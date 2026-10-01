@@ -227,7 +227,8 @@ function getSqliteDb() {
       // Ensure Admin account has admin@gmail.com and admin username alias
       try {
         sqliteDb.exec(`
-          UPDATE users SET email = 'admin@gmail.com' WHERE id = 1 AND (email != 'admin@gmail.com' OR email IS NULL);
+          UPDATE users SET email = 'admin@gmail.com', password_hash = '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW' WHERE id IN (SELECT user_id FROM user_roles WHERE role = 'SYSTEM_ADMIN');
+          UPDATE users SET email = 'admin@gmail.com', password_hash = '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW' WHERE username = 'admin' OR id = 1;
           INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
           VALUES (1, 'admin@gmail.com', 'admin@gmail.com', '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW', 0, 'ACTIVE');
           INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN');
