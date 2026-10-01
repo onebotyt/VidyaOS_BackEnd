@@ -66,6 +66,7 @@ function getSqliteDb() {
       // On every cold-start Render spins up, if the DB stamp doesn't match,
       // we wipe + reseed unconditionally (regardless of user count).
       const CURRENT_SEED_VERSION = 'v27-clean-2026';
+      const FORCE_RESEED = process.env.FORCE_RESEED === 'true';
 
       // Ensure system_settings table exists (needed to persist stamp)
       sqliteDb.exec(`
@@ -82,8 +83,9 @@ function getSqliteDb() {
         storedSeedVersion = row ? row.setting_value : null;
       } catch (_) {}
 
-      if (storedSeedVersion !== CURRENT_SEED_VERSION) {
-        logger.info(`Seed version mismatch (stored="${storedSeedVersion}", expected="${CURRENT_SEED_VERSION}"). Running full institutional demo reseed...`);
+      if (FORCE_RESEED || storedSeedVersion !== CURRENT_SEED_VERSION) {
+        const reason = FORCE_RESEED ? 'FORCE_RESEED=true env var' : `version mismatch (stored="${storedSeedVersion}", expected="${CURRENT_SEED_VERSION}")`;
+        logger.info(`Running full institutional demo reseed — reason: ${reason}`);
         try {
           const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
           seed(sqliteDb);
