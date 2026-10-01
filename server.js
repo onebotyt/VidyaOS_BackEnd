@@ -224,7 +224,18 @@ app.get('*', (req, res, next) => {
       error: { code: 'NOT_FOUND', message: `API endpoint '${req.path}' does not exist` }
     });
   }
-  res.sendFile(path.join(__dirname, '../frontend/index.html'));
+  const frontendIndex = path.join(__dirname, '../frontend/index.html');
+  if (fs.existsSync(frontendIndex)) {
+    return res.sendFile(frontendIndex);
+  }
+  // When running as standalone API server (e.g. Render), redirect root visits to Vercel frontend
+  if (req.path === '/' || req.path === '') {
+    return res.redirect(302, process.env.FRONTEND_URL || 'https://vidyaos-pink.vercel.app');
+  }
+  return res.status(404).json({
+    success: false,
+    error: { code: 'NOT_FOUND', message: `Route '${req.path}' not found on backend API service` }
+  });
 });
 
 // Global Error Handler
