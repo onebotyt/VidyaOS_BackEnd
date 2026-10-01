@@ -61,11 +61,19 @@ function getSqliteDb() {
         }
       }
 
-      // ── Seed Version Stamp ──────────────────────────────────────────────────
-      // Bump CURRENT_SEED_VERSION whenever a breaking demo reset is needed.
-      // On every cold-start Render spins up, if the DB stamp doesn't match,
-      // we wipe + reseed unconditionally (regardless of user count).
-      const CURRENT_SEED_VERSION = 'v27-clean-2026';
+      // ── Environment-Aware Seed Strategy ─────────────────────────────────────
+      // Render / Production: Clean institutional setup with ONLY 1 Admin account (Zero demo data)
+      // Local development: Full institutional demo dataset (14 users) for local tests
+      const isRenderOrProd = (
+        process.env.RENDER === 'true' || 
+        process.env.IS_RENDER === 'true' || 
+        process.env.CLEAN_ADMIN_ONLY === 'true' ||
+        (process.env.NODE_ENV === 'production' && process.env.DEMO_MODE !== 'true')
+      ) && process.env.LOCAL_DEV !== 'true';
+
+      const PROD_SEED_VERSION = 'v29-prod-clean-only-admin';
+      const DEMO_SEED_VERSION = 'v27-clean-2026';
+      const TARGET_SEED_VERSION = isRenderOrProd ? PROD_SEED_VERSION : DEMO_SEED_VERSION;
       const FORCE_RESEED = process.env.FORCE_RESEED === 'true';
 
       // Ensure system_settings table exists (needed to persist stamp)
@@ -83,20 +91,32 @@ function getSqliteDb() {
         storedSeedVersion = row ? row.setting_value : null;
       } catch (_) {}
 
-      if (FORCE_RESEED || storedSeedVersion !== CURRENT_SEED_VERSION) {
-        const reason = FORCE_RESEED ? 'FORCE_RESEED=true env var' : `version mismatch (stored="${storedSeedVersion}", expected="${CURRENT_SEED_VERSION}")`;
-        logger.info(`Running full institutional demo reseed — reason: ${reason}`);
-        try {
-          const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
-          seed(sqliteDb);
-          // Stamp the version AFTER a successful seed
-          sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(CURRENT_SEED_VERSION);
-          logger.info(`Institutional demo seed complete. Stamped seed_version="${CURRENT_SEED_VERSION}".`);
-        } catch (seedErr) {
-          logger.error('Failed to run seed-demo.js', { error: seedErr.message });
+      if (FORCE_RESEED || storedSeedVersion !== TARGET_SEED_VERSION) {
+        const reason = FORCE_RESEED ? 'FORCE_RESEED=true env var' : `version mismatch (stored="${storedSeedVersion}", expected="${TARGET_SEED_VERSION}")`;
+        
+        if (isRenderOrProd) {
+          logger.info(`Running CLEAN production seed (1 Admin login only, zero demo data) — reason: ${reason}`);
+          try {
+            const { seedProductionClean } = require(path.resolve(__dirname, '../../scripts/seed-production-clean.js'));
+            seedProductionClean(sqliteDb);
+            sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(TARGET_SEED_VERSION);
+            logger.info(`Clean production seed complete. Stamped seed_version="${TARGET_SEED_VERSION}".`);
+          } catch (seedErr) {
+            logger.error('Failed to run seed-production-clean.js', { error: seedErr.message });
+          }
+        } else {
+          logger.info(`Running local institutional demo dataset seed — reason: ${reason}`);
+          try {
+            const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
+            seed(sqliteDb);
+            sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(TARGET_SEED_VERSION);
+            logger.info(`Institutional demo seed complete. Stamped seed_version="${TARGET_SEED_VERSION}".`);
+          } catch (seedErr) {
+            logger.error('Failed to run seed-demo.js', { error: seedErr.message });
+          }
         }
       } else {
-        logger.info(`Seed version "${CURRENT_SEED_VERSION}" matches. Skipping reseed.`);
+        logger.info(`Seed version "${TARGET_SEED_VERSION}" (${isRenderOrProd ? 'Production/Render' : 'Local'}) matches. Skipping reseed.`);
       }
 
       // Ensure Milestone 45 Audit Logs and In-App Notifications tables exist
