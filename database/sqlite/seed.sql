@@ -1,9 +1,9 @@
 -- SQLite Seed Data: seed.sql
 -- Master data for local testing
 
--- 1. System Admin (admin / AdminPassword123!)
+-- 1. System Admin (admin / Admin@123 / admin@gmail.com)
 INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
-VALUES (1, 'admin', 'admin@college.local', '$2b$12$9nhYlP5dXFySfIuNlao5kO16/jAF69G0XIrwpZBJWh6CK.xLCfFma', 0, 'ACTIVE');
+VALUES (1, 'admin', 'admin@gmail.com', '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW', 0, 'ACTIVE');
 
 INSERT OR IGNORE INTO user_roles (user_id, role)
 VALUES (1, 'SYSTEM_ADMIN');

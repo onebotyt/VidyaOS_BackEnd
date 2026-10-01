@@ -190,6 +190,49 @@ function getSqliteDb() {
         CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read);
         CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
       `);
+
+      // Ensure Faculty Registration and Common Faculty Manager tables exist
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS faculty_registration_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          full_name TEXT NOT NULL,
+          email TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          phone TEXT,
+          employee_id TEXT,
+          account_type TEXT NOT NULL CHECK(account_type IN ('FACULTY', 'HOD')),
+          department_id INTEGER REFERENCES departments(id),
+          approval_type TEXT NOT NULL CHECK(approval_type IN ('DEPT_HOD', 'COMMON_FACULTY_MANAGER', 'ADMIN')),
+          status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED')),
+          rejection_reason TEXT,
+          reviewed_by INTEGER REFERENCES users(id),
+          reviewed_at DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS common_faculty_manager_assignments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          teacher_id INTEGER NOT NULL REFERENCES teachers(id),
+          assigned_by INTEGER NOT NULL REFERENCES users(id),
+          is_active INTEGER NOT NULL DEFAULT 1,
+          assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          deactivated_at DATETIME
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_frr_status ON faculty_registration_requests(status);
+        CREATE INDEX IF NOT EXISTS idx_frr_dept_status ON faculty_registration_requests(department_id, status);
+        CREATE INDEX IF NOT EXISTS idx_frr_approval_type ON faculty_registration_requests(approval_type, status);
+      `);
+
+      // Ensure Admin account has admin@gmail.com and admin username alias
+      try {
+        sqliteDb.exec(`
+          UPDATE users SET email = 'admin@gmail.com' WHERE id = 1 AND (email != 'admin@gmail.com' OR email IS NULL);
+          INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
+          VALUES (1, 'admin@gmail.com', 'admin@gmail.com', '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW', 0, 'ACTIVE');
+          INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN');
+        `);
+      } catch (_) {}
     } catch (initErr) {
       logger.error('Failed to auto-initialize SQLite schema/seed', { error: initErr.message });
     }

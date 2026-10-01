@@ -239,16 +239,20 @@ class AuthService {
 
     if (!users || users.length === 0) {
       if (cred.type === 'EMAIL') {
-        const pendingReq = await query(
-          `SELECT status, rejection_reason FROM faculty_registration_requests WHERE LOWER(email) = ? ORDER BY id DESC LIMIT 1`,
-          [cred.value]
-        );
-        if (pendingReq && pendingReq.length > 0) {
-          if (pendingReq[0].status === 'PENDING') {
-            throw { status: 403, code: 'PENDING_APPROVAL', message: 'Your faculty registration request is pending approval.' };
-          } else if (pendingReq[0].status === 'REJECTED') {
-            throw { status: 403, code: 'REGISTRATION_REJECTED', message: `Your faculty registration request was rejected: ${pendingReq[0].rejection_reason || 'Contact administration.'}` };
+        try {
+          const pendingReq = await query(
+            `SELECT status, rejection_reason FROM faculty_registration_requests WHERE LOWER(email) = ? ORDER BY id DESC LIMIT 1`,
+            [cred.value]
+          );
+          if (pendingReq && pendingReq.length > 0) {
+            if (pendingReq[0].status === 'PENDING') {
+              throw { status: 403, code: 'PENDING_APPROVAL', message: 'Your faculty registration request is pending approval.' };
+            } else if (pendingReq[0].status === 'REJECTED') {
+              throw { status: 403, code: 'REGISTRATION_REJECTED', message: `Your faculty registration request was rejected: ${pendingReq[0].rejection_reason || 'Contact administration.'}` };
+            }
           }
+        } catch (tableErr) {
+          if (tableErr.status) throw tableErr;
         }
       }
       throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid credentials. Please check your Gmail address / Mobile number and password.' };
