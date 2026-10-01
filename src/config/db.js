@@ -61,22 +61,40 @@ function getSqliteDb() {
         }
       }
 
-      // Check if users table is empty or missing master admin
-      let userCount = 0;
+      // ── Seed Version Stamp ──────────────────────────────────────────────────
+      // Bump CURRENT_SEED_VERSION whenever a breaking demo reset is needed.
+      // On every cold-start Render spins up, if the DB stamp doesn't match,
+      // we wipe + reseed unconditionally (regardless of user count).
+      const CURRENT_SEED_VERSION = 'v27-clean-2026';
+
+      // Ensure system_settings table exists (needed to persist stamp)
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+          setting_key   TEXT PRIMARY KEY,
+          setting_value TEXT,
+          updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      let storedSeedVersion = null;
       try {
-        const countRow = sqliteDb.prepare("SELECT count(*) as c FROM users").get();
-        userCount = countRow ? countRow.c : 0;
+        const row = sqliteDb.prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'seed_version'").get();
+        storedSeedVersion = row ? row.setting_value : null;
       } catch (_) {}
 
-      if (userCount < 10) {
-        logger.info(`Users count (${userCount}) is incomplete. Seeding full institutional demo dataset...`);
+      if (storedSeedVersion !== CURRENT_SEED_VERSION) {
+        logger.info(`Seed version mismatch (stored="${storedSeedVersion}", expected="${CURRENT_SEED_VERSION}"). Running full institutional demo reseed...`);
         try {
           const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
           seed(sqliteDb);
-          logger.info('Institutional demo seed loaded successfully!');
+          // Stamp the version AFTER a successful seed
+          sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(CURRENT_SEED_VERSION);
+          logger.info(`Institutional demo seed complete. Stamped seed_version="${CURRENT_SEED_VERSION}".`);
         } catch (seedErr) {
           logger.error('Failed to run seed-demo.js', { error: seedErr.message });
         }
+      } else {
+        logger.info(`Seed version "${CURRENT_SEED_VERSION}" matches. Skipping reseed.`);
       }
 
       // Ensure Milestone 45 Audit Logs and In-App Notifications tables exist
