@@ -108,9 +108,14 @@ CREATE TABLE "attendance_sessions" (
 CREATE TABLE audit_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-  action TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
+  actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  actor_role TEXT,
+  action TEXT,
+  event_type TEXT,
+  entity_type TEXT,
+  target_type TEXT,
   entity_id TEXT,
+  target_id INTEGER,
   details_json TEXT,
   ip_address TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -442,17 +447,6 @@ CREATE TABLE IF NOT EXISTS student_department_enrollments (
 CREATE INDEX IF NOT EXISTS idx_sde_student ON student_department_enrollments(student_id);
 CREATE INDEX IF NOT EXISTS idx_sde_dept ON student_department_enrollments(department_id);
 
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_type TEXT NOT NULL,
-  actor_id INTEGER REFERENCES users(id),
-  actor_role TEXT,
-  target_type TEXT,
-  target_id INTEGER,
-  details_json TEXT,
-  ip_address TEXT,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
 CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);

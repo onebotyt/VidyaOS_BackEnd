@@ -18,20 +18,20 @@ const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcrypt');
 const path = require('path');
 
-const db = new DatabaseSync(path.resolve(__dirname, '../college_attendance.sqlite'));
-db.exec('PRAGMA foreign_keys = OFF;');
-db.exec('PRAGMA journal_mode = WAL;');
-
 const UNIVERSAL_PASS = 'Password@123';
 const ADMIN_PASS = 'Admin@123';
 
-async function seed() {
+function seed(targetDb = null) {
+  const db = targetDb || new DatabaseSync(path.resolve(__dirname, '../college_attendance.sqlite'));
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('PRAGMA journal_mode = WAL;');
+
   console.log('=================================================================');
   console.log('🌱 SEEDING CLEAN INSTITUTIONAL DEMO ENVIRONMENT');
   console.log('=================================================================\n');
 
-  const universalHash = await bcrypt.hash(UNIVERSAL_PASS, 10);
-  const adminHash = await bcrypt.hash(ADMIN_PASS, 10);
+  const universalHash = bcrypt.hashSync(UNIVERSAL_PASS, 10);
+  const adminHash = bcrypt.hashSync(ADMIN_PASS, 10);
 
   // ─── Step 1: Wipe EVERYTHING Clean ────────────────────────
   console.log('[1] Wiping all existing data, departments, groups, registers, and users...');
@@ -489,8 +489,14 @@ async function seed() {
   console.log('╚════════════════════════════════════════════════════════════════════════════╝');
 }
 
-seed().catch(err => {
-  console.error('\n[SEED ERROR]', err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+module.exports = { seed };
+
+if (require.main === module) {
+  try {
+    seed();
+  } catch (err) {
+    console.error('\n[SEED ERROR]', err.message);
+    console.error(err.stack);
+    process.exit(1);
+  }
+}

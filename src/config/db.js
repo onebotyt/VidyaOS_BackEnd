@@ -48,26 +48,35 @@ function getSqliteDb() {
     try {
       const userTableCheck = sqliteDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get();
       if (!userTableCheck) {
-        logger.info('Initializing SQLite schema and master seed data...');
+        logger.info('Initializing SQLite schema...');
         const schemaPath = [
           path.join(__dirname, '../../database/sqlite/schema.sql'),
           path.join(__dirname, '../../../database/sqlite/schema.sql'),
           path.join(__dirname, '../database/sqlite/schema.sql')
         ].find(p => fs.existsSync(p));
 
-        const seedPath = [
-          path.join(__dirname, '../../database/sqlite/seed.sql'),
-          path.join(__dirname, '../../../database/sqlite/seed.sql'),
-          path.join(__dirname, '../database/sqlite/seed.sql')
-        ].find(p => fs.existsSync(p));
-
         if (schemaPath && fs.existsSync(schemaPath)) {
           sqliteDb.exec(fs.readFileSync(schemaPath, 'utf-8'));
+          logger.info('SQLite schema loaded successfully.');
         }
-        if (seedPath && fs.existsSync(seedPath)) {
-          sqliteDb.exec(fs.readFileSync(seedPath, 'utf-8'));
+      }
+
+      // Check if users table is empty or missing master admin
+      let userCount = 0;
+      try {
+        const countRow = sqliteDb.prepare("SELECT count(*) as c FROM users").get();
+        userCount = countRow ? countRow.c : 0;
+      } catch (_) {}
+
+      if (userCount === 0) {
+        logger.info('Users table is empty. Running institutional demo seed...');
+        try {
+          const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
+          seed(sqliteDb);
+          logger.info('Institutional demo seed loaded successfully!');
+        } catch (seedErr) {
+          logger.error('Failed to run seed-demo.js', { error: seedErr.message });
         }
-        logger.info('SQLite schema and seed data loaded successfully.');
       }
 
       // Ensure Milestone 45 Audit Logs and In-App Notifications tables exist
