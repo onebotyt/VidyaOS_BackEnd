@@ -3,7 +3,7 @@ services:
     name: vidyaos-backend
     runtime: node
     plan: free
-    region: singapore # or oregon, frankfurt
+    region: singapore
     buildCommand: npm install
     startCommand: node server.js
     envVars:
@@ -11,14 +11,36 @@ services:
         value: production
       - key: PORT
         value: 10000
+
+      # ─── DATABASE (MySQL) ──────────────────────────────────────────────────
+      # Set DB_CLIENT=sqlite for quick test / Set DB_CLIENT=mysql for production
       - key: DB_CLIENT
-        value: sqlite
-      - key: SQLITE_FILE
-        value: data/college_attendance.sqlite
-      - key: JWT_SECRET
-        generateValue: true
-    # Note: On Render paid tiers, a persistent disk can be mounted at /data:
-    # disk:
-    #   name: vidyaos-sqlite-data
-    #   mountPath: /data
-    #   sizeGB: 1
+        value: mysql
+      - key: DB_HOST
+        sync: false          # Fill manually in Render dashboard
+      - key: DB_PORT
+        value: 3306
+      - key: DB_USER
+        sync: false          # Fill manually in Render dashboard
+      - key: DB_PASSWORD
+        sync: false          # Fill manually in Render dashboard
+      - key: DB_NAME
+        value: college_attendance
+      - key: DB_CONNECTION_LIMIT
+        value: 10
+
+      # ─── SECURITY ──────────────────────────────────────────────────────────
+      - key: JWT_ACCESS_SECRET
+        generateValue: true  # Render auto-generates a secure random value
+      - key: JWT_REFRESH_SECRET
+        generateValue: true  # Render auto-generates a secure random value
+      - key: JWT_ACCESS_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+
+      # ─── OPERATIONAL ───────────────────────────────────────────────────────
+      - key: DEFAULT_ATTENDANCE_THRESHOLD
+        value: 75
+      - key: AUTO_CLOSE_CHECK_INTERVAL_SECONDS
+        value: 60
