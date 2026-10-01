@@ -68,8 +68,8 @@ function getSqliteDb() {
         userCount = countRow ? countRow.c : 0;
       } catch (_) {}
 
-      if (userCount === 0) {
-        logger.info('Users table is empty. Running institutional demo seed...');
+      if (userCount < 10) {
+        logger.info(`Users count (${userCount}) is incomplete. Seeding full institutional demo dataset...`);
         try {
           const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
           seed(sqliteDb);
