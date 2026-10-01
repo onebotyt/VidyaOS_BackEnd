@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: vidyaos-backend
+    runtime: node
+    plan: free
+    region: singapore # or oregon, frankfurt
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DB_CLIENT
+        value: sqlite
+      - key: SQLITE_FILE
+        value: data/college_attendance.sqlite
+      - key: JWT_SECRET
+        generateValue: true
+    # Note: On Render paid tiers, a persistent disk can be mounted at /data:
+    # disk:
+    #   name: vidyaos-sqlite-data
+    #   mountPath: /data
+    #   sizeGB: 1
