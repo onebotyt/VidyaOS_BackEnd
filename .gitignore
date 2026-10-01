@@ -11,6 +11,8 @@ package-lock.json
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
+*.sqlite-shm
+*.sqlite.bak*
 *.db
 
 # File uploads
