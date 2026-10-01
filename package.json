@@ -10,7 +10,7 @@
     "simulate-esp32": "node scripts/simulate-esp32.js"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

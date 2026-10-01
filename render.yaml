@@ -12,10 +12,10 @@ services:
       - key: PORT
         value: 10000
 
-      # ─── DATABASE (MySQL) ──────────────────────────────────────────────────
-      # Set DB_CLIENT=sqlite for quick test / Set DB_CLIENT=mysql for production
+      - key: NODE_VERSION
+        value: 22
       - key: DB_CLIENT
-        value: mysql
+        value: sqlite
       - key: DB_HOST
         sync: false          # Fill manually in Render dashboard
       - key: DB_PORT
