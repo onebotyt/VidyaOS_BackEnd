@@ -246,7 +246,15 @@ router.get('/google/config', (req, res) => {
 router.get('/google/url', (req, res) => {
   const mode = req.query.mode || 'LOGIN';
   const userId = req.query.user_id || null;
-  const authUrl = authService.getGoogleAuthUrl(mode, userId);
+  let frontendOrigin = req.query.origin || null;
+  if (!frontendOrigin && req.get('referer')) {
+    try { frontendOrigin = new URL(req.get('referer')).origin; } catch (_) {}
+  }
+  if (!frontendOrigin) {
+    frontendOrigin = process.env.FRONTEND_URL || (req.get('host') && req.get('host').includes('onrender.com') ? 'https://vidyaos-pink.vercel.app' : '');
+  }
+
+  const authUrl = authService.getGoogleAuthUrl(mode, userId, frontendOrigin);
 
   if (!authUrl) {
     return res.status(200).json({
@@ -270,6 +278,18 @@ router.get('/google/url', (req, res) => {
 router.get('/google/callback', async (req, res) => {
   const { code, state, error } = req.query;
 
+  let stateParsed = {};
+  if (state) {
+    try {
+      stateParsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+    } catch {
+      try { stateParsed = JSON.parse(Buffer.from(state, 'base64').toString('utf8')); } catch {}
+    }
+  }
+
+  const defaultFrontend = process.env.FRONTEND_URL || (req.get('host') && req.get('host').includes('onrender.com') ? 'https://vidyaos-pink.vercel.app' : '');
+  const frontendBase = stateParsed.frontendOrigin || defaultFrontend;
+
   if (error) {
     return res.send(`
       <!DOCTYPE html>
@@ -279,7 +299,10 @@ router.get('/google/callback', async (req, res) => {
         <div style="background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; text-align: center;">
           <h2 style="color: #ea4335; margin-top: 0;">Sign-In Cancelled</h2>
           <p style="color: #5f6368; font-size: 0.9rem;">${error}</p>
-          <button onclick="window.close()" style="background: #1a73e8; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;">Close Window</button>
+          <div style="display: flex; gap: 0.5rem; justify-content: center;">
+            <a href="${frontendBase || ''}/login/faculty.html" style="background: #1a73e8; color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 4px;">Return to Login</a>
+            <button onclick="window.close()" style="background: #e0e0e0; color: #333; border: none; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;">Close</button>
+          </div>
         </div>
         <script>
           if (window.opener) {
@@ -299,6 +322,7 @@ router.get('/google/callback', async (req, res) => {
   try {
     const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
     const result = await authService.handleGoogleCallback(code, state, clientInfo);
+    result.frontendOrigin = frontendBase;
 
     if (result.refresh_token) {
       res.cookie('refreshToken', result.refresh_token, {
@@ -331,24 +355,23 @@ router.get('/google/callback', async (req, res) => {
               try { window.close(); } catch (_) {}
             }, 600);
           } else {
+            const origin = payload.frontendOrigin || (window.location.origin.includes('onrender.com') ? 'https://vidyaos-pink.vercel.app' : window.location.origin);
             if (payload.action === 'STUDENT_REGISTER') {
-              window.location.href = '/login/student-register.html?google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
+              window.location.href = origin + '/login/student-register.html?google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
             } else if (payload.action === 'PENDING_APPROVAL') {
-              window.location.href = '/login/student.html?google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
+              window.location.href = origin + '/login/student.html?google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
             } else if (payload.action === 'NOT_REGISTERED') {
-              window.location.href = '/login/student-register.html?google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
+              window.location.href = origin + '/login/student-register.html?google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
             } else if (payload.access_token) {
-              localStorage.setItem('access_token', payload.access_token);
-              localStorage.setItem('user', JSON.stringify(payload.user));
+              let target = '/faculty/dashboard.html';
               if (payload.user && payload.user.roles && payload.user.roles.includes('STUDENT')) {
-                window.location.href = '/student/attendance.html';
+                target = '/student/attendance.html';
               } else if (payload.user && payload.user.roles && payload.user.roles.includes('SYSTEM_ADMIN')) {
-                window.location.href = '/admin/dashboard.html';
-              } else {
-                window.location.href = '/faculty/dashboard.html';
+                target = '/admin/dashboard.html';
               }
+              window.location.href = origin + target + '?token=' + encodeURIComponent(payload.access_token) + '&user=' + encodeURIComponent(JSON.stringify(payload.user));
             } else {
-              window.location.href = '/faculty/profile.html?google_linked=1';
+              window.location.href = origin + '/faculty/profile.html?google_linked=1';
             }
           }
         </script>
@@ -371,9 +394,9 @@ router.get('/google/callback', async (req, res) => {
           <h2 style="color: #d93025; margin: 0.25rem 0 0.5rem 0;">Sign-In Failed</h2>
           <p style="color: #5f6368; font-size: 0.95rem; line-height: 1.4; margin: 0 0 1.5rem 0;">${errorMsg}</p>
           <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-            <a href="/login/student-register.html" style="background: #1a73e8; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">← Student Register</a>
-            <a href="/login/student.html" style="background: #34a853; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Student Login</a>
-            <a href="/login/faculty.html" style="background: #5f6368; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Faculty Login</a>
+            <a href="${frontendBase || ''}/login/student-register.html" style="background: #1a73e8; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">← Student Register</a>
+            <a href="${frontendBase || ''}/login/student.html" style="background: #34a853; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Student Login</a>
+            <a href="${frontendBase || ''}/login/faculty.html" style="background: #5f6368; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Faculty Login</a>
           </div>
         </div>
         <script>

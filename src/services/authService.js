@@ -743,13 +743,13 @@ class AuthService {
   // ─────────────────────────────────────────────────────────
   // GET GOOGLE OAUTH 2.0 URL
   // ─────────────────────────────────────────────────────────
-  getGoogleAuthUrl(mode = 'LOGIN', userId = null) {
+  getGoogleAuthUrl(mode = 'LOGIN', userId = null, frontendOrigin = null) {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) {
       return null;
     }
     const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/v1/auth/google/callback';
-    const stateObj = { mode, userId, ts: Date.now() };
+    const stateObj = { mode, userId, frontendOrigin, ts: Date.now() };
     const state = Buffer.from(JSON.stringify(stateObj)).toString('base64url');
 
     const params = new URLSearchParams({
