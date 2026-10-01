@@ -1,0 +1,13 @@
+# Normalize all text line endings to LF on commit (cross-platform consistency)
+* text=auto eol=lf
+
+# Binary files — never convert
+*.sqlite binary
+*.sqlite-wal binary
+*.sqlite-shm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
