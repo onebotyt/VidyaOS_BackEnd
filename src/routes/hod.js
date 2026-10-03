@@ -2397,16 +2397,135 @@ router.get('/archive', requireHOD(), async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
 // DEPARTMENT FACULTY REGISTRATION APPROVALS (redesign.md Case A)
 // ─────────────────────────────────────────────────────────
 
 /**
+ * Helper to resolve department ID for HOD/Admin faculty registration operations
+ */
+function resolveHodDeptId(req) {
+  let deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id || req.query?.department_id;
+  if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
+    return req.query?.department_id || null;
+  }
+  return deptId || null;
+}
+
+async function approveFacultyRegistration(reqId, reviewerUser, targetDeptId) {
+  let sql = `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type = 'DEPT_HOD' AND status = 'PENDING'`;
+  const params = [reqId];
+  if (targetDeptId && !reviewerUser.roles?.includes('SYSTEM_ADMIN')) {
+    sql += ` AND department_id = ?`;
+    params.push(targetDeptId);
+  }
+  const reqRows = await query(sql, params);
+  if (!reqRows || reqRows.length === 0) {
+    const err = new Error('Pending faculty registration request not found in your department');
+    err.code = 'NOT_FOUND';
+    err.status = 404;
+    throw err;
+  }
+  const r = reqRows[0];
+
+  let createdUserId = null;
+  let createdTeacherId = null;
+
+  await withTransaction(async (conn) => {
+    // 1. Create active user account
+    const [uRes] = await conn.execute(
+      `INSERT INTO users (username, email, password_hash, must_change_password, status)
+       VALUES (?, ?, ?, 0, 'ACTIVE')`,
+      [r.email.toLowerCase(), r.email.toLowerCase(), r.password_hash]
+    );
+    createdUserId = uRes.insertId ?? uRes.lastInsertRowid;
+
+    // 2. Assign TEACHER role
+    await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'TEACHER')`, [createdUserId]);
+
+    // 3. Create teacher profile linked to department
+    const [tRes] = await conn.execute(
+      `INSERT INTO teachers (user_id, department_id, employee_id, full_name, phone)
+       VALUES (?, ?, ?, ?, ?)`,
+      [createdUserId, r.department_id, r.employee_id || null, r.full_name, r.phone || null]
+    );
+    createdTeacherId = tRes.insertId ?? tRes.lastInsertRowid;
+
+    // 4. Update request status to APPROVED
+    await conn.execute(
+      `UPDATE faculty_registration_requests 
+       SET status = 'APPROVED', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
+      [reviewerUser.id, reqId]
+    );
+
+    // 5. Audit log
+    await conn.execute(
+      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+       VALUES (?, 'FACULTY_APPROVED', 'teachers', ?, ?, CURRENT_TIMESTAMP)`,
+      [reviewerUser.id, String(createdTeacherId), JSON.stringify({ department_id: r.department_id, email: r.email, approved_from_request: reqId })]
+    );
+  });
+
+  try {
+    await notificationService.sendNotification({
+      userId: createdUserId,
+      type: notificationService.NOTIFICATION_TYPES.FACULTY_APPROVAL,
+      title: 'Faculty Registration Approved',
+      message: `Welcome to the faculty portal! Your registration for Department has been approved by the HOD.`,
+      linkUrl: '/faculty/registers.html'
+    });
+  } catch (_) {}
+
+  return {
+    request_id: reqId,
+    user_id: createdUserId,
+    teacher_id: createdTeacherId,
+    department_id: r.department_id,
+    status: 'APPROVED',
+    full_name: r.full_name
+  };
+}
+
+async function rejectFacultyRegistration(reqId, reviewerUser, targetDeptId, reason) {
+  let sql = `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type = 'DEPT_HOD' AND status = 'PENDING'`;
+  const params = [reqId];
+  if (targetDeptId && !reviewerUser.roles?.includes('SYSTEM_ADMIN')) {
+    sql += ` AND department_id = ?`;
+    params.push(targetDeptId);
+  }
+  const reqRows = await query(sql, params);
+  if (!reqRows || reqRows.length === 0) {
+    const err = new Error('Pending faculty registration request not found in your department');
+    err.code = 'NOT_FOUND';
+    err.status = 404;
+    throw err;
+  }
+
+  await query(
+    `UPDATE faculty_registration_requests
+     SET status = 'REJECTED', rejection_reason = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [reason || 'Rejected by Department HOD', reviewerUser.id, reqId]
+  );
+
+  await query(
+    `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+     VALUES (?, 'FACULTY_REJECTED', 'faculty_registration_requests', ?, ?, CURRENT_TIMESTAMP)`,
+    [reviewerUser.id, String(reqId), JSON.stringify({ reason: reason || 'Rejected by Department HOD', email: reqRows[0].email })]
+  );
+
+  return { request_id: reqId, status: 'REJECTED' };
+}
+
+/**
  * GET /api/v1/hod/registrations/pending-faculty
+ * GET /api/v1/hod/faculty-registrations/pending
  * List pending faculty registrations for the HOD's department
  */
-router.get('/registrations/pending-faculty', async (req, res) => {
+router.get(['/registrations/pending-faculty', '/faculty-registrations/pending'], async (req, res) => {
   try {
-    const deptId = req.hod_department_id;
+    const deptId = resolveHodDeptId(req);
     let sql = `
       SELECT frr.id, frr.full_name, frr.email, frr.phone, frr.employee_id,
              frr.account_type, frr.department_id, frr.created_at,
@@ -2431,130 +2550,75 @@ router.get('/registrations/pending-faculty', async (req, res) => {
 
 /**
  * POST /api/v1/hod/registrations/faculty/:id/approve
+ * POST /api/v1/hod/faculty-registrations/:id/approve
  * Department HOD approves pending department faculty member
  */
-router.post('/registrations/faculty/:id/approve', async (req, res) => {
+router.post(['/registrations/faculty/:id/approve', '/faculty-registrations/:id/approve'], async (req, res) => {
   const reqId = Number(req.params.id);
-  const deptId = req.hod_department_id;
-
+  const deptId = resolveHodDeptId(req);
   try {
-    let sql = `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type = 'DEPT_HOD' AND status = 'PENDING'`;
-    const params = [reqId];
-    if (deptId) {
-      sql += ` AND department_id = ?`;
-      params.push(deptId);
-    }
-    const reqRows = await query(sql, params);
-    if (!reqRows || reqRows.length === 0) {
-      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Pending faculty registration request not found in your department' } });
-    }
-    const r = reqRows[0];
-
-    let createdUserId = null;
-    let createdTeacherId = null;
-
-    await withTransaction(async (conn) => {
-      // 1. Create active user account
-      const [uRes] = await conn.execute(
-        `INSERT INTO users (username, email, password_hash, must_change_password, status)
-         VALUES (?, ?, ?, 0, 'ACTIVE')`,
-        [r.email.toLowerCase(), r.email.toLowerCase(), r.password_hash]
-      );
-      createdUserId = uRes.insertId ?? uRes.lastInsertRowid;
-
-      // 2. Assign TEACHER role
-      await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'TEACHER')`, [createdUserId]);
-
-      // 3. Create teacher profile linked to department
-      const [tRes] = await conn.execute(
-        `INSERT INTO teachers (user_id, department_id, employee_id, full_name, phone)
-         VALUES (?, ?, ?, ?, ?)`,
-        [createdUserId, r.department_id, r.employee_id || null, r.full_name, r.phone || null]
-      );
-      createdTeacherId = tRes.insertId ?? tRes.lastInsertRowid;
-
-      // 4. Update request status to APPROVED
-      await conn.execute(
-        `UPDATE faculty_registration_requests 
-         SET status = 'APPROVED', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP 
-         WHERE id = ?`,
-        [req.user.id, reqId]
-      );
-
-      // 5. Audit log
-      await conn.execute(
-        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
-         VALUES (?, 'FACULTY_APPROVED', 'teachers', ?, ?, CURRENT_TIMESTAMP)`,
-        [req.user.id, String(createdTeacherId), JSON.stringify({ department_id: r.department_id, email: r.email, approved_from_request: reqId })]
-      );
-    });
-
-    try {
-      await notificationService.sendNotification({
-        userId: createdUserId,
-        type: notificationService.NOTIFICATION_TYPES.FACULTY_APPROVAL,
-        title: 'Faculty Registration Approved',
-        message: `Welcome to the faculty portal! Your registration for Department has been approved by the HOD.`,
-        linkUrl: '/faculty/registers.html'
-      });
-    } catch (_) {}
-
+    const result = await approveFacultyRegistration(reqId, req.user, deptId);
     res.status(200).json({
       success: true,
-      message: `Faculty registration for ${r.full_name} has been approved successfully.`,
-      data: {
-        request_id: reqId,
-        user_id: createdUserId,
-        teacher_id: createdTeacherId,
-        department_id: r.department_id,
-        status: 'APPROVED'
-      }
+      message: `Faculty registration for ${result.full_name} has been approved successfully.`,
+      data: result
     });
   } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
 
 /**
  * POST /api/v1/hod/registrations/faculty/:id/reject
+ * POST /api/v1/hod/faculty-registrations/:id/reject
  * Department HOD rejects pending department faculty member
  */
-router.post('/registrations/faculty/:id/reject', [
+router.post(['/registrations/faculty/:id/reject', '/faculty-registrations/:id/reject'], [
   body('reason').optional().trim(),
+  body('rejection_reason').optional().trim(),
   validate
 ], async (req, res) => {
   const reqId = Number(req.params.id);
-  const deptId = req.hod_department_id;
-  const { reason } = req.body;
+  const deptId = resolveHodDeptId(req);
+  const reason = req.body.rejection_reason || req.body.reason;
+  try {
+    const result = await rejectFacultyRegistration(reqId, req.user, deptId, reason);
+    res.json({ success: true, message: 'Faculty registration request rejected.', data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/v1/hod/faculty-registrations/:id/adjudicate
+ * POST /api/v1/hod/registrations/faculty/:id/adjudicate
+ * Unified adjudication endpoint (Approve / Reject) matching frontend callers
+ */
+router.post(['/faculty-registrations/:id/adjudicate', '/registrations/faculty/:id/adjudicate'], [
+  body('action').optional().isIn(['APPROVE', 'REJECT']).withMessage("Action must be 'APPROVE' or 'REJECT'"),
+  body('reason').optional().trim(),
+  body('rejection_reason').optional().trim(),
+  validate
+], async (req, res) => {
+  const reqId = Number(req.params.id);
+  const deptId = resolveHodDeptId(req);
+  const action = (req.body.action || 'APPROVE').toUpperCase();
 
   try {
-    let sql = `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type = 'DEPT_HOD' AND status = 'PENDING'`;
-    const params = [reqId];
-    if (deptId) {
-      sql += ` AND department_id = ?`;
-      params.push(deptId);
+    if (action === 'REJECT') {
+      const reason = req.body.rejection_reason || req.body.reason;
+      const result = await rejectFacultyRegistration(reqId, req.user, deptId, reason);
+      return res.json({ success: true, message: 'Faculty registration request rejected.', data: result });
+    } else {
+      const result = await approveFacultyRegistration(reqId, req.user, deptId);
+      return res.status(200).json({
+        success: true,
+        message: `Faculty registration for ${result.full_name} has been approved successfully.`,
+        data: result
+      });
     }
-    const reqRows = await query(sql, params);
-    if (!reqRows || reqRows.length === 0) {
-      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Pending faculty registration request not found in your department' } });
-    }
-
-    await query(
-      `UPDATE faculty_registration_requests
-       SET status = 'REJECTED', rejection_reason = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [reason || 'Rejected by Department HOD', req.user.id, reqId]
-    );
-
-    await query(
-      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
-       VALUES (?, 'FACULTY_REJECTED', 'faculty_registration_requests', ?, ?, CURRENT_TIMESTAMP)`,
-      [req.user.id, String(reqId), JSON.stringify({ reason: reason || 'Rejected by Department HOD', email: reqRows[0].email })]
-    );
-
-    res.json({ success: true, message: 'Faculty registration request rejected.' });
   } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
 
