@@ -16,10 +16,38 @@ const path = require('path');
 
 const ADMIN_PASS = 'Admin@123';
 
-function seedProductionClean(targetDb = null) {
+function seedProductionClean(targetDb = null, options = {}) {
   const db = targetDb || new DatabaseSync(path.resolve(__dirname, '../college_attendance.sqlite'));
   db.exec('PRAGMA foreign_keys = OFF;');
   db.exec('PRAGMA journal_mode = WAL;');
+
+  const force = options.force || process.env.FORCE_PURGE_PRODUCTION === 'true' || process.env.FORCE_RESEED === 'true';
+
+  // ─── Safety Shield: Check if existing active users exist ─────────────────
+  try {
+    const userCheck = db.prepare("SELECT count(*) as c FROM users").get();
+    if (userCheck && userCheck.c > 0 && !force) {
+      console.log('=================================================================');
+      console.log(`🛡️  SAFETY SHIELD: Active database contains ${userCheck.c} existing user account(s).`);
+      console.log('    Refusing destructive table wipe. Preserving all production students,');
+      console.log('    teachers, attendance records, and registered data.');
+      console.log('=================================================================\n');
+
+      const adminHash = bcrypt.hashSync(ADMIN_PASS, 10);
+      // Ensure master admin exists without overwriting existing data
+      db.prepare(`
+        INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
+        VALUES (1, 'admin@gmail.com', 'admin@gmail.com', ?, 0, 'ACTIVE')
+      `).run(adminHash);
+      db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
+
+      const userCount = db.prepare('SELECT count(*) as c FROM users').get().c;
+      const studentCount = db.prepare('SELECT count(*) as c FROM students').get().c;
+      const deptCount = db.prepare('SELECT count(*) as c FROM departments').get().c;
+      db.exec('PRAGMA foreign_keys = ON;');
+      return { success: true, preserved: true, userCount, studentCount, deptCount };
+    }
+  } catch (_) {}
 
   console.log('=================================================================');
   console.log('🏛️  PROVISIONING CLEAN PRODUCTION ENVIRONMENT (ONLY 1 ADMIN LOGIN)');
@@ -28,7 +56,7 @@ function seedProductionClean(targetDb = null) {
   const adminHash = bcrypt.hashSync(ADMIN_PASS, 10);
 
   // ─── Step 1: Wipe all demo / transient data ──────────────────────────────
-  console.log('[1] Purging all demo data, faculty, students, and registers...');
+  console.log('[1] Purging all demo data, faculty, students, and registers (authorized force reset)...');
 
   const tablesToClear = [
     'classroom_posts',
@@ -81,7 +109,7 @@ function seedProductionClean(targetDb = null) {
   console.log('[2] Initializing Active Academic Year and 6 Standard Departments...');
 
   db.prepare(`
-    INSERT INTO academic_years (id, label, start_date, end_date, is_current)
+    INSERT OR IGNORE INTO academic_years (id, label, start_date, end_date, is_current)
     VALUES (1, '2026-27 (Winter)', '2026-07-01', '2027-06-30', 1)
   `).run();
 
@@ -96,7 +124,7 @@ function seedProductionClean(targetDb = null) {
 
   for (const sd of standardDepts) {
     db.prepare(`
-      INSERT INTO departments (id, name, code, is_active, degree_duration_years, active_term, hod_user_id)
+      INSERT OR IGNORE INTO departments (id, name, code, is_active, degree_duration_years, active_term, hod_user_id)
       VALUES (?, ?, ?, 1, ?, '2026-27 (Winter)', NULL)
     `).run(sd.id, sd.name, sd.code, sd.duration);
     console.log(`    ✓ Department: ${sd.name} (${sd.code}, id=${sd.id}) — HOD: Unassigned`);
@@ -107,15 +135,15 @@ function seedProductionClean(targetDb = null) {
 
   // User 1: admin / admin@gmail.com
   db.prepare(`
-    INSERT INTO users (id, username, email, password_hash, must_change_password, status)
+    INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
     VALUES (1, 'admin@gmail.com', 'admin@gmail.com', ?, 0, 'ACTIVE')
   `).run(adminHash);
 
-  db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
+  db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
 
   // Institutional Administrator teacher profile for foreign key stability
   db.prepare(`
-    INSERT INTO teachers (id, user_id, department_id, full_name, employee_id, phone)
+    INSERT OR IGNORE INTO teachers (id, user_id, department_id, full_name, employee_id, phone)
     VALUES (1, 1, 4, 'System Administrator', 'ADMIN-01', '0000000000')
   `).run();
 

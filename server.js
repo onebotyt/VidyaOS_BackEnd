@@ -20,6 +20,7 @@ const departmentService = require('./src/services/departmentService');
 const curriculumService = require('./src/services/curriculumService');
 const studentMigrationService = require('./src/services/studentMigrationService');
 const iotMigrationService = require('./src/services/iotMigrationService');
+const dbSyncService = require('./src/services/dbSyncService');
 const { generalLimiter } = require('./src/middleware/rateLimiter');
 
 // Import Route Handlers
@@ -281,6 +282,7 @@ setInterval(() => {
 
 // Initialize Server & Database Test
 async function startServer() {
+  dbSyncService.initDatabasePersistence();
   await testConnection();
 
   // Automatically synchronize active academic session (e.g. "2026 Session") on startup
@@ -339,9 +341,12 @@ async function startServer() {
     logger.info(`REST API Base URL: http://localhost:${PORT}/api/v1`);
   });
 
-  // Graceful shutdown handling for Docker / Kubernetes / systemd / PM2
+  // Graceful shutdown handling for Docker / Kubernetes / systemd / PM2 / Render
   const gracefulShutdown = (signal) => {
-    logger.info(`Received ${signal}. Shutting down gracefully...`);
+    logger.info(`Received ${signal}. Capturing pre-shutdown snapshot and shutting down gracefully...`);
+    try {
+      dbSyncService.capturePreShutdownSnapshot();
+    } catch (_) {}
     serverInstance.close(() => {
       logger.info('HTTP server closed. Exiting process.');
       process.exit(0);

@@ -10,9 +10,14 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../src/utils/logger');
 
-const DB_PATH = process.env.SQLITE_FILE
-  ? path.resolve(__dirname, '../', process.env.SQLITE_FILE)
-  : path.resolve(__dirname, '../college_attendance.sqlite');
+function getSourceDbPath(overridePath = null) {
+  if (overridePath) {
+    return path.isAbsolute(overridePath) ? overridePath : path.resolve(process.cwd(), overridePath);
+  }
+  return process.env.SQLITE_FILE
+    ? (path.isAbsolute(process.env.SQLITE_FILE) ? process.env.SQLITE_FILE : path.resolve(__dirname, '../', process.env.SQLITE_FILE))
+    : path.resolve(__dirname, '../college_attendance.sqlite');
+}
 
 const BACKUP_DIR = path.resolve(__dirname, '../backups');
 const MAX_BACKUPS = 30; // Keep max 30 recent snapshots
@@ -21,9 +26,10 @@ const MAX_AGE_DAYS = 14; // Keep snapshots up to 14 days
 /**
  * Creates an instantaneous database backup snapshot
  */
-function createDatabaseBackup() {
-  if (!fs.existsSync(DB_PATH)) {
-    throw new Error(`Source database file not found at ${DB_PATH}`);
+function createDatabaseBackup(sourceDbPath = null) {
+  const dbPath = getSourceDbPath(sourceDbPath);
+  if (!fs.existsSync(dbPath)) {
+    throw new Error(`Source database file not found at ${dbPath}`);
   }
 
   if (!fs.existsSync(BACKUP_DIR)) {
@@ -39,8 +45,16 @@ function createDatabaseBackup() {
   const backupFilename = `college_attendance_${timestamp}.sqlite`;
   const backupFilePath = path.join(BACKUP_DIR, backupFilename);
 
+  // Flush WAL journal into main database file before creating snapshot
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const syncDb = new DatabaseSync(dbPath);
+    syncDb.exec('PRAGMA wal_checkpoint(PASSIVE);');
+    syncDb.close();
+  } catch (_) {}
+
   // Copy SQLite database atomically
-  fs.copyFileSync(DB_PATH, backupFilePath);
+  fs.copyFileSync(dbPath, backupFilePath);
   const stats = fs.statSync(backupFilePath);
   const sizeKb = Math.round(stats.size / 1024);
 
@@ -76,7 +90,7 @@ function pruneOldBackups() {
           ctime: stat.ctimeMs
         };
       })
-      .sort((a, b) => b.ctime - a.ctime); // newest first
+      .sort((a, b) => b.filename.localeCompare(a.filename)); // newest first based on timestamp ISO format
 
     const now = Date.now();
     const maxAgeMs = MAX_AGE_DAYS * 24 * 60 * 60 * 1000;

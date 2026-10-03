@@ -20,9 +20,17 @@ let sqliteDb = null;
 function getSqliteDb() {
   if (!sqliteDb) {
     const { DatabaseSync } = require('node:sqlite');
-    const dbFilePath = process.env.SQLITE_FILE
-      ? (path.isAbsolute(process.env.SQLITE_FILE) ? process.env.SQLITE_FILE : path.resolve(__dirname, '../../', process.env.SQLITE_FILE))
-      : path.resolve(__dirname, '../../college_attendance.sqlite');
+    let defaultDbPath = path.resolve(__dirname, '../../college_attendance.sqlite');
+    if (process.env.SQLITE_FILE) {
+      defaultDbPath = path.isAbsolute(process.env.SQLITE_FILE)
+        ? process.env.SQLITE_FILE
+        : path.resolve(__dirname, '../../', process.env.SQLITE_FILE);
+    } else if (fs.existsSync('/var/data')) {
+      defaultDbPath = '/var/data/college_attendance.sqlite';
+    } else if (fs.existsSync('/data')) {
+      defaultDbPath = '/data/college_attendance.sqlite';
+    }
+    const dbFilePath = defaultDbPath;
 
     const dbDir = path.dirname(dbFilePath);
     if (!fs.existsSync(dbDir)) {
@@ -94,14 +102,23 @@ function getSqliteDb() {
         storedSeedVersion = row ? row.setting_value : null;
       } catch (_) {}
 
-      if (FORCE_RESEED || storedSeedVersion !== TARGET_SEED_VERSION) {
-        const reason = FORCE_RESEED ? 'FORCE_RESEED=true env var' : `version mismatch (stored="${storedSeedVersion}", expected="${TARGET_SEED_VERSION}")`;
+      // ── Database Data Protection Check ──────────────────────────────────────
+      // If the database already has registered users, NEVER run a destructive wipe!
+      // Only run initial seeds if the database is 100% empty (0 users) or FORCE_RESEED=true.
+      let existingUsersCount = 0;
+      try {
+        const countRow = sqliteDb.prepare("SELECT count(*) as c FROM users").get();
+        existingUsersCount = countRow ? Number(countRow.c) : 0;
+      } catch (_) {}
+
+      if (FORCE_RESEED || (existingUsersCount === 0 && storedSeedVersion !== TARGET_SEED_VERSION)) {
+        const reason = FORCE_RESEED ? 'FORCE_RESEED=true env var' : `initial setup (users=0, stored="${storedSeedVersion}", target="${TARGET_SEED_VERSION}")`;
         
         if (isRenderOrProd) {
           logger.info(`Running CLEAN production seed (1 Admin login only, zero demo data) — reason: ${reason}`);
           try {
             const { seedProductionClean } = require(path.resolve(__dirname, '../../scripts/seed-production-clean.js'));
-            seedProductionClean(sqliteDb);
+            seedProductionClean(sqliteDb, { force: FORCE_RESEED });
             sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(TARGET_SEED_VERSION);
             logger.info(`Clean production seed complete. Stamped seed_version="${TARGET_SEED_VERSION}".`);
           } catch (seedErr) {
@@ -111,7 +128,7 @@ function getSqliteDb() {
           logger.info(`Running local institutional demo dataset seed — reason: ${reason}`);
           try {
             const { seed } = require(path.resolve(__dirname, '../../scripts/seed-demo.js'));
-            seed(sqliteDb);
+            seed(sqliteDb, { force: FORCE_RESEED });
             sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(TARGET_SEED_VERSION);
             logger.info(`Institutional demo seed complete. Stamped seed_version="${TARGET_SEED_VERSION}".`);
           } catch (seedErr) {
@@ -119,7 +136,12 @@ function getSqliteDb() {
           }
         }
       } else {
-        logger.info(`Seed version "${TARGET_SEED_VERSION}" (${isRenderOrProd ? 'Production/Render' : 'Local'}) matches. Skipping reseed.`);
+        if (existingUsersCount > 0 && storedSeedVersion !== TARGET_SEED_VERSION) {
+          logger.info(`[DATA INTEGRITY GUARD] Active database detected with ${existingUsersCount} user(s). Preserving all institutional records, faculty, students, and attendance. Skipping destructive seed and updating version stamp to "${TARGET_SEED_VERSION}".`);
+          sqliteDb.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('seed_version', ?, datetime('now'))").run(TARGET_SEED_VERSION);
+        } else {
+          logger.info(`Seed version "${TARGET_SEED_VERSION}" (${isRenderOrProd ? 'Production/Render' : 'Local'}) matches. Database preserved.`);
+        }
       }
 
       // Ensure Milestone 45 Audit Logs and In-App Notifications tables exist
@@ -327,15 +349,20 @@ function getSqliteDb() {
       try { sqliteDb.exec('ALTER TABLE attendance_registers ADD COLUMN group_id INTEGER REFERENCES teaching_groups(id) ON DELETE CASCADE;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE assessments ADD COLUMN group_id INTEGER REFERENCES teaching_groups(id) ON DELETE CASCADE;'); } catch (_) {}
 
-      // Ensure Admin account has admin@gmail.com and admin username alias
+      // Ensure at least one System Admin account exists (non-destructive)
       try {
-        sqliteDb.exec(`
-          UPDATE users SET email = 'admin@gmail.com', password_hash = '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW' WHERE id IN (SELECT user_id FROM user_roles WHERE role = 'SYSTEM_ADMIN');
-          UPDATE users SET email = 'admin@gmail.com', password_hash = '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW' WHERE username = 'admin' OR id = 1;
-          INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
-          VALUES (1, 'admin@gmail.com', 'admin@gmail.com', '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW', 0, 'ACTIVE');
-          INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN');
-        `);
+        const adminExists = sqliteDb.prepare("SELECT u.id FROM users u JOIN user_roles ur ON u.id = ur.user_id WHERE ur.role = 'SYSTEM_ADMIN' LIMIT 1").get();
+        if (!adminExists) {
+          sqliteDb.prepare(`
+            INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
+            VALUES (1, 'admin@gmail.com', 'admin@gmail.com', '$2b$12$F3fQ1FKnymvFYcx0TBmJrefTNI5O5H07rSeF0IqofBlRt7J5dv9GW', 0, 'ACTIVE')
+          `).run();
+          sqliteDb.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
+          sqliteDb.prepare(`
+            INSERT OR IGNORE INTO teachers (id, user_id, department_id, full_name, employee_id, phone)
+            VALUES (1, 1, 4, 'System Administrator', 'ADMIN-01', '0000000000')
+          `).run();
+        }
       } catch (_) {}
     } catch (initErr) {
       logger.error('Failed to auto-initialize SQLite schema/seed', { error: initErr.message });

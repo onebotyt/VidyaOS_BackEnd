@@ -21,10 +21,26 @@ const path = require('path');
 const UNIVERSAL_PASS = 'Password@123';
 const ADMIN_PASS = 'Admin@123';
 
-function seed(targetDb = null) {
+function seed(targetDb = null, options = {}) {
   const db = targetDb || new DatabaseSync(path.resolve(__dirname, '../college_attendance.sqlite'));
   db.exec('PRAGMA foreign_keys = OFF;');
   db.exec('PRAGMA journal_mode = WAL;');
+
+  const force = options.force || process.env.FORCE_RESEED === 'true';
+
+  // ─── Safety Shield: Check if existing active users exist ─────────────────
+  try {
+    const userCheck = db.prepare("SELECT count(*) as c FROM users").get();
+    if (userCheck && userCheck.c > 0 && !force) {
+      console.log('=================================================================');
+      console.log(`🛡️  SAFETY SHIELD: Database contains ${userCheck.c} existing user account(s).`);
+      console.log('    Refusing demo reseed to prevent data loss. Pass FORCE_RESEED=true');
+      console.log('    or { force: true } if you explicitly intend to purge this database.');
+      console.log('=================================================================\n');
+      db.exec('PRAGMA foreign_keys = ON;');
+      return { success: true, preserved: true, userCount: userCheck.c };
+    }
+  } catch (_) {}
 
   console.log('=================================================================');
   console.log('🌱 SEEDING CLEAN INSTITUTIONAL DEMO ENVIRONMENT');
@@ -34,7 +50,7 @@ function seed(targetDb = null) {
   const adminHash = bcrypt.hashSync(ADMIN_PASS, 10);
 
   // ─── Step 1: Wipe EVERYTHING Clean ────────────────────────
-  console.log('[1] Wiping all existing data, departments, groups, registers, and users...');
+  console.log('[1] Wiping all existing data, departments, groups, registers, and users (authorized force reset)...');
 
   db.exec(`DELETE FROM classroom_posts;`);
   db.exec(`DELETE FROM teaching_group_members;`);
