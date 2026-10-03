@@ -509,7 +509,7 @@ router.get('/registrations/pending', auth, requireRole('TEACHER'), requireDepart
     const ayId = req.query.academic_year_id || (await query(`SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1`))[0]?.id;
 
     let sql = `
-      SELECT s.id as student_id, s.official_enrollment_no, s.official_enrollment_no as enrollment_no, s.registration_no,
+      SELECT s.id, s.id as id, s.id as student_id, s.official_enrollment_no, s.official_enrollment_no as enrollment_no, s.registration_no,
              s.full_name, s.entry_mode,
              u.email, u.created_at as registered_at,
              e.id as enrollment_id, e.status as enrollment_status,
@@ -620,11 +620,26 @@ router.post(
     const { class_roll_no, enrollment_no, official_enrollment_no, rejection_reason } = req.body;
 
     try {
+      // Resolve student identifier (handles valid ID or lookup via official_enrollment_no fallback)
+      let resolvedStudentId = (!isNaN(Number(studentId)) && Number(studentId) > 0) ? Number(studentId) : null;
+      if (!resolvedStudentId) {
+        const lookupVal = (official_enrollment_no || enrollment_no || (studentId !== 'undefined' && studentId !== 'null' ? studentId : '')).trim();
+        if (lookupVal) {
+          const matched = await query(
+            `SELECT s.id FROM students s JOIN users u ON s.user_id = u.id WHERE (s.official_enrollment_no = ? OR s.registration_no = ?) AND u.status = 'PENDING' LIMIT 1`,
+            [lookupVal, lookupVal]
+          );
+          if (matched && matched.length > 0) {
+            resolvedStudentId = matched[0].id;
+          }
+        }
+      }
+
       // Department scope authorization: verify student belongs to teacher's department
-      if (!req.user.roles.includes('SYSTEM_ADMIN')) {
+      if (!req.user.roles.includes('SYSTEM_ADMIN') && resolvedStudentId) {
         const studentEnrollment = await query(
           `SELECT department_id FROM enrollments WHERE student_id = ? LIMIT 1`,
-          [studentId]
+          [resolvedStudentId]
         );
         if (studentEnrollment.length > 0) {
           const studentDeptId = studentEnrollment[0].department_id;
@@ -647,20 +662,43 @@ router.post(
       let resolvedEnrollNo = null;
       let finalRollNo = null;
       let studentName = null;
+      let actualStudentId = resolvedStudentId;
 
       await withTransaction(async (conn) => {
-        const [students] = await conn.execute(
-          `SELECT s.user_id, s.official_enrollment_no, s.full_name,
-                  e.department_id, e.academic_year_id, e.year, e.semester, e.class_roll_no
-           FROM students s
-           JOIN enrollments e ON s.id = e.student_id
-           WHERE s.id = ? LIMIT 1`,
-          [studentId]
-        );
+        let students = [];
+        if (resolvedStudentId) {
+          const [rows] = await conn.execute(
+            `SELECT s.id as student_id, s.user_id, s.official_enrollment_no, s.full_name,
+                    e.department_id, e.academic_year_id, e.year, e.semester, e.class_roll_no
+             FROM students s
+             JOIN enrollments e ON s.id = e.student_id
+             WHERE s.id = ? LIMIT 1`,
+            [resolvedStudentId]
+          );
+          students = rows;
+        }
+
+        if (students.length === 0) {
+          const lookupVal = (official_enrollment_no || enrollment_no || (studentId !== 'undefined' && studentId !== 'null' ? studentId : '')).trim();
+          if (lookupVal) {
+            const [rows] = await conn.execute(
+              `SELECT s.id as student_id, s.user_id, s.official_enrollment_no, s.full_name,
+                      e.department_id, e.academic_year_id, e.year, e.semester, e.class_roll_no
+               FROM students s
+               JOIN enrollments e ON s.id = e.student_id
+               WHERE (s.official_enrollment_no = ? OR s.registration_no = ?)
+               LIMIT 1`,
+              [lookupVal, lookupVal]
+            );
+            students = rows;
+          }
+        }
+
         if (students.length === 0) {
           throw { status: 404, code: 'NOT_FOUND', message: 'Student not found' };
         }
         const student = students[0];
+        actualStudentId = student.student_id;
         const userId = student.user_id;
         studentName = student.full_name;
 
@@ -674,13 +712,13 @@ router.post(
           // Check if enrollment number is already assigned to another student
           const [conflict] = await conn.execute(
             `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
-            [resolvedEnrollNo, studentId]
+            [resolvedEnrollNo, actualStudentId]
           );
           if (conflict && conflict.length > 0) {
             throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${resolvedEnrollNo}" is already assigned to another student.` };
           }
 
-          // 2. Resolve class roll number: use provided class_roll_no or auto-assign next sequential in cohort
+          // 2. Resolve class roll number: use provided class_roll_no or auto-assign next sequential in cohort (no manual assignment required)
           finalRollNo = class_roll_no ? Number(class_roll_no) : null;
           if (!finalRollNo || isNaN(finalRollNo) || finalRollNo <= 0) {
             const [maxRollRow] = await conn.execute(
@@ -695,11 +733,11 @@ router.post(
           await conn.execute(`UPDATE users SET status = 'ACTIVE', username = ? WHERE id = ?`, [resolvedEnrollNo, userId]);
           await conn.execute(
             `UPDATE enrollments SET class_roll_no = ?, status = 'ENROLLED' WHERE student_id = ?`,
-            [finalRollNo, studentId]
+            [finalRollNo, actualStudentId]
           );
           await conn.execute(
             `UPDATE students SET official_enrollment_no = ?, class_roll_no = ? WHERE id = ?`,
-            [resolvedEnrollNo, finalRollNo, studentId]
+            [resolvedEnrollNo, finalRollNo, actualStudentId]
           );
 
           // Create Time-Aware Department Enrollment (redesign.md Section 16)
@@ -707,7 +745,7 @@ router.post(
             await conn.execute(
               `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
                VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
-              [studentId, student.department_id, student.academic_year_id, student.year, student.semester, finalRollNo]
+              [actualStudentId, student.department_id, student.academic_year_id, student.year, student.semester, finalRollNo]
             );
           } catch (_) {}
         } else {
@@ -725,7 +763,7 @@ router.post(
             actorId: req.user.id,
             actorRole: req.user.roles?.[0] || 'TEACHER',
             targetType: 'students',
-            targetId: studentId,
+            targetId: actualStudentId,
             details: { action, official_enrollment_no: resolvedEnrollNo, class_roll_no: finalRollNo, reason: rejection_reason || null },
             ipAddress: req.ip
           });
@@ -746,7 +784,7 @@ router.post(
         success: true,
         message: `Registration ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully.`,
         data: action === 'APPROVE' ? {
-          student_id: Number(studentId),
+          student_id: Number(actualStudentId),
           name: studentName,
           official_enrollment_no: resolvedEnrollNo,
           enrollment_no: resolvedEnrollNo,
