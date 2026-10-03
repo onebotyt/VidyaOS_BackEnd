@@ -605,8 +605,8 @@ router.post('/registers', [
   body('name').trim().notEmpty().withMessage('Register name required'),
   body('subject_id').optional().isInt(),
   body('department_id').optional().isInt(),
-  body('year').optional().isInt({ min: 1, max: 4 }),
-  body('semester').optional().isInt({ min: 1, max: 8 }),
+  body('year').optional().isInt({ min: 1, max: 3 }),
+  body('semester').optional().isInt({ min: 1, max: 6 }),
   body('session_type_scope').optional().isIn(['THEORY', 'PRACTICAL', 'ALL']),
   validate
 ], async (req, res) => {
@@ -859,21 +859,64 @@ router.get('/cohorts/biometrics', async (req, res) => {
 router.post('/cohorts/registration-toggle', requireDepartmentFaculty(), [
   body('department_id').optional().isInt(),
   body('branch_id').optional().isInt(),
-  body('year').isInt({ min: 1, max: 4 }),
-  body('semester').isInt({ min: 1, max: 8 }),
+  body('year').optional().isInt({ min: 1, max: 4 }),
+  body('semester').optional().isInt({ min: 1, max: 8 }),
   body('registration_open').optional().isBoolean(),
   body('open').optional().isBoolean(),
+  body('department_wide').optional().isBoolean(),
+  body('all_cohorts').optional().isBoolean(),
   validate
 ], async (req, res) => {
-  const { department_id, branch_id, year, semester, registration_open, open, academic_year_id } = req.body;
-  const effDeptId = department_id || branch_id;
+  const { department_id, branch_id, year, semester, registration_open, open, academic_year_id, department_wide, all_cohorts } = req.body;
+  const effDeptId = department_id || branch_id || req.department_id || req.user?.department_id;
   const isOpen = registration_open !== undefined ? registration_open : open;
   if (isOpen === undefined || !effDeptId) {
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'department_id and registration_open or open is required' } });
   }
 
   try {
+    const isDeptWide = Boolean(department_wide || all_cohorts);
     const ayId = academic_year_id || (await query(`SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1`))[0]?.id;
+
+    if (isDeptWide) {
+      const branchKey = `cohort_reg_dept_${effDeptId}`;
+      await query(
+        `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+         VALUES (?, ?, 'Department-Wide Student Self-Registration Open/Closed', ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(setting_key)
+         DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+        [branchKey, isOpen ? '1' : '0', req.user.id]
+      );
+
+      // Also update or set cohort keys for active cohorts in this department
+      const cohorts = await query(
+        `SELECT DISTINCT year, semester FROM teacher_assignments WHERE department_id = ? AND is_active = 1
+         UNION
+         SELECT DISTINCT year, semester FROM enrollments WHERE department_id = ? AND status = 'ENROLLED'`,
+        [effDeptId, effDeptId]
+      );
+      for (const c of cohorts) {
+        const cKey = `cohort_reg_${effDeptId}_${effDeptId}_${c.year}_${c.semester}_${ayId}`;
+        await query(
+          `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+           VALUES (?, ?, 'Cohort Self-Registration Open/Closed', ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(setting_key)
+           DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+          [cKey, isOpen ? '1' : '0', req.user.id]
+        );
+      }
+
+      return res.json({
+        success: true,
+        message: `Student self-registration is now ${isOpen ? 'OPEN' : 'CLOSED'} for all cohorts in this department`,
+        data: { is_open: Boolean(isOpen), department_wide: true, department_id: effDeptId }
+      });
+    }
+
+    if (!year || !semester) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'year and semester are required for cohort registration toggle' } });
+    }
+
     const settingKey = `cohort_reg_${effDeptId}_${effDeptId}_${year}_${semester}_${ayId}`;
     await query(
       `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
@@ -882,10 +925,19 @@ router.post('/cohorts/registration-toggle', requireDepartmentFaculty(), [
        DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
       [settingKey, isOpen ? '1' : '0', req.user.id]
     );
+
+    if (!isOpen) {
+      const branchKey = `cohort_reg_dept_${effDeptId}`;
+      await query(
+        `UPDATE system_settings SET setting_value = '0', updated_at = CURRENT_TIMESTAMP WHERE setting_key = ?`,
+        [branchKey]
+      );
+    }
+
     res.json({
       success: true,
       message: `Student self-registration is now ${isOpen ? 'OPEN' : 'CLOSED'} for this cohort`,
-      data: { is_open: Boolean(isOpen), setting_key: settingKey }
+      data: { is_open: Boolean(isOpen), setting_key: settingKey, department_id: effDeptId, year, semester }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -894,16 +946,35 @@ router.post('/cohorts/registration-toggle', requireDepartmentFaculty(), [
 
 router.get('/cohorts/registration-status', requireDepartmentFaculty(), async (req, res) => {
   const { department_id, branch_id, year, semester, academic_year_id } = req.query;
-  const effDeptId = department_id || branch_id;
-  if (!effDeptId || !year || !semester) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Cohort parameters required' } });
+  const effDeptId = department_id || branch_id || req.department_id || req.user?.department_id;
+  if (!effDeptId) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'department_id required' } });
   }
   try {
     const ayId = academic_year_id || (await query(`SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1`))[0]?.id;
-    const settingKey = `cohort_reg_${effDeptId}_${effDeptId}_${year}_${semester}_${ayId}`;
-    const setting = await query(`SELECT setting_value FROM system_settings WHERE setting_key = ?`, [settingKey]);
-    const isOpen = setting.length > 0 && setting[0].setting_value === '1';
-    res.json({ success: true, data: { is_open: isOpen, setting_key: settingKey } });
+    const branchKey = `cohort_reg_dept_${effDeptId}`;
+    const branchSetting = await query(`SELECT setting_value FROM system_settings WHERE setting_key = ?`, [branchKey]);
+    const isDeptOpen = branchSetting.length > 0 && branchSetting[0].setting_value === '1';
+
+    let isCohortOpen = false;
+    let settingKey = branchKey;
+    if (year && semester) {
+      settingKey = `cohort_reg_${effDeptId}_${effDeptId}_${year}_${semester}_${ayId}`;
+      const cohortSetting = await query(`SELECT setting_value FROM system_settings WHERE setting_key = ?`, [settingKey]);
+      isCohortOpen = cohortSetting.length > 0 && cohortSetting[0].setting_value === '1';
+    }
+
+    const isOpen = isDeptOpen || isCohortOpen;
+    res.json({
+      success: true,
+      data: {
+        is_open: isOpen,
+        is_dept_open: isDeptOpen,
+        is_cohort_open: isCohortOpen,
+        setting_key: settingKey,
+        department_id: effDeptId
+      }
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }

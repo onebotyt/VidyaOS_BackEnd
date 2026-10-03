@@ -71,6 +71,57 @@ router.get('/dashboard', requireHOD(), async (req, res) => {
       (await query(`SELECT setting_value FROM system_settings WHERE setting_key = 'attendance_threshold'`))[0]?.setting_value || '75'
     );
 
+    // Hardware devices telemetry
+    const [devicesSummary] = await query(
+      `SELECT 
+         COUNT(*) as total,
+         SUM(CASE WHEN is_active = 1 AND last_heartbeat_at >= datetime('now', '-10 minutes') THEN 1 ELSE 0 END) as online
+       FROM devices WHERE department_id = ?`, [deptId]
+    );
+
+    // Pending student registrations
+    const [pendingStudents] = await query(
+      `SELECT COUNT(DISTINCT s.id) as total
+       FROM students s
+       JOIN users u ON s.user_id = u.id
+       JOIN enrollments e ON e.student_id = s.id
+       WHERE u.status = 'PENDING' AND e.department_id = ?`, [deptId]
+    );
+
+    // Pending leave applications
+    const [pendingLeaves] = await query(
+      `SELECT COUNT(*) as total
+       FROM leave_applications la
+       JOIN students s ON la.student_id = s.id
+       JOIN enrollments e ON e.student_id = s.id
+       WHERE la.status = 'PENDING' AND e.department_id = ?`, [deptId]
+    );
+
+    // Pending faculty registration requests
+    const [pendingFaculty] = await query(
+      `SELECT COUNT(*) as total
+       FROM faculty_registration_requests
+       WHERE approval_type = 'DEPT_HOD' AND status = 'PENDING' AND department_id = ?`, [deptId]
+    );
+
+    // Recent department attendance sessions (latest 6)
+    const recentSessions = await query(
+      `SELECT s.id, s.session_date, s.start_time, s.end_time, s.state, s.session_type,
+              ar.name as register_name, sub.name as subject_name, sub.code as subject_code,
+              t.full_name as teacher_name,
+              COUNT(ra.id) as marked_count,
+              SUM(CASE WHEN ra.attendance_status IN ('PRESENT','LATE') THEN 1 ELSE 0 END) as present_count
+       FROM attendance_sessions s
+       JOIN attendance_registers ar ON s.register_id = ar.id
+       LEFT JOIN subjects sub ON ar.subject_id = sub.id
+       LEFT JOIN teachers t ON ar.teacher_id = t.id
+       LEFT JOIN register_attendance ra ON ra.session_id = s.id
+       WHERE ar.department_id = ?
+       GROUP BY s.id
+       ORDER BY s.session_date DESC, s.id DESC
+       LIMIT 6`, [deptId]
+    );
+
     res.json({ success: true, data: {
       department_id: deptId,
       department_name: req.hod_department_name,
@@ -79,7 +130,13 @@ router.get('/dashboard', requireHOD(), async (req, res) => {
       total_students: studentsCount?.total || 0,
       active_registers: activeRegisters?.total || 0,
       avg_attendance_pct: avgAttendance?.avg_pct || 0,
-      attendance_threshold: threshold
+      attendance_threshold: threshold,
+      devices_total: devicesSummary?.total || 0,
+      devices_online: devicesSummary?.online || 0,
+      pending_students: pendingStudents?.total || 0,
+      pending_leaves: pendingLeaves?.total || 0,
+      pending_faculty: pendingFaculty?.total || 0,
+      recent_sessions: recentSessions || []
     }});
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -351,8 +408,8 @@ router.post('/subjects', requireHOD(), [
   body('name').trim().notEmpty().withMessage('Subject name required'),
   body('code').trim().notEmpty().withMessage('Subject code required'),
   body('branch_id').optional(),
-  body('year').isInt({ min: 1, max: 4 }).withMessage('Year 1-4 required'),
-  body('semester').isInt({ min: 1, max: 8 }).withMessage('Semester 1-8 required'),
+  body('year').isInt({ min: 1, max: 3 }).withMessage('Year 1-3 required'),
+  body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester 1-6 required'),
   validate
 ], async (req, res) => {
   const { name, code, year, semester } = req.body;
@@ -385,8 +442,8 @@ router.put('/subjects/:id', requireHOD(), [
   param('id').isInt(),
   body('name').optional().trim().notEmpty(),
   body('code').optional().trim().notEmpty(),
-  body('year').optional().isInt({ min: 1, max: 4 }),
-  body('semester').optional().isInt({ min: 1, max: 8 }),
+  body('year').optional().isInt({ min: 1, max: 3 }),
+  body('semester').optional().isInt({ min: 1, max: 6 }),
   body('is_active').optional().isBoolean(),
   validate
 ], async (req, res) => {
@@ -498,8 +555,8 @@ router.post('/assignments/subject-teacher', requireHOD(), [
   body('subject_id').isInt().withMessage('Subject ID required'),
   body('session_type_scope').isIn(['THEORY', 'PRACTICAL']).withMessage('session_type_scope must be THEORY or PRACTICAL'),
   body('branch_id').optional(),
-  body('year').optional().isInt({ min: 1, max: 4 }),
-  body('semester').optional().isInt({ min: 1, max: 8 }),
+  body('year').optional().isInt({ min: 1, max: 3 }),
+  body('semester').optional().isInt({ min: 1, max: 6 }),
   validate
 ], async (req, res) => {
   const { teacher_id, subject_id, session_type_scope, year, semester } = req.body;
@@ -574,8 +631,8 @@ router.post('/assignments/subject-teacher', requireHOD(), [
 router.post('/assignments/class-teacher', requireHOD(), [
   body('teacher_id').isInt().withMessage('Teacher ID required'),
   body('branch_id').optional().isInt(),
-  body('year').isInt({ min: 1, max: 4 }).withMessage('Year 1-4 required'),
-  body('semester').isInt({ min: 1, max: 8 }).withMessage('Semester 1-8 required'),
+  body('year').isInt({ min: 1, max: 3 }).withMessage('Year 1-3 required'),
+  body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester 1-6 required'),
   validate
 ], async (req, res) => {
   const { teacher_id, branch_id, year, semester } = req.body;
@@ -1244,9 +1301,26 @@ router.post('/students', requireHOD(), [
       ayId = ayRow.id;
     }
 
-    const existingUser = await query('SELECT id FROM users WHERE username = ?', [official_enrollment_no.trim()]);
+    const cleanEnroll = official_enrollment_no.trim();
+    const existingUser = await query(
+      `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)
+       UNION
+       SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)`,
+      [cleanEnroll, cleanEnroll]
+    );
     if (existingUser.length > 0) {
-      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Enrollment number "${official_enrollment_no}" already exists` } });
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` } });
+    }
+
+    if (email && email.trim()) {
+      const cleanEmail = email.trim();
+      const existingEmail = await query(
+        `SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(?) OR LOWER(TRIM(username)) = LOWER(?)`,
+        [cleanEmail, cleanEmail]
+      );
+      if (existingEmail.length > 0) {
+        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Email "${cleanEmail}" is already registered to an account.` } });
+      }
     }
 
     const tempPassword = (initial_password && initial_password.trim()) ? initial_password.trim() : 'Password@123';
@@ -1349,10 +1423,27 @@ router.post('/students/bulk', requireHOD(), [
           continue;
         }
 
-        const [existing] = await conn.execute('SELECT id FROM users WHERE username = ?', [enrollNo]);
+        const [existing] = await conn.execute(
+          `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)
+           UNION
+           SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)`,
+          [enrollNo, enrollNo]
+        );
         if (existing && existing.length > 0) {
-          errors.push(`Enrollment "${enrollNo}" already exists`);
+          errors.push(`Enrollment "${enrollNo}" already exists in the system`);
           continue;
+        }
+
+        if (st.email && st.email.trim()) {
+          const cleanEmail = st.email.trim();
+          const [existingEmail] = await conn.execute(
+            `SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(?) OR LOWER(TRIM(username)) = LOWER(?)`,
+            [cleanEmail, cleanEmail]
+          );
+          if (existingEmail && existingEmail.length > 0) {
+            errors.push(`Email "${cleanEmail}" already exists`);
+            continue;
+          }
         }
 
         const tempPass = (st.initial_password && st.initial_password.trim()) ? st.initial_password.trim() : 'Password@123';
@@ -1584,7 +1675,7 @@ router.get('/settings', requireHOD(), async (req, res) => {
 });
 
 router.put('/settings', requireHOD(), [
-  body('degree_duration_years').optional().isInt({ min: 1, max: 4 }),
+  body('degree_duration_years').optional().isInt({ min: 1, max: 3 }),
   body('active_term').optional().isString().trim().notEmpty(),
   body('defaulter_threshold_percent').optional().isInt({ min: 50, max: 100 }),
   validate
@@ -1643,7 +1734,7 @@ router.get('/settings/duration', requireHOD(), async (req, res) => {
 });
 
 router.post('/settings/duration', requireHOD(), [
-  body('duration_years').isInt({ min: 1, max: 4 }).withMessage('Duration years must be between 1 and 4'),
+  body('duration_years').isInt({ min: 1, max: 3 }).withMessage('Duration years must be between 1 and 3'),
   body('confirm_code').trim().notEmpty().withMessage('Confirmation code required'),
   validate
 ], async (req, res) => {
@@ -2474,7 +2565,11 @@ router.post('/registrations/faculty/:id/reject', [
 // ─────────────────────────────────────────────────────────
 router.get('/faculty-registration-status', requireHOD(), async (req, res) => {
   try {
-    const deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id;
+    let deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id || req.query.department_id;
+    if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
+      const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+      deptId = defaultDept;
+    }
     if (!deptId) {
       return res.status(400).json({ success: false, error: { code: 'NO_DEPARTMENT', message: 'HOD has no assigned department' } });
     }
@@ -2495,10 +2590,15 @@ router.get('/faculty-registration-status', requireHOD(), async (req, res) => {
 
 router.post('/faculty-registration-toggle', requireHOD(), [
   body('open').isBoolean().withMessage('open flag (boolean) is required'),
+  body('department_id').optional().isInt(),
   validate
 ], async (req, res) => {
   try {
-    const deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id;
+    let deptId = req.body.department_id || req.hod_department_id || req.user?.department_id || req.user?.hod_department_id;
+    if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
+      const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+      deptId = defaultDept;
+    }
     if (!deptId) {
       return res.status(400).json({ success: false, error: { code: 'NO_DEPARTMENT', message: 'HOD has no assigned department' } });
     }

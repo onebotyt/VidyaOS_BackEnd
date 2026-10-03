@@ -646,9 +646,10 @@ async function runTests() {
       // 3. Clean up database fixtures directly via db query
       const { query: dbQuery } = require('../src/config/db');
 
-      // Clear common manager assignments and setting
+      // Clear common manager assignments, setting, and roles
       await dbQuery(`DELETE FROM common_faculty_manager_assignments`);
       await dbQuery(`DELETE FROM system_settings WHERE setting_key = 'common_faculty_manager_teacher_id'`);
+      await dbQuery(`DELETE FROM user_roles WHERE role = 'COMMON_FACULTY_MANAGER'`);
 
       // Clean test department if created
       if (testDeptId) {

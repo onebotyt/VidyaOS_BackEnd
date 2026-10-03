@@ -6,20 +6,13 @@
 
 const express = require('express');
 const router = express.Router();
-const { body, validationResult } = require('express-validator');
+const { body } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
+const validate = require('../middleware/validate');
 const { query } = require('../config/db');
 
 router.use(auth);
-
-function validate(req, res, next) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: errors.array()[0].msg } });
-  }
-  next();
-}
 
 const SELECT_BASE = `
   SELECT t.*, sub.name as subject_name, sub.code as subject_code,

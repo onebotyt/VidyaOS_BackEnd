@@ -48,6 +48,19 @@ router.post('/faculty/login', authLimiter, [
 });
 
 // ─────────────────────────────────────────────────────────
+// CURRENT USER PROFILE (Auto-sync session)
+// GET /api/v1/auth/me
+// ─────────────────────────────────────────────────────────
+router.get('/me', auth, async (req, res) => {
+  try {
+    const result = await authService.getMe(req.user.id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
 // STUDENT LOGIN  (Strictly Gmail or Mobile Number + password)
 // POST /api/v1/auth/student/login
 // ─────────────────────────────────────────────────────────
@@ -123,6 +136,26 @@ router.post('/otp/send', authLimiter, [
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// PUBLIC: Get WhatsApp Gateway Settings (for registration forms)
+// GET /api/v1/auth/whatsapp-settings
+// ─────────────────────────────────────────────────────────
+router.get('/whatsapp-settings', async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('whatsapp_otp_mandatory', 'whatsapp_bot_enabled')`,
+    );
+    const settings = {};
+    (rows || []).forEach(r => { settings[r.setting_key] = r.setting_value; });
+    // Default: mandatory is TRUE (opt-out model - admin must explicitly disable)
+    const mandatory = settings.whatsapp_otp_mandatory !== 'false';
+    res.json({ success: true, data: { whatsapp_otp_mandatory: mandatory } });
+  } catch (err) {
+    // On error, default to mandatory = true for safety
+    res.json({ success: true, data: { whatsapp_otp_mandatory: true } });
   }
 });
 
@@ -788,8 +821,8 @@ router.post('/student/register', authLimiter, [
   body('parent_name').optional().trim(),
   body('department_id').optional().isInt(),
   body('branch_id').optional().isInt(),
-  body('year').optional().isInt({ min: 1, max: 4 }),
-  body('semester').isInt({ min: 1, max: 8 }).withMessage('Semester must be between 1 and 8'),
+  body('year').optional().isInt({ min: 1, max: 3 }),
+  body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester must be between 1 and 6'),
   validate
 ], async (req, res) => {
   const { full_name, official_enrollment_no, registration_no, email, password, phone, parent_phone, parent_name, otp_verification_token, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
@@ -875,27 +908,31 @@ router.post('/student/register', authLimiter, [
       });
     }
 
-    // 3. Check enrollment number is not already taken
+    // 3. Check enrollment number is not already taken across the entire institution
+    const cleanEnroll = official_enrollment_no.trim();
     const existingEnroll = await query(
-      `SELECT u.id FROM students s JOIN users u ON s.user_id = u.id WHERE s.official_enrollment_no = ?`,
-      [official_enrollment_no.trim()]
+      `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)
+       UNION
+       SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)`,
+      [cleanEnroll, cleanEnroll]
     );
     if (existingEnroll && existingEnroll.length > 0) {
       return res.status(409).json({
         success: false,
-        error: { code: 'CONFLICT', message: 'An account with this enrollment number already exists.' }
+        error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` }
       });
     }
 
     // 4. Check email is not already taken
+    const cleanEmail = email.trim();
     const existingEmail = await query(
-      `SELECT id FROM users WHERE LOWER(email) = LOWER(?) OR LOWER(username) = LOWER(?)`,
-      [email, email]
+      `SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(?) OR LOWER(TRIM(username)) = LOWER(?)`,
+      [cleanEmail, cleanEmail]
     );
     if (existingEmail && existingEmail.length > 0) {
       return res.status(409).json({
         success: false,
-        error: { code: 'CONFLICT', message: 'An account with this Gmail address already exists.' }
+        error: { code: 'CONFLICT', message: `An account with this email address ("${cleanEmail}") already exists.` }
       });
     }
 
@@ -912,8 +949,14 @@ router.post('/student/register', authLimiter, [
       }
     }
 
-    // 4c. Mandatory OTP Verification Check (WhatsApp / Mobile)
-    if (!otp_verification_token || !otp_verification_token.trim()) {
+    // 4c. Conditional OTP Verification Check (WhatsApp / Mobile)
+    // Only mandatory when admin has enabled it from the WhatsApp Gateway page
+    const waSettingRow = await query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_otp_mandatory' LIMIT 1`
+    );
+    const isOtpMandatory = !waSettingRow || waSettingRow.length === 0 || waSettingRow[0].setting_value !== 'false';
+
+    if (isOtpMandatory && (!otp_verification_token || !otp_verification_token.trim())) {
       return res.status(400).json({
         success: false,
         error: {
@@ -923,34 +966,38 @@ router.post('/student/register', authLimiter, [
       });
     }
 
-    let tokenData;
-    try {
-      tokenData = await otpService.consumeVerificationToken(otp_verification_token.trim(), 'REGISTRATION');
-    } catch (otpErr) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_OTP_TOKEN',
-          message: otpErr.message || 'Invalid or expired OTP verification token. Please request a new WhatsApp OTP code.'
-        }
-      });
+    let tokenData = null;
+    let isPhoneVerified = 0;
+
+    if (otp_verification_token && otp_verification_token.trim()) {
+      try {
+        tokenData = await otpService.consumeVerificationToken(otp_verification_token.trim(), 'REGISTRATION');
+      } catch (otpErr) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_OTP_TOKEN',
+            message: otpErr.message || 'Invalid or expired OTP verification token. Please request a new WhatsApp OTP code.'
+          }
+        });
+      }
+
+      const tokenIdentifier = (tokenData.identifier || '').toLowerCase();
+      const matchesEmail = Boolean(email && tokenIdentifier === email.toLowerCase());
+      const matchesPhone = Boolean(cleanPhone && tokenIdentifier === cleanPhone);
+
+      if (!matchesEmail && !matchesPhone) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'OTP_IDENTIFIER_MISMATCH',
+            message: 'The verified OTP does not match the submitted WhatsApp mobile number.'
+          }
+        });
+      }
+
+      isPhoneVerified = matchesPhone ? 1 : 0;
     }
-
-    const tokenIdentifier = (tokenData.identifier || '').toLowerCase();
-    const matchesEmail = Boolean(email && tokenIdentifier === email.toLowerCase());
-    const matchesPhone = Boolean(cleanPhone && tokenIdentifier === cleanPhone);
-
-    if (!matchesEmail && !matchesPhone) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'OTP_IDENTIFIER_MISMATCH',
-          message: 'The verified OTP does not match the submitted WhatsApp mobile number.'
-        }
-      });
-    }
-
-    const isPhoneVerified = matchesPhone ? 1 : 0;
 
     // 5. Hash the student's chosen password
     const passwordHash = await bcrypt.hash(password, 12);
@@ -1186,8 +1233,14 @@ router.post('/faculty/register', authLimiter, [
       }
     }
 
-    // Mandatory OTP Verification Check (WhatsApp / Mobile)
-    if (!otp_verification_token || !otp_verification_token.trim()) {
+    // Conditional OTP Verification Check (WhatsApp / Mobile)
+    // Only mandatory when admin has enabled it from the WhatsApp Gateway page
+    const waFacSettingRow = await query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_otp_mandatory' LIMIT 1`
+    );
+    const isFacOtpMandatory = !waFacSettingRow || waFacSettingRow.length === 0 || waFacSettingRow[0].setting_value !== 'false';
+
+    if (isFacOtpMandatory && (!otp_verification_token || !otp_verification_token.trim())) {
       return res.status(400).json({
         success: false,
         error: {
@@ -1197,31 +1250,34 @@ router.post('/faculty/register', authLimiter, [
       });
     }
 
-    let tokenData;
-    try {
-      tokenData = await otpService.consumeVerificationToken(otp_verification_token.trim(), 'REGISTRATION');
-    } catch (otpErr) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_OTP_TOKEN',
-          message: otpErr.message || 'Invalid or expired OTP verification token. Please request a new WhatsApp OTP code.'
-        }
-      });
-    }
+    let facTokenData = null;
 
-    const tokenIdentifier = (tokenData.identifier || '').toLowerCase();
-    const matchesEmail = Boolean(email && tokenIdentifier === email.toLowerCase());
-    const matchesPhone = Boolean(cleanPhone && tokenIdentifier === cleanPhone);
+    if (otp_verification_token && otp_verification_token.trim()) {
+      try {
+        facTokenData = await otpService.consumeVerificationToken(otp_verification_token.trim(), 'REGISTRATION');
+      } catch (otpErr) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_OTP_TOKEN',
+            message: otpErr.message || 'Invalid or expired OTP verification token. Please request a new WhatsApp OTP code.'
+          }
+        });
+      }
 
-    if (!matchesEmail && !matchesPhone) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'OTP_IDENTIFIER_MISMATCH',
-          message: 'The verified OTP does not match the submitted WhatsApp mobile number.'
-        }
-      });
+      const facTokenIdentifier = (facTokenData.identifier || '').toLowerCase();
+      const facMatchesEmail = Boolean(email && facTokenIdentifier === email.toLowerCase());
+      const facMatchesPhone = Boolean(cleanPhone && facTokenIdentifier === cleanPhone);
+
+      if (!facMatchesEmail && !facMatchesPhone) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'OTP_IDENTIFIER_MISMATCH',
+            message: 'The verified OTP does not match the submitted WhatsApp mobile number.'
+          }
+        });
+      }
     }
 
     // 4. Hash password

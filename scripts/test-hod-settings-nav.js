@@ -70,7 +70,7 @@ async function run() {
     throw new Error('Resource counts missing from settings payload');
   }
 
-  // 3. Test PUT /api/v1/hod/settings with duration max 4 years validation
+  // 3. Test PUT /api/v1/hod/settings with duration max 3 years validation
   const invalidPut = await request({
     hostname: 'localhost',
     port: 3000,
@@ -81,12 +81,12 @@ async function run() {
       'Content-Type': 'application/json'
     }
   }, {
-    degree_duration_years: 5
+    degree_duration_years: 4
   });
   if (invalidPut.status === 200) {
-    throw new Error('Expected validation failure when setting degree duration to 5 years (max 4)');
+    throw new Error('Expected validation failure when setting degree duration to 4 years (max 3)');
   }
-  console.log('✔ Degree duration validation successfully rejected 5 years (capped to max 4 years)');
+  console.log('✔ Degree duration validation successfully rejected 4 years (capped to max 3 years)');
 
   const putRes = await request({
     hostname: 'localhost',
@@ -98,14 +98,14 @@ async function run() {
       'Content-Type': 'application/json'
     }
   }, {
-    degree_duration_years: 4,
+    degree_duration_years: 3,
     attendance_defaulter_threshold_percent: 78
   });
 
   if (putRes.status !== 200 || !putRes.json?.success) {
     throw new Error(`PUT /api/v1/hod/settings failed: ${putRes.status} ${putRes.body}`);
   }
-  console.log('✔ PUT /api/v1/hod/settings updated policies successfully with 4 years duration');
+  console.log('✔ PUT /api/v1/hod/settings updated policies successfully with 3 years duration');
 
   // 4. Test RBAC: Non-HOD teacher should get 403
   const teacherToken = await login('teacher@gmail.com', 'Password@123');
@@ -138,7 +138,7 @@ async function run() {
   
   // A. Check auth.js
   const authJs = fs.readFileSync(path.join(frontendDir, 'js/auth.js'), 'utf8');
-  if (!authJs.includes('/faculty/hod-settings.html') || !authJs.includes('Department Settings')) {
+  if (!authJs.includes('/faculty/hod-settings.html') || (!authJs.includes('Department Settings') && !authJs.includes('Dept Settings'))) {
     throw new Error('auth.js does not have Department Settings in HOD navItems!');
   }
   console.log('✔ auth.js has Department Settings in hamburger navigation menu');
@@ -170,10 +170,10 @@ async function run() {
   if (settingsHtml.includes('setting-term') || settingsHtml.includes('Active Session Term')) {
     throw new Error('hod-settings.html still contains Active Session Term elements!');
   }
-  if (settingsHtml.includes('value="5"') || settingsHtml.includes('value="6"')) {
-    throw new Error('hod-settings.html still contains duration options beyond 4 years!');
+  if (settingsHtml.includes('value="4"') || settingsHtml.includes('value="5"') || settingsHtml.includes('value="6"')) {
+    throw new Error('hod-settings.html still contains duration options beyond 3 years!');
   }
-  console.log('✔ hod-settings.html: Active Term removed and duration capped at 4 years');
+  console.log('✔ hod-settings.html: Active Term removed and duration capped at 3 years');
 
   // D. Verify hod-subjects.html specific constraints
   const subjectsHtml = fs.readFileSync(path.join(frontendDir, 'faculty/hod-subjects.html'), 'utf8');

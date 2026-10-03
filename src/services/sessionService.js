@@ -190,6 +190,18 @@ async function syncAcademicSession(targetDate = new Date()) {
       `UPDATE departments SET active_term = ?, updated_at = CURRENT_TIMESTAMP WHERE active_term != ? OR active_term IS NULL`,
       [resolved.session_label, resolved.session_label]
     );
+
+    // 3. Option 3: Automatically archive active teaching groups and registers from expired sessions
+    await conn.execute(`
+      UPDATE teaching_groups 
+      SET status = 'ARCHIVED', archived_at = CURRENT_TIMESTAMP 
+      WHERE status = 'ACTIVE' AND academic_year_id IN (SELECT id FROM academic_years WHERE is_current = 0)
+    `);
+    await conn.execute(`
+      UPDATE attendance_registers
+      SET is_active = 0
+      WHERE group_id IN (SELECT id FROM teaching_groups WHERE status = 'ARCHIVED')
+    `);
   });
 
   return {

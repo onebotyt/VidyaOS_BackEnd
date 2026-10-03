@@ -166,11 +166,11 @@ router.post(
   [
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('official_enrollment_no').trim().notEmpty().withMessage('Official enrollment number is required'),
-    body('class_roll_no').isInt({ min: 1 }).withMessage('Class roll number must be greater than 0'),
+    body('class_roll_no').optional().isInt({ min: 1 }).withMessage('Class roll number must be greater than 0'),
     body('department_id').isInt().withMessage('Department ID required'),
     body('branch_id').optional(),
-    body('year').isInt({ min: 1, max: 4 }).withMessage('Year must be between 1 and 4'),
-    body('semester').isInt({ min: 1, max: 8 }).withMessage('Semester must be between 1 and 8'),
+    body('year').isInt({ min: 1, max: 3 }).withMessage('Year must be between 1 and 3'),
+    body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester must be between 1 and 6'),
     validate
   ],
   async (req, res) => {
@@ -202,17 +202,59 @@ router.post(
           return res.status(400).json({ success: false, error: { code: 'CONFLICT', message: 'Academic year not found' } });
         }
 
-        // Check unique class_roll_no within cohort
-        const rollConflict = await query(
-          `SELECT id FROM enrollments 
-           WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ? AND class_roll_no = ?`,
-          [department_id, year, semester, ayId, class_roll_no]
+        const cleanEnroll = official_enrollment_no.trim();
+        // Check unique official_enrollment_no across the entire institution
+        const enrollConflict = await query(
+          `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)
+           UNION
+           SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)`,
+          [cleanEnroll, cleanEnroll]
         );
-        if (rollConflict.length > 0) {
+        if (enrollConflict.length > 0) {
           return res.status(409).json({
             success: false,
-            error: { code: 'CONFLICT', message: `Class roll number ${class_roll_no} is already assigned in this cohort` }
+            error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` }
           });
+        }
+
+        // Check unique email across users if provided
+        if (email && email.trim()) {
+          const cleanEmail = email.trim();
+          const emailConflict = await query(
+            `SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(?) OR LOWER(TRIM(username)) = LOWER(?)`,
+            [cleanEmail, cleanEmail]
+          );
+          if (emailConflict.length > 0) {
+            return res.status(409).json({
+              success: false,
+              error: { code: 'CONFLICT', message: `Email "${cleanEmail}" is already registered to an account.` }
+            });
+          }
+        }
+
+        // Resolve class roll number: optional, auto-assign next sequential if omitted
+        let finalRoll = class_roll_no ? Number(class_roll_no) : null;
+        if (!finalRoll || isNaN(finalRoll) || finalRoll <= 0) {
+          const maxRollRow = await query(
+            `SELECT COALESCE(MAX(class_roll_no), 0) + 1 AS next_roll
+             FROM enrollments
+             WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ?`,
+            [department_id, year, semester, ayId]
+          );
+          finalRoll = maxRollRow[0]?.next_roll || 1;
+        } else {
+          // Check unique class_roll_no within cohort
+          const rollConflict = await query(
+            `SELECT id FROM enrollments 
+             WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ? AND class_roll_no = ?`,
+            [department_id, year, semester, ayId, finalRoll]
+          );
+          if (rollConflict.length > 0) {
+            return res.status(409).json({
+              success: false,
+              error: { code: 'CONFLICT', message: `Class roll number ${finalRoll} is already assigned in this cohort` }
+            });
+          }
         }
 
         // Generate random 8-character temporary password
@@ -224,7 +266,7 @@ router.post(
           const [uRes] = await conn.execute(
             `INSERT INTO users (username, email, temp_password_hash, must_change_password, status) 
              VALUES (?, ?, ?, TRUE, 'PROVISIONED')`,
-            [official_enrollment_no, email || null, tempPasswordHash]
+            [cleanEnroll, email?.trim() || null, tempPasswordHash]
           );
           const userId = uRes.insertId;
 
@@ -235,7 +277,7 @@ router.post(
           const [sRes] = await conn.execute(
             `INSERT INTO students (user_id, official_enrollment_no, registration_no, class_roll_no, full_name, entry_mode) 
              VALUES (?, ?, ?, ?, ?, 'teacher_provisioned')`,
-            [userId, official_enrollment_no, (registration_no || '').trim() || null, class_roll_no, full_name]
+            [userId, cleanEnroll, (registration_no || '').trim() || null, finalRoll, full_name]
           );
           const studentId = sRes.insertId;
 
@@ -243,7 +285,7 @@ router.post(
           await conn.execute(
             `INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status) 
              VALUES (?, ?, ?, ?, ?, ?, 'ENROLLED')`,
-            [studentId, department_id, year, semester, ayId, class_roll_no]
+            [studentId, department_id, year, semester, ayId, finalRoll]
           );
 
           // 5. Create Time-Aware Department Enrollment (redesign.md Section 16)
@@ -251,16 +293,16 @@ router.post(
             await conn.execute(
               `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
                VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
-              [studentId, department_id, ayId, year, semester, class_roll_no]
+              [studentId, department_id, ayId, year, semester, finalRoll]
             );
           } catch (_) {}
 
           return {
             student_id: studentId,
-            official_enrollment_no,
-            enrollment_no: official_enrollment_no,
+            official_enrollment_no: cleanEnroll,
+            enrollment_no: cleanEnroll,
             registration_no: (registration_no || '').trim() || null,
-            class_roll_no,
+            class_roll_no: finalRoll,
             temporary_password: tempPassword,
             status: 'PROVISIONED'
           };
@@ -288,8 +330,8 @@ router.post(
   [
     body('department_id').isInt().withMessage('Department ID required'),
     body('branch_id').optional(),
-    body('year').isInt({ min: 1, max: 4 }).withMessage('Year must be between 1 and 4'),
-    body('semester').isInt({ min: 1, max: 8 }).withMessage('Semester must be between 1 and 8'),
+    body('year').isInt({ min: 1, max: 3 }).withMessage('Year must be between 1 and 3'),
+    body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester must be between 1 and 6'),
     body('students').isArray({ min: 1 }).withMessage('Array of students is required'),
     validate
   ],
@@ -321,29 +363,73 @@ router.post(
       for (const item of students) {
         const { full_name, official_enrollment_no, registration_no, class_roll_no, email } = item;
 
-        if (!full_name || !official_enrollment_no || !class_roll_no) {
+        if (!full_name || !official_enrollment_no) {
           results.errors.push({
             enrollment_no: official_enrollment_no || 'UNKNOWN',
-            reason: 'Missing full_name, official_enrollment_no, or class_roll_no'
+            reason: 'Missing full_name or official_enrollment_no'
           });
           continue;
         }
 
-        try {
-          // Check roll conflict
-          const rollCheck = await query(
-            `SELECT id FROM enrollments 
-             WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ? AND class_roll_no = ?`,
-            [department_id, year, semester, ayId, class_roll_no]
+        const cleanEnroll = official_enrollment_no.trim();
+
+        // 1. Check unique enrollment number across the institution
+        const enrollConflict = await query(
+          `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)
+           UNION
+           SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)`,
+          [cleanEnroll, cleanEnroll]
+        );
+        if (enrollConflict.length > 0) {
+          results.errors.push({
+            enrollment_no: cleanEnroll,
+            reason: `Official Enrollment Number "${cleanEnroll}" already exists in the institution.`
+          });
+          continue;
+        }
+
+        // 2. Check unique email if provided
+        if (email && email.trim()) {
+          const cleanEmail = email.trim();
+          const emailConflict = await query(
+            `SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(?) OR LOWER(TRIM(username)) = LOWER(?)`,
+            [cleanEmail, cleanEmail]
           );
-          if (rollCheck.length > 0) {
+          if (emailConflict.length > 0) {
             results.errors.push({
-              enrollment_no: official_enrollment_no,
-              reason: `Roll number ${class_roll_no} already exists in this cohort`
+              enrollment_no: cleanEnroll,
+              reason: `Email "${cleanEmail}" is already registered.`
             });
             continue;
           }
+        }
 
+        // 3. Resolve class_roll_no: auto-assign sequential if omitted
+        let finalRoll = class_roll_no ? Number(class_roll_no) : null;
+        if (!finalRoll || isNaN(finalRoll) || finalRoll <= 0) {
+          const maxRollRow = await query(
+            `SELECT COALESCE(MAX(class_roll_no), 0) + 1 AS next_roll
+             FROM enrollments
+             WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ?`,
+            [department_id, year, semester, ayId]
+          );
+          finalRoll = maxRollRow[0]?.next_roll || 1;
+        } else {
+          const rollCheck = await query(
+            `SELECT id FROM enrollments 
+             WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ? AND class_roll_no = ?`,
+            [department_id, year, semester, ayId, finalRoll]
+          );
+          if (rollCheck.length > 0) {
+            results.errors.push({
+              enrollment_no: cleanEnroll,
+              reason: `Roll number ${finalRoll} already exists in this cohort`
+            });
+            continue;
+          }
+        }
+
+        try {
           const tempPassword = crypto.randomBytes(4).toString('hex').toUpperCase();
           const tempPasswordHash = await bcrypt.hash(tempPassword, 12);
 
@@ -351,7 +437,7 @@ router.post(
             const [uRes] = await conn.execute(
               `INSERT INTO users (username, email, temp_password_hash, must_change_password, status) 
                VALUES (?, ?, ?, TRUE, 'PROVISIONED')`,
-              [official_enrollment_no, email || null, tempPasswordHash]
+              [cleanEnroll, email?.trim() || null, tempPasswordHash]
             );
             const userId = uRes.insertId;
 
@@ -360,14 +446,14 @@ router.post(
             const [sRes] = await conn.execute(
               `INSERT INTO students (user_id, official_enrollment_no, registration_no, class_roll_no, full_name, entry_mode) 
                VALUES (?, ?, ?, ?, ?, 'teacher_provisioned')`,
-              [userId, official_enrollment_no, (registration_no || '').trim() || null, class_roll_no, full_name]
+              [userId, cleanEnroll, (registration_no || '').trim() || null, finalRoll, full_name]
             );
             const studentId = sRes.insertId;
 
             await conn.execute(
               `INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status) 
                VALUES (?, ?, ?, ?, ?, ?, 'ENROLLED')`,
-              [studentId, department_id, year, semester, ayId, class_roll_no]
+              [studentId, department_id, year, semester, ayId, finalRoll]
             );
 
             // Create Time-Aware Department Enrollment (redesign.md Section 16)
@@ -375,17 +461,17 @@ router.post(
               await conn.execute(
                 `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
                  VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
-                [studentId, department_id, ayId, year, semester, class_roll_no]
+                [studentId, department_id, ayId, year, semester, finalRoll]
               );
             } catch (_) {}
 
             return {
               student_id: studentId,
               full_name,
-              official_enrollment_no,
-              enrollment_no: official_enrollment_no,
+              official_enrollment_no: cleanEnroll,
+              enrollment_no: cleanEnroll,
               registration_no: (registration_no || '').trim() || null,
-              class_roll_no,
+              class_roll_no: finalRoll,
               temporary_password: tempPassword,
               status: 'PROVISIONED'
             };
@@ -394,7 +480,7 @@ router.post(
           results.provisioned.push(studentRecord);
         } catch (subErr) {
           results.errors.push({
-            enrollment_no: official_enrollment_no,
+            enrollment_no: cleanEnroll,
             reason: subErr.code === 'ER_DUP_ENTRY' ? 'Enrollment number already exists' : subErr.message
           });
         }
@@ -513,29 +599,27 @@ router.get('/registrations/count', auth, requireRole('TEACHER'), requireDepartme
 /**
  * Adjudicate Pending Student Registration (Approve / Reject)
  * POST /api/v1/students/registrations/:id/adjudicate
+ * POST /api/v1/students/registrations/:id/approve
+ * POST /api/v1/students/:id/approve
  */
 router.post(
-  '/registrations/:id/adjudicate',
+  ['/registrations/:id/adjudicate', '/registrations/:id/approve', '/:id/approve'],
   auth,
   requireRole('TEACHER'),
   requireDepartmentFaculty(),
   [
-    body('action').isIn(['APPROVE', 'REJECT']).withMessage("Action must be 'APPROVE' or 'REJECT'"),
-    body('class_roll_no').optional().isInt({ min: 1 }).withMessage('Valid class roll number required for approval'),
+    body('action').optional().isIn(['APPROVE', 'REJECT']).withMessage("Action must be 'APPROVE' or 'REJECT'"),
+    body('official_enrollment_no').optional().isString().trim(),
+    body('enrollment_no').optional().isString().trim(),
+    body('class_roll_no').optional(),
     validate
   ],
   async (req, res) => {
     const studentId = req.params.id;
-    const { action, class_roll_no, rejection_reason } = req.body;
+    const action = req.body.action || (req.path.includes('reject') ? 'REJECT' : 'APPROVE');
+    const { class_roll_no, enrollment_no, official_enrollment_no, rejection_reason } = req.body;
 
     try {
-      if (action === 'APPROVE' && !class_roll_no) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'VALIDATION_ERROR', message: 'Class roll number is required to approve student enrollment' }
-        });
-      }
-
       // Department scope authorization: verify student belongs to teacher's department
       if (!req.user.roles.includes('SYSTEM_ADMIN')) {
         const studentEnrollment = await query(
@@ -560,39 +644,72 @@ router.post(
         }
       }
 
+      let resolvedEnrollNo = null;
+      let finalRollNo = null;
+      let studentName = null;
+
       await withTransaction(async (conn) => {
-        const [students] = await conn.execute(`SELECT user_id FROM students WHERE id = ?`, [studentId]);
+        const [students] = await conn.execute(
+          `SELECT s.user_id, s.official_enrollment_no, s.full_name,
+                  e.department_id, e.academic_year_id, e.year, e.semester, e.class_roll_no
+           FROM students s
+           JOIN enrollments e ON s.id = e.student_id
+           WHERE s.id = ? LIMIT 1`,
+          [studentId]
+        );
         if (students.length === 0) {
           throw { status: 404, code: 'NOT_FOUND', message: 'Student not found' };
         }
-        const userId = students[0].user_id;
+        const student = students[0];
+        const userId = student.user_id;
+        studentName = student.full_name;
 
         if (action === 'APPROVE') {
-          await conn.execute(`UPDATE users SET status = 'ACTIVE' WHERE id = ?`, [userId]);
+          // 1. Resolve official enrollment number: from payload or existing profile
+          resolvedEnrollNo = (official_enrollment_no || enrollment_no || student.official_enrollment_no || '').trim();
+          if (!resolvedEnrollNo) {
+            throw { status: 400, code: 'VALIDATION_ERROR', message: 'Official Enrollment Number is required to approve student enrollment' };
+          }
+
+          // Check if enrollment number is already assigned to another student
+          const [conflict] = await conn.execute(
+            `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
+            [resolvedEnrollNo, studentId]
+          );
+          if (conflict && conflict.length > 0) {
+            throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${resolvedEnrollNo}" is already assigned to another student.` };
+          }
+
+          // 2. Resolve class roll number: use provided class_roll_no or auto-assign next sequential in cohort
+          finalRollNo = class_roll_no ? Number(class_roll_no) : null;
+          if (!finalRollNo || isNaN(finalRollNo) || finalRollNo <= 0) {
+            const [maxRollRow] = await conn.execute(
+              `SELECT COALESCE(MAX(class_roll_no), 0) + 1 AS next_roll
+               FROM enrollments
+               WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ?`,
+              [student.department_id, student.year, student.semester, student.academic_year_id]
+            );
+            finalRollNo = maxRollRow[0]?.next_roll || 1;
+          }
+
+          await conn.execute(`UPDATE users SET status = 'ACTIVE', username = ? WHERE id = ?`, [resolvedEnrollNo, userId]);
           await conn.execute(
             `UPDATE enrollments SET class_roll_no = ?, status = 'ENROLLED' WHERE student_id = ?`,
-            [class_roll_no, studentId]
+            [finalRollNo, studentId]
           );
           await conn.execute(
-            `UPDATE students SET class_roll_no = ? WHERE id = ?`,
-            [class_roll_no, studentId]
+            `UPDATE students SET official_enrollment_no = ?, class_roll_no = ? WHERE id = ?`,
+            [resolvedEnrollNo, finalRollNo, studentId]
           );
 
           // Create Time-Aware Department Enrollment (redesign.md Section 16)
-          const [enrRows] = await conn.execute(
-            `SELECT department_id, academic_year_id, year, semester FROM enrollments WHERE student_id = ? LIMIT 1`,
-            [studentId]
-          );
-          if (enrRows && enrRows.length > 0) {
-            const enr = enrRows[0];
-            try {
-              await conn.execute(
-                `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-                 VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
-                [studentId, enr.department_id, enr.academic_year_id, enr.year, enr.semester, class_roll_no]
-              );
-            } catch (_) {}
-          }
+          try {
+            await conn.execute(
+              `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
+               VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
+              [studentId, student.department_id, student.academic_year_id, student.year, student.semester, finalRollNo]
+            );
+          } catch (_) {}
         } else {
           await conn.execute(
             `UPDATE users SET status = 'REJECTED', rejection_reason = ? WHERE id = ?`,
@@ -609,7 +726,7 @@ router.post(
             actorRole: req.user.roles?.[0] || 'TEACHER',
             targetType: 'students',
             targetId: studentId,
-            details: { action, class_roll_no: class_roll_no || null, reason: rejection_reason || null },
+            details: { action, official_enrollment_no: resolvedEnrollNo, class_roll_no: finalRollNo, reason: rejection_reason || null },
             ipAddress: req.ip
           });
 
@@ -618,7 +735,7 @@ router.post(
             type: notificationService.NOTIFICATION_TYPES.STUDENT_APPROVAL,
             title: isApprove ? 'Enrollment Approved' : 'Enrollment Application Update',
             message: isApprove
-              ? `Your student registration has been approved. Assigned Roll Number: ${class_roll_no}.`
+              ? `Your student registration has been approved. Enrollment Number: ${resolvedEnrollNo} (Class Roll: ${finalRollNo}).`
               : `Your registration request was not approved: ${rejection_reason || 'Criteria not met'}.`,
             linkUrl: isApprove ? '/student/attendance.html' : null
           });
@@ -627,7 +744,16 @@ router.post(
 
       res.status(200).json({
         success: true,
-        message: `Registration ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully.`
+        message: `Registration ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully.`,
+        data: action === 'APPROVE' ? {
+          student_id: Number(studentId),
+          name: studentName,
+          official_enrollment_no: resolvedEnrollNo,
+          enrollment_no: resolvedEnrollNo,
+          class_roll_no: finalRollNo,
+          roll_no: String(finalRollNo),
+          status: 'ACTIVE'
+        } : null
       });
     } catch (err) {
       const status = err.status || 500;

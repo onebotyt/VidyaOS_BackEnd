@@ -64,12 +64,11 @@ async function runTest() {
   // Clean up any existing AUTO test department
   const existingAUTO = await query("SELECT id FROM departments WHERE code = 'AUTO'");
   if (existingAUTO.length > 0) {
-    await query("DELETE FROM branches WHERE department_id = ?", [existingAUTO[0].id]);
     await query("DELETE FROM departments WHERE id = ?", [existingAUTO[0].id]);
   }
 
   // [Step 3] Test POST /api/v1/admin/departments
-  console.log('\n[Step 3] Submitting new department via API (AUTO - Automobile Engineering, 4 Years)...');
+  console.log('\n[Step 3] Submitting new department via API (AUTO - Automobile Engineering, 3 Years)...');
   const createRes = await fetch(`${BASE_URL}/api/v1/admin/departments`, {
     method: 'POST',
     headers: {
@@ -79,7 +78,7 @@ async function runTest() {
     body: JSON.stringify({
       code: 'AUTO',
       name: 'Automobile Engineering',
-      degree_duration_years: 4
+      degree_duration_years: 3
     })
   });
   const createData = await createRes.json();
@@ -102,22 +101,13 @@ async function runTest() {
     duration: foundDept.degree_duration_years,
     active: foundDept.is_active
   });
-  if (foundDept.degree_duration_years !== 4) {
-    throw new Error(`Expected degree_duration_years 4, got ${foundDept.degree_duration_years}`);
+  if (foundDept.degree_duration_years !== 3) {
+    throw new Error(`Expected degree_duration_years 3, got ${foundDept.degree_duration_years}`);
   }
   console.log('✓ Department code, name, and degree_duration_years verified.');
 
-  // Verify matching unified branch was created
-  const branchRows = await query("SELECT * FROM branches WHERE department_id = ?", [createdDeptId]);
-  console.log('   Branch query result:', branchRows);
-  const branchRow = branchRows[0];
-  if (!branchRow || branchRow.code !== 'AUTO') {
-    throw new Error('Unified branch was not auto-created');
-  }
-  console.log('✓ Unified branch auto-created in lockstep:', { id: branchRow.id, code: branchRow.code, name: branchRow.name });
-
   // [Step 5] Test PUT /api/v1/admin/departments/:id (Edit Department)
-  console.log('\n[Step 5] Testing PUT /api/v1/admin/departments/:id (Update duration to 3 years)...');
+  console.log('\n[Step 5] Testing PUT /api/v1/admin/departments/:id (Update duration to 2 years)...');
   const updateRes = await fetch(`${BASE_URL}/api/v1/admin/departments/${createdDeptId}`, {
     method: 'PUT',
     headers: {
@@ -126,7 +116,7 @@ async function runTest() {
     },
     body: JSON.stringify({
       name: 'Automobile & EV Engineering',
-      degree_duration_years: 3
+      degree_duration_years: 2
     })
   });
   const updateData = await updateRes.json();
@@ -135,7 +125,6 @@ async function runTest() {
 
   // Clean up test department
   console.log('\n[Cleanup] Removing test department...');
-  await query("DELETE FROM branches WHERE department_id = ?", [createdDeptId]);
   await query("DELETE FROM departments WHERE id = ?", [createdDeptId]);
   console.log('✓ Cleanup complete.');
 

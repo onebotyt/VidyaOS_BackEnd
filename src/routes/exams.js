@@ -6,22 +6,15 @@
 
 const express = require('express');
 const router = express.Router();
-const { body, validationResult } = require('express-validator');
+const { body } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
+const validate = require('../middleware/validate');
 const { query, withTransaction } = require('../config/db');
 const auditService = require('../services/auditService');
 const notificationService = require('../services/notificationService');
 
 router.use(auth);
-
-function validate(req, res, next) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: errors.array()[0].msg } });
-  }
-  next();
-}
 
 /**
  * Teacher: create a test/exam for one of their classes.

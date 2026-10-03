@@ -350,6 +350,47 @@ class AuthService {
   }
 
   // ─────────────────────────────────────────────────────────
+  // GET CURRENT USER PROFILE (Auto-sync session)
+  // ─────────────────────────────────────────────────────────
+  async getMe(userId) {
+    const users = await query(
+      `SELECT u.id, u.username, u.email, u.phone, u.status 
+       FROM users u WHERE u.id = ?`,
+      [userId]
+    );
+    if (!users || users.length === 0) {
+      throw { status: 404, code: 'NOT_FOUND', message: 'User not found' };
+    }
+    const user = users[0];
+    const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
+    const userRoles = roles.map(r => r.role);
+    user.roles = userRoles;
+    const payload = await buildUserPayload(user);
+    const googleLinked = !!(await query(`SELECT google_sub FROM users WHERE id = ? AND google_sub IS NOT NULL`, [user.id]))[0];
+
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      phone: user.phone || null,
+      full_name: payload.full_name,
+      roles: userRoles,
+      department_id: payload.teacher?.department_id ?? null,
+      department_name: payload.teacher?.department_name ?? null,
+      is_hod: payload.is_hod || false,
+      hod_department_id: payload.hod_department_id || null,
+      hod_department_name: payload.hod_department_name || null,
+      is_class_teacher: payload.is_class_teacher || false,
+      has_assigned_subjects: payload.has_assigned_subjects || false,
+      is_common_faculty_manager: payload.is_common_faculty_manager || false,
+      teacher: payload.teacher || null,
+      student: payload.student || null,
+      google_linked: googleLinked,
+      status: user.status
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────
   // STUDENT LOGIN (Strictly Gmail or Phone Number)
   // ─────────────────────────────────────────────────────────
   async studentLogin(credential, password, clientInfo = {}) {

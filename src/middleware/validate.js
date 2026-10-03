@@ -16,7 +16,7 @@ function validate(req, res, next) {
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Invalid request payload parameters',
+        message: errors.array()[0]?.msg || 'Invalid request payload parameters',
         details: formattedDetails
       }
     });

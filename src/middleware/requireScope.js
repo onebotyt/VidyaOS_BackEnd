@@ -137,7 +137,7 @@ function requireClassTeacher() {
  */
 function requireTeachingGroupOwner(paramName = 'id') {
   return async (req, res, next) => {
-    if (req.user.roles.includes('SYSTEM_ADMIN')) {
+    if (req.user.roles.includes('SYSTEM_ADMIN') || req.user.is_hod || req.user.roles.includes('HOD')) {
       return next();
     }
 

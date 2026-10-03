@@ -21,10 +21,8 @@ function getSqliteDb() {
   if (!sqliteDb) {
     const { DatabaseSync } = require('node:sqlite');
     const dbFilePath = process.env.SQLITE_FILE
-      ? (path.isAbsolute(process.env.SQLITE_FILE) ? process.env.SQLITE_FILE : path.resolve(process.cwd(), process.env.SQLITE_FILE))
-      : (fs.existsSync(path.resolve(__dirname, '../../college_attendance.sqlite'))
-          ? path.resolve(__dirname, '../../college_attendance.sqlite')
-          : path.resolve(__dirname, '../college_attendance.sqlite'));
+      ? (path.isAbsolute(process.env.SQLITE_FILE) ? process.env.SQLITE_FILE : path.resolve(__dirname, '../../', process.env.SQLITE_FILE))
+      : path.resolve(__dirname, '../../college_attendance.sqlite');
 
     const dbDir = path.dirname(dbFilePath);
     if (!fs.existsSync(dbDir)) {
@@ -33,6 +31,11 @@ function getSqliteDb() {
 
     sqliteDb = new DatabaseSync(dbFilePath);
     sqliteDb.exec('PRAGMA foreign_keys = ON;');
+    sqliteDb.exec('PRAGMA journal_mode = WAL;');
+    sqliteDb.exec('PRAGMA synchronous = NORMAL;');
+    sqliteDb.exec('PRAGMA cache_size = -64000;');
+    sqliteDb.exec('PRAGMA temp_store = MEMORY;');
+    sqliteDb.exec('PRAGMA busy_timeout = 5000;');
 
     // Register MySQL-compatible SQL functions in SQLite
     sqliteDb.function('NOW', () => new Date().toISOString().replace('T', ' ').slice(0, 19));
@@ -271,7 +274,58 @@ function getSqliteDb() {
         CREATE INDEX IF NOT EXISTS idx_frr_status ON faculty_registration_requests(status);
         CREATE INDEX IF NOT EXISTS idx_frr_dept_status ON faculty_registration_requests(department_id, status);
         CREATE INDEX IF NOT EXISTS idx_frr_approval_type ON faculty_registration_requests(approval_type, status);
+
+        -- Teaching Groups Core Tables
+        CREATE TABLE IF NOT EXISTS teaching_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          subject_name TEXT NOT NULL,
+          component TEXT NOT NULL DEFAULT 'THEORY',
+          teacher_id INTEGER NOT NULL REFERENCES teachers(id),
+          academic_year_id INTEGER NOT NULL REFERENCES academic_years(id),
+          semester INTEGER NOT NULL,
+          invite_code TEXT UNIQUE,
+          status TEXT NOT NULL DEFAULT 'ACTIVE',
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          archived_at DATETIME
+        );
+
+        CREATE TABLE IF NOT EXISTS teaching_group_members (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id INTEGER NOT NULL REFERENCES teaching_groups(id) ON DELETE CASCADE,
+          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+          joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          status TEXT NOT NULL DEFAULT 'ENROLLED',
+          UNIQUE(group_id, student_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS classroom_posts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_id INTEGER NOT NULL REFERENCES teaching_groups(id) ON DELETE CASCADE,
+          author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          content TEXT NOT NULL,
+          attachment_path TEXT,
+          attachment_name TEXT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS classroom_post_comments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          post_id INTEGER NOT NULL REFERENCES classroom_posts(id) ON DELETE CASCADE,
+          author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          content TEXT NOT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tg_teacher_status ON teaching_groups(teacher_id, status);
+        CREATE INDEX IF NOT EXISTS idx_tg_invite_code ON teaching_groups(invite_code);
+        CREATE INDEX IF NOT EXISTS idx_tgm_group_student ON teaching_group_members(group_id, student_id);
+        CREATE INDEX IF NOT EXISTS idx_cp_group_created ON classroom_posts(group_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_cpc_post ON classroom_post_comments(post_id);
       `);
+
+      try { sqliteDb.exec('ALTER TABLE attendance_registers ADD COLUMN group_id INTEGER REFERENCES teaching_groups(id) ON DELETE CASCADE;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE assessments ADD COLUMN group_id INTEGER REFERENCES teaching_groups(id) ON DELETE CASCADE;'); } catch (_) {}
 
       // Ensure Admin account has admin@gmail.com and admin username alias
       try {

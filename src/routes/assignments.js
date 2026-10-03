@@ -8,9 +8,10 @@
 const express = require('express');
 const router = express.Router();
 const path = require('path');
-const { body, validationResult } = require('express-validator');
+const { body } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
+const validate = require('../middleware/validate');
 const { query } = require('../config/db');
 const { makeUploader } = require('../middleware/upload');
 const auditService = require('../services/auditService');
@@ -20,14 +21,6 @@ const uploadAttachment = makeUploader('assignments');
 const uploadSubmission = makeUploader('submissions');
 
 router.use(auth);
-
-function validate(req, res, next) {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: errors.array()[0].msg } });
-  }
-  next();
-}
 
 /**
  * Teacher: create an assignment for one of their classes.

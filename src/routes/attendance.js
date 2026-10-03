@@ -25,8 +25,8 @@ router.post(
     body('subject_id').optional().isInt(),
     body('department_id').optional().isInt(),
     body('branch_id').optional(),
-    body('year').optional().isInt({ min: 1, max: 4 }),
-    body('semester').optional().isInt({ min: 1, max: 8 }),
+    body('year').optional().isInt({ min: 1, max: 3 }),
+    body('semester').optional().isInt({ min: 1, max: 6 }),
     validate
   ],
   async (req, res) => {
@@ -397,6 +397,37 @@ router.post(
     }
   }
 );
+
+/**
+ * Get Register Attendance Summary Statistics
+ * GET /api/v1/attendance/registers/:id/summary
+ */
+router.get('/registers/:id/summary', auth, async (req, res) => {
+  try {
+    const regId = Number(req.params.id);
+    const rows = await query(
+      `SELECT COUNT(DISTINCT s.id) as total_sessions,
+              COUNT(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) as total_present,
+              COUNT(ra.id) as total_records
+       FROM attendance_sessions s
+       LEFT JOIN register_attendance ra ON ra.session_id = s.id
+       WHERE s.register_id = ? AND s.state != 'DRAFT'`,
+      [regId]
+    );
+    const r = rows[0] || {};
+    const avgPct = r.total_records > 0 ? (r.total_present * 100.0 / r.total_records) : null;
+    res.json({
+      success: true,
+      data: {
+        register_id: regId,
+        total_sessions: r.total_sessions || 0,
+        avg_attendance_pct: avgPct !== null ? Number(avgPct.toFixed(1)) : null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
 
 /**
  * Get ESP32 scans strictly for a specific date for a register's cohort

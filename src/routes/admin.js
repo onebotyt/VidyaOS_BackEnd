@@ -84,7 +84,7 @@ router.get('/departments', async (req, res) => {
 router.post('/departments', [
   body('name').trim().notEmpty().withMessage('Department name required'),
   body('code').trim().notEmpty().withMessage('Department code required'),
-  body('degree_duration_years').optional().isInt({ min: 1, max: 6 }),
+  body('degree_duration_years').optional().isInt({ min: 1, max: 3 }),
   validate
 ], async (req, res) => {
   try {
@@ -110,7 +110,7 @@ router.put('/departments/:id', [
   body('name').optional().trim().notEmpty(),
   body('code').optional().trim().notEmpty(),
   body('is_active').optional().isBoolean(),
-  body('degree_duration_years').optional().isInt({ min: 1, max: 6 }),
+  body('degree_duration_years').optional().isInt({ min: 1, max: 3 }),
   validate
 ], async (req, res) => {
   const { name, code, is_active, degree_duration_years } = req.body;
@@ -925,8 +925,8 @@ router.post('/devices', [
   body('name').trim().notEmpty().withMessage('Device name required'),
   body('department_id').isInt(),
   body('branch_id').optional(),
-  body('year').isInt({ min: 1, max: 4 }),
-  body('semester').isInt({ min: 1, max: 8 }),
+  body('year').isInt({ min: 1, max: 3 }),
+  body('semester').isInt({ min: 1, max: 6 }),
   validate
 ], async (req, res) => {
   const { device_uid, name, department_id, year, semester, academic_year_id } = req.body;
@@ -2015,6 +2015,50 @@ router.post('/registration-gates/toggle', [
 // ─────────────────────────────────────────────────────────
 
 const whatsappBotService = require('../services/whatsappBotService');
+
+/**
+ * GET /api/v1/admin/whatsapp/mandatory-toggle
+ * Get the current WhatsApp OTP mandatory setting
+ */
+router.get('/whatsapp/mandatory-toggle', async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_otp_mandatory' LIMIT 1`
+    );
+    // Default is TRUE (mandatory) unless explicitly set to 'false'
+    const mandatory = !rows || rows.length === 0 || rows[0].setting_value !== 'false';
+    res.json({ success: true, data: { whatsapp_otp_mandatory: mandatory } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/v1/admin/whatsapp/mandatory-toggle
+ * Enable or disable WhatsApp OTP mandatory requirement for registration
+ */
+router.post('/whatsapp/mandatory-toggle', [
+  body('mandatory').isBoolean().withMessage('mandatory (boolean) is required'),
+  validate
+], async (req, res) => {
+  const { mandatory } = req.body;
+  try {
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+       VALUES ('whatsapp_otp_mandatory', ?, 'Whether WhatsApp OTP is mandatory for registration', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+      [mandatory ? 'true' : 'false', req.user?.id || 1]
+    );
+    const action = mandatory ? 'ENABLED' : 'DISABLED';
+    res.json({
+      success: true,
+      message: `WhatsApp OTP verification ${action} for all registration forms.`,
+      data: { whatsapp_otp_mandatory: mandatory }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
 
 /**
  * GET /api/v1/admin/whatsapp/status

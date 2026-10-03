@@ -132,6 +132,10 @@ async function run() {
   let studentId2 = null;
   
   if (regCohort) {
+    // Ensure OTP is mandatory for this test step
+    const { query: dbQuery } = require('../src/config/db');
+    await dbQuery(`INSERT INTO system_settings (setting_key, setting_value, updated_at) VALUES ('whatsapp_otp_mandatory', 'true', CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value = 'true'`);
+
     const regBody = {
       full_name: `Test Student ${ts}`,
       official_enrollment_no: `TST${ts}`,
@@ -189,15 +193,18 @@ async function run() {
   ok('Count is a number', typeof countRes.body?.data?.count === 'number', JSON.stringify(countRes.body));
   console.log(`    Badge count: ${countRes.body?.data?.count}`);
 
-  // ── 8. Approve the student ───────────────────────────────
-  console.log(`\n${YELLOW}► Step 8: Teacher approves the registration${RESET}`);
+  // ── 8. Approve the student using Official Enrollment Number ──
+  console.log(`\n${YELLOW}► Step 8: Teacher approves registration by Official Enrollment Number${RESET}`);
   if (newStudentId) {
     const approveRes = await request('POST', `/students/registrations/${newStudentId}/adjudicate`, {
       action: 'APPROVE',
-      class_roll_no: 99
+      official_enrollment_no: `TST${ts}`
+      // class_roll_no omitted: system must auto-assign next sequential roll number
     }, teacherToken);
     ok('Approval returns 200', approveRes.status === 200, JSON.stringify(approveRes.body?.error));
     ok('Approval success flag', approveRes.body?.success === true, JSON.stringify(approveRes.body));
+    ok('Official enrollment number returned in approval response', approveRes.body?.data?.official_enrollment_no === `TST${ts}`, JSON.stringify(approveRes.body?.data));
+    ok('Class roll number is auto-assigned when omitted', typeof approveRes.body?.data?.class_roll_no === 'number' && approveRes.body?.data?.class_roll_no > 0, JSON.stringify(approveRes.body?.data));
 
     // ── 8b. Approved student can now log in ────────────────
     console.log(`\n${YELLOW}► Step 8b: Approved student login${RESET}`);

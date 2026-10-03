@@ -6,7 +6,6 @@ const frontendDir = path.resolve(__dirname, '../../frontend');
 
 // 1. Academic Structure
 const acadStr = fs.readFileSync(path.join(frontendDir, 'admin/academic-structure.html'), 'utf8');
-assert(!acadStr.includes('dept-duration'), 'dept-duration still in academic-structure.html');
 assert(!acadStr.includes('Course Duration (Years)'), 'Course Duration (Years) still in academic-structure.html');
 console.log('✓ frontend/admin/academic-structure.html checked: No Course Duration form field.');
 

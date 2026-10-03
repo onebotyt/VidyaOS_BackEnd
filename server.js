@@ -4,6 +4,7 @@
  */
 
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
@@ -45,22 +46,37 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet({
   contentSecurityPolicy: false // Allows local dashboard scripts and styles
 }));
+app.use(compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use(cors({
   origin: true,
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(generalLimiter);
 
-// Anti-Cache Header Middleware (Ensures browser always gets latest JS, CSS & HTML)
+// Cache-Control Header Middleware:
+// - Dynamic API routes and HTML pages: no-cache to guarantee fresh institutional state
+// - Static assets (CSS, JS, fonts, images): cacheable with ETag validation & 1-day TTL
 app.use((req, res, next) => {
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+  const isApi = req.originalUrl.startsWith('/api/');
+  const isHtml = req.path.endsWith('.html') || req.path === '/' || (req.headers.accept && req.headers.accept.includes('text/html'));
+  if (isApi || isHtml || process.env.NODE_ENV !== 'production') {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else {
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  }
   const start = Date.now();
   res.on('finish', () => {
-    if (req.originalUrl.startsWith('/api/')) {
+    if (isApi) {
       console.log(`[API ${req.method}] ${req.originalUrl} -> ${res.statusCode} (${Date.now() - start}ms) [Auth: ${req.headers.authorization ? 'YES' : 'NO'}]`);
     }
   });
@@ -140,18 +156,25 @@ app.get(['/faculty/settings.html', '/faculty/settings', '/faculty/hod_settings.h
 // Admin Audit Logs Redirects
 app.get(['/admin/audit-logs', '/admin/audit', '/admin/audit.html'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
 
+// Static file serving options with production caching
+const staticOptions = {
+  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+  etag: true,
+  lastModified: true
+};
+
 // Serve Shared Assets (Single Source of Truth with backward compatibility)
 const sharedDir = path.join(__dirname, '../frontend/shared');
 if (fs.existsSync(sharedDir)) {
-  app.use('/shared', express.static(sharedDir));
-  app.use('/js', express.static(path.join(sharedDir, 'js')));
-  app.use('/css', express.static(path.join(sharedDir, 'css')));
+  app.use('/shared', express.static(sharedDir, staticOptions));
+  app.use('/js', express.static(path.join(sharedDir, 'js'), staticOptions));
+  app.use('/css', express.static(path.join(sharedDir, 'css'), staticOptions));
 }
 
 // Serve Frontend Static Web Client (when co-located or in Docker)
 const frontendDir = path.join(__dirname, '../frontend');
 if (fs.existsSync(frontendDir)) {
-  app.use(express.static(frontendDir));
+  app.use(express.static(frontendDir, staticOptions));
 }
 
 // Serve Uploaded Files (assignment attachments & student submissions)
@@ -161,7 +184,7 @@ const uploadsDir = process.env.UPLOADS_DIR
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(uploadsDir, staticOptions));
 
 // Health Check
 app.get('/api/v1/health', (req, res) => {
@@ -302,7 +325,7 @@ async function startServer() {
     sessionService.syncAcademicSession().catch(() => {});
   }, 3600 * 1000);
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const serverInstance = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`College Attendance System Backend running:`);
     logger.info(`  ➜ Local:   http://localhost:${PORT}`);
     const ifaces = os.networkInterfaces();
@@ -315,6 +338,22 @@ async function startServer() {
     }
     logger.info(`REST API Base URL: http://localhost:${PORT}/api/v1`);
   });
+
+  // Graceful shutdown handling for Docker / Kubernetes / systemd / PM2
+  const gracefulShutdown = (signal) => {
+    logger.info(`Received ${signal}. Shutting down gracefully...`);
+    serverInstance.close(() => {
+      logger.info('HTTP server closed. Exiting process.');
+      process.exit(0);
+    });
+    setTimeout(() => {
+      logger.error('Forcefully terminating server after timeout.');
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 // Handle Uncaught Exceptions & Rejections gracefully
