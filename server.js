@@ -21,6 +21,7 @@ const curriculumService = require('./src/services/curriculumService');
 const studentMigrationService = require('./src/services/studentMigrationService');
 const iotMigrationService = require('./src/services/iotMigrationService');
 const dbSyncService = require('./src/services/dbSyncService');
+const promotionEngineService = require('./src/services/promotionEngineService');
 const { generalLimiter } = require('./src/middleware/rateLimiter');
 
 // Import Route Handlers
@@ -87,7 +88,7 @@ app.use((req, res, next) => {
 // Admin URL Aliases / Normalization — Consolidated Academic Structure
 app.get('/admin/departments.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
 app.get('/admin/branches.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
-app.get(['/admin/subjects.html', '/admin/subjects'], (req, res) => res.redirect(301, '/faculty/hod-subjects.html'));
+app.get(['/admin/subjects.html', '/admin/subjects', '/faculty/hod-subjects.html', '/faculty/hod-subjects'], (req, res) => res.redirect(301, '/faculty/groups.html'));
 app.get(['/admin/academic-years.html', '/admin/academic_years.html', '/admin/academic_year.html', '/admin/academic-year.html'], (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=academic-years'));
 app.get(['/admin/academic_structure.html', '/admin/academic_structure', '/admin/academic-structure'], (req, res) => res.redirect(301, '/admin/academic-structure.html'));
 app.get(['/admin/audit.html', '/admin/audit'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
@@ -173,6 +174,9 @@ app.get(['/faculty/settings.html', '/faculty/settings', '/faculty/hod_settings.h
 
 // Admin Audit Logs Redirects
 app.get(['/admin/audit-logs', '/admin/audit', '/admin/audit.html'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
+
+// Deprecated WhatsApp Gateway Redirect
+app.get(['/admin/whatsapp-gateway', '/admin/whatsapp-gateway.html', '/admin/whatsapp'], (req, res) => res.redirect(301, '/admin/dashboard.html'));
 
 // Static file serving options with production caching
 const staticOptions = {
@@ -302,13 +306,27 @@ async function startServer() {
   dbSyncService.initDatabasePersistence();
   await testConnection();
 
-  // Automatically synchronize active academic session (e.g. "2026 Session") on startup
+  // Automatically synchronize active academic session & run semester promotion on startup
   try {
     const syncRes = await sessionService.syncAcademicSession();
     logger.info(`Academic Session automated & active: [${syncRes.active_session}]`);
+    const promoRes = await promotionEngineService.checkAndRunAutomatedSemesterPromotion();
+    if (promoRes.executed) {
+      logger.info(`Autonomous Semester Promotion executed for ${promoRes.active_term}: ${promoRes.promoted_count} promoted, ${promoRes.graduated_count} graduated.`);
+    }
   } catch (err) {
-    logger.warn(`Failed to auto-sync academic session: ${err.message}`);
+    logger.warn(`Failed to auto-sync academic session or run promotion: ${err.message}`);
   }
+
+  // Periodic hourly check to auto-roll semester at midnight on boundary dates (July 1 & Jan 1)
+  setInterval(async () => {
+    try {
+      await sessionService.syncAcademicSession();
+      await promotionEngineService.checkAndRunAutomatedSemesterPromotion();
+    } catch (e) {
+      // background silent catch
+    }
+  }, 3600000);
 
   // Automatically ensure standard institutional departments exist
   try {

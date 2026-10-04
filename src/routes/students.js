@@ -925,4 +925,266 @@ router.get('/:id/department-history', auth, async (req, res) => {
   }
 });
 
+/**
+ * Get Student Multi-Semester Academic Dossier (Data Sovereignty Vault)
+ * GET /api/v1/students/:id/academic-dossier
+ * Accessible by Teachers, HODs, Admins, and the Student themselves
+ */
+router.get('/:id/academic-dossier', auth, async (req, res) => {
+  try {
+    const studentId = Number(req.params.id);
+    if (isNaN(studentId)) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Invalid student ID' } });
+    }
+
+    // Role check: Students can only view their own dossier
+    if (req.user.roles.includes('STUDENT') && Number(req.user.student_id) !== studentId) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+    }
+
+    // 1. Fetch Student Master & Current Enrollment
+    const studentRows = await query(
+      `SELECT s.id, s.user_id, s.official_enrollment_no, s.registration_no, s.full_name,
+              s.entry_mode, s.admission_year, s.graduation_year, s.is_lateral_entry,
+              COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
+              s.phone, s.parent_phone, s.parent_name,
+              u.username, u.email, u.status as user_status,
+              d.id as department_id, d.name as department_name, d.code as department_code,
+              d.degree_duration_years as total_years,
+              e.year as current_year, e.semester as current_semester, e.status as enrollment_status,
+              ay.label as academic_year_label
+       FROM students s
+       JOIN users u ON s.user_id = u.id
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       LEFT JOIN departments d ON e.department_id = d.id
+       LEFT JOIN academic_years ay ON e.academic_year_id = ay.id
+       WHERE s.id = ?
+       LIMIT 1`,
+      [studentId]
+    );
+
+    if (!studentRows || studentRows.length === 0) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student record not found' } });
+    }
+
+    const student = studentRows[0];
+    const isGraduated = student.user_status === 'ALUMNI' || student.enrollment_status === 'COMPLETED' || !!student.graduation_year;
+    student.is_passout = isGraduated;
+    student.display_status = isGraduated ? 'PASSOUT' : 'ACTIVE';
+
+    // 2. Fetch Semester Enrollment History (student_department_enrollments)
+    const historyRows = await query(
+      `SELECT sde.id, sde.year, sde.semester, sde.class_roll_no, sde.start_date, sde.end_date, sde.status,
+              ay.label as academic_year_label
+       FROM student_department_enrollments sde
+       LEFT JOIN academic_years ay ON sde.academic_year_id = ay.id
+       WHERE sde.student_id = ?
+       ORDER BY sde.semester ASC, sde.id ASC`,
+      [studentId]
+    );
+
+    // 3. Fetch All Attendance Records — real table: register_attendance (joined via attendance_sessions)
+    const attendanceRows = await query(
+      `SELECT ra.id as record_id, ra.attendance_status, ra.teacher_notes as remarks, ra.marked_at as recorded_at,
+              s.id as session_id, s.session_date, s.session_type,
+              reg.id as register_id, reg.name as register_name, reg.semester, reg.year,
+              sub.id as subject_id, sub.code as subject_code, sub.name as subject_name,
+              t.full_name as teacher_name
+       FROM register_attendance ra
+       JOIN attendance_sessions s ON ra.session_id = s.id
+       JOIN attendance_registers reg ON s.register_id = reg.id
+       LEFT JOIN subjects sub ON reg.subject_id = sub.id
+       LEFT JOIN teachers t ON reg.teacher_id = t.id
+       WHERE ra.student_id = ?
+       ORDER BY reg.semester ASC, s.session_date ASC`,
+      [studentId]
+    );
+
+    // 4. Fetch All Assessments (ASSIGNMENT type) and Submissions
+    const assignmentRows = await query(
+      `SELECT sub.id as submission_id, sub.file_path, sub.original_filename, sub.submitted_at,
+              sub.status as submission_status, sub.marks_obtained, sub.feedback, sub.graded_at,
+              a.id as assignment_id, a.title as assignment_title, a.description, a.max_marks,
+              a.due_date, a.semester, a.year,
+              subj.id as subject_id, subj.code as subject_code, subj.name as subject_name,
+              t.full_name as teacher_name
+       FROM assessment_submissions sub
+       JOIN assessments a ON sub.assessment_id = a.id
+       LEFT JOIN subjects subj ON a.subject_id = subj.id
+       LEFT JOIN teachers t ON a.teacher_id = t.id
+       WHERE sub.student_id = ? AND a.type = 'ASSIGNMENT'
+       ORDER BY a.semester ASC, sub.submitted_at DESC`,
+      [studentId]
+    );
+
+    // 5. Fetch All Exam Assessments (EXAM type) and Submissions/Scores
+    const examRows = await query(
+      `SELECT sub.id as score_id, sub.marks_obtained, sub.feedback as remarks, sub.graded_at as created_at,
+              a.id as exam_id, a.title as exam_name, a.due_date as exam_date, a.max_marks,
+              a.semester, a.year,
+              subj.id as subject_id, subj.code as subject_code, subj.name as subject_name,
+              t.full_name as teacher_name
+       FROM assessment_submissions sub
+       JOIN assessments a ON sub.assessment_id = a.id
+       LEFT JOIN subjects subj ON a.subject_id = subj.id
+       LEFT JOIN teachers t ON a.teacher_id = t.id
+       WHERE sub.student_id = ? AND a.type = 'EXAM'
+       ORDER BY a.semester ASC, a.due_date DESC`,
+      [studentId]
+    );
+
+    // 6. Aggregate by Semesters
+    const semSet = new Set();
+    historyRows.forEach(h => semSet.add(h.semester));
+    attendanceRows.forEach(a => { if (a.semester) semSet.add(a.semester); });
+    assignmentRows.forEach(asgn => { if (asgn.semester) semSet.add(asgn.semester); });
+    examRows.forEach(ex => { if (ex.semester) semSet.add(ex.semester); });
+    if (student.current_semester) semSet.add(student.current_semester);
+    if (semSet.size === 0) semSet.add(1);
+
+    const sortedSemesters = Array.from(semSet).sort((a, b) => a - b);
+    const semesterDossiers = [];
+
+    let overallTotalHeld = 0;
+    let overallTotalPresent = 0;
+
+    for (const sem of sortedSemesters) {
+      const year = Math.ceil(sem / 2);
+      const enHistory = historyRows.find(h => h.semester === sem) || null;
+
+      // --- Attendance aggregation by subject ---
+      const semAtt = attendanceRows.filter(a => a.semester === sem);
+      const subjectMap = {};
+
+      semAtt.forEach(att => {
+        const subKey = att.subject_code || `SUB_${att.subject_id || 'UNKNOWN'}`;
+        if (!subjectMap[subKey]) {
+          subjectMap[subKey] = {
+            subject_id: att.subject_id,
+            subject_code: att.subject_code || 'N/A',
+            subject_name: att.subject_name || att.register_name || 'Class Subject',
+            teacher_name: att.teacher_name || 'Faculty',
+            total_sessions: 0,
+            present_count: 0,
+            late_count: 0,
+            absent_count: 0,
+            percentage: 0,
+            sessions: []
+          };
+        }
+        subjectMap[subKey].total_sessions++;
+        overallTotalHeld++;
+        if (att.attendance_status === 'PRESENT') {
+          subjectMap[subKey].present_count++;
+          overallTotalPresent++;
+        } else if (att.attendance_status === 'LATE') {
+          subjectMap[subKey].late_count++;
+          overallTotalPresent++; // Late counts as attended
+        } else {
+          subjectMap[subKey].absent_count++;
+        }
+
+        subjectMap[subKey].sessions.push({
+          session_id: att.session_id,
+          session_date: att.session_date,
+          session_type: att.session_type,
+          status: att.attendance_status,
+          remarks: att.remarks
+        });
+      });
+
+      const subjectsAttendance = Object.values(subjectMap).map(sub => {
+        sub.percentage = sub.total_sessions > 0
+          ? Math.round(((sub.present_count + sub.late_count) / sub.total_sessions) * 1000) / 10
+          : 0;
+        return sub;
+      });
+
+      const semHeld = subjectsAttendance.reduce((acc, s) => acc + s.total_sessions, 0);
+      const semPres = subjectsAttendance.reduce((acc, s) => acc + (s.present_count + s.late_count), 0);
+      const semPercentage = semHeld > 0 ? Math.round((semPres / semHeld) * 1000) / 10 : 0;
+
+      // --- Assignment submissions for this semester ---
+      const semAssignments = assignmentRows
+        .filter(asgn => asgn.semester === sem)
+        .map(asgn => ({
+          submission_id: asgn.submission_id,
+          assignment_id: asgn.assignment_id,
+          title: asgn.assignment_title,
+          description: asgn.description,
+          subject_code: asgn.subject_code || 'N/A',
+          subject_name: asgn.subject_name || 'Subject',
+          teacher_name: asgn.teacher_name,
+          max_marks: asgn.max_marks,
+          marks_obtained: asgn.marks_obtained,
+          percentage: asgn.marks_obtained !== null && asgn.max_marks > 0
+            ? Math.round((asgn.marks_obtained / asgn.max_marks) * 1000) / 10
+            : null,
+          feedback: asgn.feedback,
+          file_path: asgn.file_path,
+          original_filename: asgn.original_filename,
+          submitted_at: asgn.submitted_at,
+          graded_at: asgn.graded_at,
+          status: asgn.submission_status
+        }));
+
+      // --- Exam scores for this semester ---
+      const semExams = examRows
+        .filter(ex => ex.semester === sem)
+        .map(ex => ({
+          score_id: ex.score_id,
+          exam_id: ex.exam_id,
+          exam_name: ex.exam_name,
+          exam_date: ex.exam_date,
+          subject_code: ex.subject_code || 'N/A',
+          subject_name: ex.subject_name || 'Subject',
+          teacher_name: ex.teacher_name,
+          max_marks: ex.max_marks,
+          marks_obtained: ex.marks_obtained,
+          percentage: ex.marks_obtained !== null && ex.max_marks > 0
+            ? Math.round((ex.marks_obtained / ex.max_marks) * 1000) / 10
+            : null,
+          remarks: ex.remarks,
+          recorded_at: ex.created_at
+        }));
+
+      semesterDossiers.push({
+        semester: sem,
+        year,
+        enrollment_info: enHistory,
+        attendance: {
+          total_held: semHeld,
+          total_present: semPres,
+          percentage: semPercentage,
+          by_subject: subjectsAttendance
+        },
+        assignments: semAssignments,
+        exams: semExams
+      });
+    }
+
+    const overallPercentage = overallTotalHeld > 0
+      ? Math.round((overallTotalPresent / overallTotalHeld) * 1000) / 10
+      : 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        student,
+        summary: {
+          total_semesters_recorded: semesterDossiers.length,
+          overall_attendance_held: overallTotalHeld,
+          overall_attendance_present: overallTotalPresent,
+          overall_attendance_percentage: overallPercentage,
+          total_assignments_submitted: assignmentRows.length,
+          total_exams_recorded: examRows.length
+        },
+        semesters: semesterDossiers
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
 module.exports = router;

@@ -36,7 +36,26 @@ yarn-debug.log*
 .DS_Store
 Thumbs.db
 
-# Test screenshots
+# Test screenshots & captures
 *.png
 *.jpg
 test-*.js.snap
+scripts/*.png
+scripts/*.jpg
+
+# Test & verification scripts (local development only, NEVER push to GitHub)
+scripts/test-*
+scripts/test_*
+scripts/verify-*
+scripts/simulate-*
+scripts/check-*
+scripts/scan-*
+scripts/find-*
+scripts/take-*
+scripts/capture-*
+scripts/inspect-*
+*.test.js
+*.spec.js
+tests/
+test/
+

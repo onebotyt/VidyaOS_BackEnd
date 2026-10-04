@@ -11,7 +11,6 @@
 
 const bcrypt = require('bcrypt');
 const { query, withTransaction } = require('../config/db');
-const otpService = require('./otpService');
 const auditService = require('./auditService');
 const {
   generateAccessToken,
@@ -20,6 +19,19 @@ const {
   verifyRefreshToken,
   hashToken
 } = require('../utils/tokenHelper');
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function normalizePhone(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let cleaned = raw.trim().replace(/[^\d+]/g, '');
+  if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
+  else if (cleaned.startsWith('91') && cleaned.length === 12) cleaned = cleaned.slice(2);
+  else if (cleaned.startsWith('0') && cleaned.length === 11) cleaned = cleaned.slice(1);
+  return cleaned;
+}
 
 /**
  * Validates and normalizes login credentials.
@@ -32,14 +44,14 @@ function parseLoginCredential(raw, allowAdmin = false) {
   }
   const trimmed = raw.trim();
   if (trimmed.includes('@')) {
-    if (!otpService.isValidEmail(trimmed)) {
+    if (!isValidEmail(trimmed)) {
       throw { status: 400, code: 'VALIDATION_ERROR', message: 'Invalid Gmail address format.' };
     }
     return { type: 'EMAIL', value: trimmed.toLowerCase() };
   }
 
   // Check if phone number
-  const cleanPhone = otpService.normalizeIdentifier(trimmed);
+  const cleanPhone = normalizePhone(trimmed);
   if (/^[6-9]\d{9}$/.test(cleanPhone)) {
     return { type: 'PHONE', value: cleanPhone };
   }
@@ -678,153 +690,6 @@ class AuthService {
         student: payload2.student || null,
         teacher: payload2.teacher || null,
         google_linked: true
-      }
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // PASSWORDLESS LOGIN VIA OTP (Gmail or Mobile Number)
-  // ─────────────────────────────────────────────────────────
-  async loginWithOtp(credential, otpCode, clientInfo = {}) {
-    const cred = parseLoginCredential(credential, false);
-    let users = [];
-
-    if (cred.type === 'EMAIL') {
-      users = await query(
-        `SELECT u.id, u.username, u.email, u.phone, u.status 
-         FROM users u WHERE LOWER(u.email) = ?`,
-        [cred.value]
-      );
-    } else if (cred.type === 'PHONE') {
-      users = await query(
-        `SELECT u.id, u.username, u.email, u.phone, u.status 
-         FROM users u 
-         LEFT JOIN students s ON s.user_id = u.id
-         LEFT JOIN teachers t ON t.user_id = u.id
-         WHERE u.phone = ? OR s.phone = ? OR t.phone = ?`,
-        [cred.value, cred.value, cred.value]
-      );
-    }
-
-    if (!users || users.length === 0) {
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'No account found with this Gmail address or Mobile number.' };
-    }
-
-    const user = users[0];
-    if (user.status === 'PENDING') {
-      throw { status: 403, code: 'PENDING_APPROVAL', message: 'Your registration is pending approval.' };
-    }
-    if (user.status === 'SUSPENDED' || user.status === 'REJECTED') {
-      throw { status: 403, code: 'FORBIDDEN', message: 'Account is inactive. Contact administration.' };
-    }
-
-    // Verify OTP using otpService
-    await otpService.verifyOtp(cred.value, otpCode, 'LOGIN');
-
-    await enforceSingleActiveSession(user.id, clientInfo);
-
-    const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
-    user.roles = roles.map(r => r.role);
-
-    const payload = await buildUserPayload(user);
-    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
-    payload.session_id = sessionId;
-    const accessToken = generateAccessToken(payload);
-
-    // Audit log
-    await auditService.logAudit({
-      eventType: auditService.AUDIT_EVENTS.OTP_VERIFIED || 'OTP_VERIFIED',
-      actorId: user.id,
-      actorRole: user.roles[0] || 'USER',
-      targetType: 'users',
-      targetId: user.id,
-      details: { login_method: 'OTP_LOGIN', credential_type: cred.type },
-      ipAddress: clientInfo.ip
-    });
-
-    return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        phone: user.phone || cred.value,
-        roles: user.roles,
-        full_name: payload.full_name || user.username,
-        student: payload.student || null,
-        teacher: payload.teacher || null
-      }
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // FORGOT PASSWORD RESET VIA OTP
-  // ─────────────────────────────────────────────────────────
-  async resetPasswordWithOtp(credential, verificationToken, newPassword, clientInfo = {}) {
-    const cred = parseLoginCredential(credential, false);
-    if (!newPassword || newPassword.length < 8) {
-      throw { status: 400, code: 'VALIDATION_ERROR', message: 'New password must be at least 8 characters long.' };
-    }
-
-    // Consume the one-time verification token
-    await otpService.consumeVerificationToken(verificationToken, 'PASSWORD_RESET');
-
-    // Look up user
-    let users = [];
-    if (cred.type === 'EMAIL') {
-      users = await query(`SELECT id, email, username FROM users WHERE LOWER(email) = ?`, [cred.value]);
-    } else if (cred.type === 'PHONE') {
-      users = await query(
-        `SELECT u.id, u.email, u.username FROM users u 
-         LEFT JOIN students s ON s.user_id = u.id
-         LEFT JOIN teachers t ON t.user_id = u.id
-         WHERE u.phone = ? OR s.phone = ? OR t.phone = ?`,
-        [cred.value, cred.value, cred.value]
-      );
-    }
-    if (!users || users.length === 0) {
-      throw { status: 404, code: 'NOT_FOUND', message: 'Account not found.' };
-    }
-    const user = users[0];
-
-    const passwordHash = await bcrypt.hash(newPassword, 10);
-    await query(
-      `UPDATE users SET password_hash = ?, temp_password_hash = NULL, must_change_password = 0, status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [passwordHash, user.id]
-    );
-
-    // Audit log
-    await auditService.logAudit({
-      eventType: auditService.AUDIT_EVENTS.PASSWORD_RESET_COMPLETED || 'PASSWORD_RESET_COMPLETED',
-      actorId: user.id,
-      actorRole: 'USER',
-      targetType: 'users',
-      targetId: user.id,
-      details: { reset_method: 'OTP_VERIFICATION', credential_type: cred.type },
-      ipAddress: clientInfo.ip
-    });
-
-    await enforceSingleActiveSession(user.id, clientInfo);
-
-    const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
-    user.roles = roles.map(r => r.role);
-    const payload = await buildUserPayload(user);
-    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
-    payload.session_id = sessionId;
-    const accessToken = generateAccessToken(payload);
-
-    return {
-      success: true,
-      message: 'Password reset successfully. You are now logged in.',
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        roles: user.roles,
-        full_name: payload.full_name || user.username,
-        student: payload.student || null,
-        teacher: payload.teacher || null
       }
     };
   }

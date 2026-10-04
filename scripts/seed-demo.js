@@ -91,7 +91,7 @@ function seed(targetDb = null, options = {}) {
   // Academic Year: 2026-27 (id=1)
   db.prepare(`
     INSERT INTO academic_years (id, label, start_date, end_date, is_current)
-    VALUES (1, '2026-27 (Winter)', '2026-07-01', '2027-06-30', 1)
+    VALUES (1, '2026-27 (Odd Semester)', '2026-07-01', '2027-06-30', 1)
   `).run();
   const AY_ID = 1;
 
@@ -108,7 +108,7 @@ function seed(targetDb = null, options = {}) {
   for (const sd of standardDepts) {
     db.prepare(`
       INSERT INTO departments (id, name, code, is_active, degree_duration_years, active_term)
-      VALUES (?, ?, ?, 1, ?, '2026-27 (Winter)')
+      VALUES (?, ?, ?, 1, ?, '2026-27 (Odd Semester)')
     `).run(sd.id, sd.name, sd.code, sd.duration);
     console.log(`    ✓ Department: ${sd.name} (${sd.code}, id=${sd.id})`);
   }
@@ -296,6 +296,12 @@ function seed(targetDb = null, options = {}) {
       INSERT INTO enrollments (id, student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'ENROLLED')
     `).run(studentId, studentId, DEPT_ID, Y, S, AY_ID, s.roll);
+
+    db.prepare(`
+      INSERT INTO student_department_enrollments 
+        (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
+      VALUES (?, ?, ?, ?, ?, ?, '2026-07-01', 'ACTIVE')
+    `).run(studentId, DEPT_ID, AY_ID, Y, S, s.roll);
 
     // Enroll student into the 3 Teaching Groups
     for (let gid = 1; gid <= 3; gid++) {

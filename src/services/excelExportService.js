@@ -42,7 +42,7 @@ async function generateClassTestExcel(data) {
 
   // Extract metadata with fallbacks
   const institutionName = data.institution_name || 'Uttarakhand Government Institute of Polytechnic, Nainital';
-  const sessionLabel = data.session_label || 'Internal Evaluation Sheet 2026-27 (Winter)';
+  const sessionLabel = data.session_label || 'Internal Evaluation Sheet 2026-27 (Odd Semester)';
   const deptName = data.department_name || 'Information Technology';
   const deptCode = data.department_code || 'IT';
   const subjectName = data.subject_name || 'Subject';
@@ -397,7 +397,7 @@ async function generateInternalEvaluationExcel(data) {
   });
 
   const institutionName = data.institution_name || 'Government Polytechnic Nainital';
-  const sessionLabel = data.session_label || 'Internal Evaluation Sheet 2026-27 (Winter)';
+  const sessionLabel = data.session_label || 'Internal Evaluation Sheet 2026-27 (Odd Semester)';
   const deptName = data.department_name || 'Information Technology';
   const deptCode = data.department_code || 'IT';
   const subjectName = data.subject_name || 'Internet of Things';

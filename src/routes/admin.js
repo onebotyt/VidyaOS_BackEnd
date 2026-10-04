@@ -81,28 +81,14 @@ router.get('/departments', async (req, res) => {
   res.json({ success: true, data: flagged });
 });
 
-router.post('/departments', [
-  body('name').trim().notEmpty().withMessage('Department name required'),
-  body('code').trim().notEmpty().withMessage('Department code required'),
-  body('degree_duration_years').optional().isInt({ min: 1, max: 3 }),
-  validate
-], async (req, res) => {
-  try {
-    const code = req.body.code.toUpperCase();
-    const name = req.body.name;
-    const duration = parseInt(req.body.degree_duration_years, 10) || 3;
-    const activeSession = await sessionService.getActiveSession();
-    const activeTerm = activeSession?.label || 'Current Session';
-    const result = await query(
-      `INSERT INTO departments (name, code, degree_duration_years, active_term) VALUES (?, ?, ?, ?)`,
-      [name, code, duration, activeTerm]
-    );
-    const id = result[0]?.insertId ?? result.lastInsertRowid;
-    res.status(201).json({ success: true, data: { id, name, code, degree_duration_years: duration } });
-  } catch (err) {
-    if (err.message?.includes('UNIQUE')) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Department code already exists' } });
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
+router.post('/departments', async (req, res) => {
+  return res.status(403).json({
+    success: false,
+    error: {
+      code: 'FORBIDDEN',
+      message: 'Department creation is disabled. Institutional academic structure is fixed.'
+    }
+  });
 });
 
 router.put('/departments/:id', [
@@ -271,7 +257,7 @@ router.get('/academic-years', async (req, res) => {
 });
 
 router.post('/academic-years', [
-  body('label').trim().notEmpty().withMessage('Label required (e.g. 2026-27 (Winter))'),
+  body('label').trim().notEmpty().withMessage('Label required (e.g. 2026-27 (Odd Semester))'),
   body('start_date').isDate().withMessage('start_date required (YYYY-MM-DD)'),
   body('end_date').isDate().withMessage('end_date required (YYYY-MM-DD)'),
   validate
@@ -2010,164 +1996,8 @@ router.post('/registration-gates/toggle', [
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
-// ─────────────────────────────────────────────────────────
-// INSTITUTIONAL WHATSAPP WEB BOT GATEWAY (SELF-HOSTED)
-// ─────────────────────────────────────────────────────────
-
-const whatsappBotService = require('../services/whatsappBotService');
-
-/**
- * GET /api/v1/admin/whatsapp/mandatory-toggle
- * Get the current WhatsApp OTP mandatory setting
- */
-router.get('/whatsapp/mandatory-toggle', async (req, res) => {
-  try {
-    const rows = await query(
-      `SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_otp_mandatory' LIMIT 1`
-    );
-    // Default is TRUE (mandatory) unless explicitly set to 'false'
-    const mandatory = !rows || rows.length === 0 || rows[0].setting_value !== 'false';
-    res.json({ success: true, data: { whatsapp_otp_mandatory: mandatory } });
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-/**
- * POST /api/v1/admin/whatsapp/mandatory-toggle
- * Enable or disable WhatsApp OTP mandatory requirement for registration
- */
-router.post('/whatsapp/mandatory-toggle', [
-  body('mandatory').isBoolean().withMessage('mandatory (boolean) is required'),
-  validate
-], async (req, res) => {
-  const { mandatory } = req.body;
-  try {
-    await query(
-      `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
-       VALUES ('whatsapp_otp_mandatory', ?, 'Whether WhatsApp OTP is mandatory for registration', ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
-      [mandatory ? 'true' : 'false', req.user?.id || 1]
-    );
-    const action = mandatory ? 'ENABLED' : 'DISABLED';
-    res.json({
-      success: true,
-      message: `WhatsApp OTP verification ${action} for all registration forms.`,
-      data: { whatsapp_otp_mandatory: mandatory }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-/**
- * GET /api/v1/admin/whatsapp/status
- * Get real-time connection telemetry, QR data URL, and bot state
- */
-router.get('/whatsapp/status', async (req, res) => {
-  try {
-    const status = whatsappBotService.getStatus();
-    const rows = await query(
-      "SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_gateway_phone' LIMIT 1"
-    );
-    const persistedPhone = rows && rows.length > 0 ? rows[0].setting_value : null;
-    res.json({
-      success: true,
-      data: {
-        ...status,
-        persisted_phone: persistedPhone,
-        gateway_phone: status.connected_user?.phone || persistedPhone || null
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-/**
- * POST /api/v1/admin/whatsapp/gateway-phone
- * Update the Admin Gateway WhatsApp Phone Number in settings
- */
-router.post('/whatsapp/gateway-phone', [
-  body('phone').trim().notEmpty().withMessage('Valid phone number is required'),
-  validate
-], async (req, res) => {
-  const { phone } = req.body;
-  let clean = phone.replace(/\D/g, '');
-  if (clean.length === 10) clean = `91${clean}`;
-  if (!clean || clean.length < 10) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid 10-digit mobile number is required' } });
-  }
-  try {
-    await query(
-      `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
-       VALUES ('whatsapp_gateway_phone', ?, 'Institutional Admin WhatsApp phone number linked in gateway', ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
-      [clean, req.user?.id || 1]
-    );
-    res.json({
-      success: true,
-      message: `Admin Gateway WhatsApp phone updated to +${clean}`,
-      data: { gateway_phone: clean }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-/**
- * POST /api/v1/admin/whatsapp/initialize
- * Start the WhatsApp Web Bot and generate QR code for Linking
- */
-router.post('/whatsapp/initialize', async (req, res) => {
-  try {
-    const clearSession = req.body?.clear_session === true || req.body?.clearSession === true;
-    const initRes = await whatsappBotService.initialize({ clearSession });
-    res.json(initRes);
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-/**
- * POST /api/v1/admin/whatsapp/disconnect
- * Disconnect and destroy the current WhatsApp Bot session
- */
-router.post('/whatsapp/disconnect', async (req, res) => {
-  try {
-    const discRes = await whatsappBotService.disconnect();
-    res.json(discRes);
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-/**
- * POST /api/v1/admin/whatsapp/test-send
- * Send a test OTP or institutional message to verify direct delivery
- */
-router.post('/whatsapp/test-send', [
-  body('phone').trim().notEmpty().withMessage('Valid phone number is required'),
-  body('message').optional().trim(),
-  validate
-], async (req, res) => {
-  const { phone, message } = req.body;
-  const msgText = message || `🧪 Government Polytechnic College WhatsApp Gateway: Test dispatch successful at ${new Date().toLocaleTimeString()}!`;
-  try {
-    const sendRes = await whatsappBotService.sendMessage(phone, msgText);
-    if (sendRes.success) {
-      res.json({ success: true, message: `Test message sent directly to +91 ${phone}`, data: sendRes });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: { code: sendRes.reason || 'SEND_FAILED', message: `Could not send message: ${sendRes.reason || 'Bot not connected'}` }
-      });
-    }
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
 
 module.exports = router;
+
 
 

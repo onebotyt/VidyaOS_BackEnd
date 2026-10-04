@@ -64,10 +64,7 @@ async function resolveTeacher(req) {
 router.get('/overview', auth, async (req, res) => {
   try {
     const teacherId = req.user.teacher_id;
-    const isAdmin = req.user.roles && req.user.roles.includes('SYSTEM_ADMIN');
-
-    const teacherFilter = isAdmin ? '' : 'WHERE tg.teacher_id = ?';
-    const teacherParams = isAdmin ? [] : [teacherId || -1];
+    const teacherParams = [teacherId || -1];
 
     // 1. Groups overview & attendance stats for chart
     const groups = await query(`
@@ -81,7 +78,7 @@ router.get('/overview', auth, async (req, res) => {
               WHERE s.register_id = ar.id AND s.state != 'DRAFT') as avg_attendance_pct
       FROM teaching_groups tg
       LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
-      ${teacherFilter ? teacherFilter + " AND tg.status = 'ACTIVE' AND tg.deleted_at IS NULL" : "WHERE tg.status = 'ACTIVE' AND tg.deleted_at IS NULL"}
+      WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE' AND tg.deleted_at IS NULL
       ORDER BY tg.created_at DESC
     `, teacherParams);
 
@@ -93,7 +90,7 @@ router.get('/overview', auth, async (req, res) => {
              (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as total_students
       FROM assessments a
       JOIN teaching_groups tg ON a.group_id = tg.id
-      ${isAdmin ? 'WHERE' : 'WHERE tg.teacher_id = ? AND'} tg.status = 'ACTIVE' AND tg.deleted_at IS NULL
+      WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE' AND tg.deleted_at IS NULL
       ORDER BY 
         CASE WHEN a.due_date >= date('now') THEN 0 ELSE 1 END,
         a.due_date ASC,
@@ -104,7 +101,7 @@ router.get('/overview', auth, async (req, res) => {
     // 3. Trash count (deleted within last 7 days)
     const trashRows = await query(`
       SELECT COUNT(*) as cnt FROM teaching_groups tg
-      ${isAdmin ? 'WHERE' : 'WHERE tg.teacher_id = ? AND'} (tg.status = 'TRASHED' OR tg.deleted_at IS NOT NULL)
+      WHERE tg.teacher_id = ? AND (tg.status = 'TRASHED' OR tg.deleted_at IS NOT NULL)
     `, teacherParams);
 
     // 4. Overall attendance KPI
@@ -115,7 +112,7 @@ router.get('/overview', auth, async (req, res) => {
       JOIN register_attendance ra ON ra.session_id = s.id
       JOIN attendance_registers ar ON s.register_id = ar.id
       JOIN teaching_groups tg ON ar.group_id = tg.id
-      ${isAdmin ? 'WHERE' : 'WHERE tg.teacher_id = ? AND'} tg.status = 'ACTIVE' AND tg.deleted_at IS NULL AND s.state != 'DRAFT'
+      WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE' AND tg.deleted_at IS NULL AND s.state != 'DRAFT'
     `, teacherParams);
 
     const totalRecords = overallAttRows[0]?.total || 0;
@@ -444,7 +441,7 @@ router.post(
           message: `You have successfully enrolled into teaching group "${group.name}".`,
           linkUrl: `/student/groups.html?id=${group.id}`
         });
-      } catch (_) {}
+      } catch (_) { }
 
       res.status(201).json({
         success: true,
@@ -545,7 +542,7 @@ router.post(
             });
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       res.status(200).json({
         success: true,
@@ -912,11 +909,13 @@ router.delete('/:id/permanent', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), as
     await withTransaction(async (conn) => {
       await conn.execute(`DELETE FROM teaching_group_members WHERE group_id = ?`, [groupId]);
       await conn.execute(`DELETE FROM classroom_posts WHERE group_id = ?`, [groupId]);
-      await conn.execute(`DELETE FROM attendance_registers WHERE group_id = ?`, [groupId]);
+      // Student Data Sovereignty: Detach attendance register from class container rather than deleting,
+      // ensuring student historical attendance sessions and records are permanently preserved in their ledger.
+      await conn.execute(`UPDATE attendance_registers SET group_id = NULL, is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE group_id = ?`, [groupId]);
       await conn.execute(`DELETE FROM teaching_groups WHERE id = ?`, [groupId]);
     });
 
-    res.status(200).json({ success: true, message: 'Class permanently deleted.' });
+    res.status(200).json({ success: true, message: 'Class permanently deleted (historical student attendance preserved in academic vault).' });
   } catch (err) {
     res.status(500).json({ success: false, error: { message: err.message } });
   }
@@ -953,16 +952,16 @@ router.get('/:id/unenrolled-students', auth, requireRole('TEACHER', 'SYSTEM_ADMI
     `;
     const params = [groupId];
 
+    if (targetDeptId) {
+      sql += ` AND e.department_id = ?`;
+      params.push(targetDeptId);
+    }
+    sql += ` AND (e.semester = ? OR e.year = ?)`;
+    params.push(group.semester, Math.ceil(group.semester / 2));
+
     if (search) {
       sql += ` AND (s.full_name LIKE ? OR s.official_enrollment_no LIKE ? OR s.registration_no LIKE ?)`;
       params.push(search, search, search);
-    } else {
-      if (targetDeptId) {
-        sql += ` AND e.department_id = ?`;
-        params.push(targetDeptId);
-      }
-      sql += ` AND (e.semester = ? OR e.year = ?)`;
-      params.push(group.semester, Math.ceil(group.semester / 2));
     }
 
     sql += ` ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 9999) ASC, s.full_name ASC LIMIT 100`;
@@ -1087,7 +1086,7 @@ router.post(
             });
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       res.status(201).json({
         success: true,
@@ -1187,7 +1186,7 @@ router.post(
               linkUrl: `/student/groups.html`
             });
             notifiedCount++;
-          } catch (_) {}
+          } catch (_) { }
         }
       }
 

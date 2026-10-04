@@ -110,7 +110,7 @@ function seedProductionClean(targetDb = null, options = {}) {
 
   db.prepare(`
     INSERT OR IGNORE INTO academic_years (id, label, start_date, end_date, is_current)
-    VALUES (1, '2026-27 (Winter)', '2026-07-01', '2027-06-30', 1)
+    VALUES (1, '2026-27 (Odd Semester)', '2026-07-01', '2027-06-30', 1)
   `).run();
 
   const standardDepts = [
@@ -125,7 +125,7 @@ function seedProductionClean(targetDb = null, options = {}) {
   for (const sd of standardDepts) {
     db.prepare(`
       INSERT OR IGNORE INTO departments (id, name, code, is_active, degree_duration_years, active_term, hod_user_id)
-      VALUES (?, ?, ?, 1, ?, '2026-27 (Winter)', NULL)
+      VALUES (?, ?, ?, 1, ?, '2026-27 (Odd Semester)', NULL)
     `).run(sd.id, sd.name, sd.code, sd.duration);
     console.log(`    ✓ Department: ${sd.name} (${sd.code}, id=${sd.id}) — HOD: Unassigned`);
   }

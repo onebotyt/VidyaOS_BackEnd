@@ -1328,7 +1328,7 @@ router.get('/registers/:id/internal-evaluation', [param('id').isInt(), validate]
     });
 
     const currentAyRow = (await query(`SELECT label FROM academic_years WHERE is_current = 1 LIMIT 1`))[0];
-    const sessionLabelFromTable = currentAyRow?.label || register.academic_year_label || '2026-27 (Winter)';
+    const sessionLabelFromTable = currentAyRow?.label || register.academic_year_label || '2026-27 (Odd Semester)';
 
     res.json({
       success: true,
@@ -1527,7 +1527,7 @@ router.get('/registers/:id/export/internal-evaluation-excel', [param('id').isInt
 
     const exportPayload = {
       institution_name: institutionName,
-      session_label: `Internal Evaluation Sheet ${register.academic_year_label || '2026-27 (Winter)'}`,
+      session_label: `Internal Evaluation Sheet ${register.academic_year_label || '2026-27 (Odd Semester)'}`,
       department_name: register.department_name,
       department_code: register.department_code,
       subject_name: register.subject_name,
@@ -1577,7 +1577,7 @@ router.post('/registers/:id/export/internal-evaluation-excel', [param('id').isIn
     const customData = req.body || {};
 
     const currentAyRow = (await query(`SELECT label FROM academic_years WHERE is_current = 1 LIMIT 1`))[0];
-    const sessionLabelFromTable = currentAyRow?.label || register.academic_year_label || '2026-27 (Winter)';
+    const sessionLabelFromTable = currentAyRow?.label || register.academic_year_label || '2026-27 (Odd Semester)';
 
     const exportPayload = {
       institution_name: customData.institution_name || institutionName,

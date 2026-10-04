@@ -14,10 +14,18 @@ const { body } = require('express-validator');
 const bcrypt = require('bcrypt');
 const validate = require('../middleware/validate');
 const authService = require('../services/authService');
-const otpService = require('../services/otpService');
 const { authLimiter } = require('../middleware/rateLimiter');
 const auth = require('../middleware/auth');
 const { query, withTransaction } = require('../config/db');
+
+function normalizePhone(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let cleaned = raw.trim().replace(/[^\d+]/g, '');
+  if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
+  else if (cleaned.startsWith('91') && cleaned.length === 12) cleaned = cleaned.slice(2);
+  else if (cleaned.startsWith('0') && cleaned.length === 11) cleaned = cleaned.slice(1);
+  return cleaned;
+}
 
 function getClientInfo(req) {
   return {
@@ -150,132 +158,6 @@ router.post('/login', authLimiter, [
         active_session: err.active_session || undefined
       }
     });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// DISPATCH OTP  (WhatsApp / SMS / Email)
-// POST /api/v1/auth/otp/send
-// ─────────────────────────────────────────────────────────
-router.post('/otp/send', authLimiter, [
-  body('identifier').trim().notEmpty().withMessage('Gmail address or Mobile number is required'),
-  body('purpose').isIn(['REGISTRATION', 'LOGIN', 'PASSWORD_RESET']).withMessage('Valid purpose (REGISTRATION, LOGIN, PASSWORD_RESET) is required'),
-  validate
-], async (req, res) => {
-  try {
-    const result = await otpService.generateOtp(req.body.identifier, req.body.purpose);
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// PUBLIC: Get WhatsApp Gateway Settings (for registration forms)
-// GET /api/v1/auth/whatsapp-settings
-// ─────────────────────────────────────────────────────────
-router.get('/whatsapp-settings', async (req, res) => {
-  try {
-    const rows = await query(
-      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('whatsapp_otp_mandatory', 'whatsapp_bot_enabled', 'whatsapp_gateway_phone', 'admin_whatsapp_phone')`,
-    );
-    const settings = {};
-    (rows || []).forEach(r => { settings[r.setting_key] = r.setting_value; });
-    // Default: mandatory is TRUE (opt-out model - admin must explicitly disable)
-    const mandatory = settings.whatsapp_otp_mandatory !== 'false';
-    const gatewayPhone = await otpService.getAdminGatewayPhone();
-    res.json({
-      success: true,
-      data: {
-        whatsapp_otp_mandatory: mandatory,
-        gateway_phone: gatewayPhone || null
-      }
-    });
-  } catch (err) {
-    // On error, default to mandatory = true for safety
-    res.json({ success: true, data: { whatsapp_otp_mandatory: true, gateway_phone: null } });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// VERIFY OTP
-// POST /api/v1/auth/otp/verify
-// ─────────────────────────────────────────────────────────
-router.post('/otp/verify', authLimiter, [
-  body('identifier').trim().notEmpty().withMessage('Identifier is required'),
-  body('otp_code').trim().notEmpty().withMessage('6-digit OTP code is required'),
-  body('purpose').isIn(['REGISTRATION', 'LOGIN', 'PASSWORD_RESET']).withMessage('Valid purpose is required'),
-  validate
-], async (req, res) => {
-  try {
-    const result = await otpService.verifyOtp(req.body.identifier, req.body.otp_code, req.body.purpose);
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// PASSWORDLESS LOGIN VIA OTP
-// POST /api/v1/auth/login-otp
-// ─────────────────────────────────────────────────────────
-router.post('/login-otp', authLimiter, [
-  body('otp_code').trim().notEmpty().withMessage('6-digit OTP code is required'),
-  validate
-], async (req, res) => {
-  const credential = (req.body.identifier || req.body.email || req.body.phone || req.body.credential || '').trim();
-  if (!credential) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
-  }
-  try {
-    const clientInfo = getClientInfo(req);
-    const result = await authService.loginWithOtp(credential, req.body.otp_code, clientInfo);
-
-    if (result.refresh_token) {
-      res.cookie('refreshToken', result.refresh_token, {
-        httpOnly: true, secure: process.env.NODE_ENV === 'production',
-        sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-    }
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    res.status(err.status || 500).json({
-      success: false,
-      error: {
-        code: err.code || 'INTERNAL_SERVER_ERROR',
-        message: err.message,
-        active_session: err.active_session || undefined
-      }
-    });
-  }
-});
-
-// ─────────────────────────────────────────────────────────
-// FORGOT PASSWORD RESET VIA OTP
-// POST /api/v1/auth/reset-password-otp
-// ─────────────────────────────────────────────────────────
-router.post('/reset-password-otp', authLimiter, [
-  body('verification_token').trim().notEmpty().withMessage('Verification token is required'),
-  body('new_password').isLength({ min: 8 }).withMessage('New password must be at least 8 characters'),
-  validate
-], async (req, res) => {
-  const credential = (req.body.identifier || req.body.email || req.body.phone || req.body.credential || '').trim();
-  if (!credential) {
-    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
-  }
-  try {
-    const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
-    const result = await authService.resetPasswordWithOtp(credential, req.body.verification_token, req.body.new_password, clientInfo);
-
-    if (result.refresh_token) {
-      res.cookie('refreshToken', result.refresh_token, {
-        httpOnly: true, secure: process.env.NODE_ENV === 'production',
-        sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-      });
-    }
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
 
@@ -1017,7 +899,7 @@ router.post('/student/register', authLimiter, [
     // 4b. Optional Phone verification & uniqueness check
     let cleanPhone = null;
     if (phone && phone.trim()) {
-      cleanPhone = otpService.normalizeIdentifier(phone);
+      cleanPhone = normalizePhone(phone);
       if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mobile number must be a valid 10-digit Indian number.' } });
       }
@@ -1259,7 +1141,7 @@ router.post('/faculty/register', authLimiter, [
     // Optional Phone format check if provided
     let cleanPhone = null;
     if (phone && phone.trim()) {
-      cleanPhone = otpService.normalizeIdentifier(phone);
+      cleanPhone = normalizePhone(phone);
       if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mobile number must be a valid 10-digit Indian number.' } });
       }

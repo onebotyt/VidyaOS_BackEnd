@@ -8,92 +8,101 @@
 const { query, withTransaction } = require('../config/db');
 
 /**
- * Automatically computes institutional Academic Session label (e.g. "2026-27 (Winter)" or "2026-27 (Summer)")
- * from session calendar bounds and institutional cycle.
+ * Automatically computes institutional Academic Session label (e.g. "2026-27 (Odd Semester)" or "2026-27 (Even Semester)")
+ * from session calendar bounds (July 1 - Dec 31 = Odd Semester, Jan 1 - June 30 = Even Semester).
  */
 function computeAutoSessionLabel(startStr, endStr, refDate = new Date()) {
-  if (!startStr) return '';
-  const s = new Date(startStr);
-  if (isNaN(s.getTime())) return '';
-  const startYear = s.getFullYear();
-  const startMonth = s.getMonth() + 1; // 1-12
-
-  const e = endStr ? new Date(endStr) : null;
-  const endYear = (e && !isNaN(e.getTime())) ? e.getFullYear() : (startMonth >= 7 ? startYear + 1 : startYear);
-  const endMonth = (e && !isNaN(e.getTime())) ? (e.getMonth() + 1) : startMonth;
+  const ref = (refDate instanceof Date && !isNaN(refDate)) ? refDate : new Date();
+  const refMonth = ref.getMonth() + 1;
+  const refYear = ref.getFullYear();
 
   let ayStartYear;
   let ayEndYear;
+  let cycle;
 
-  if (startMonth >= 7) {
-    ayStartYear = startYear;
-    ayEndYear = (endYear > startYear) ? endYear : (startYear + 1);
+  if (refMonth >= 7) {
+    ayStartYear = refYear;
+    ayEndYear = refYear + 1;
+    cycle = 'Odd Semester';
   } else {
-    ayStartYear = startYear - 1;
-    ayEndYear = startYear;
+    ayStartYear = refYear - 1;
+    ayEndYear = refYear;
+    cycle = 'Even Semester';
   }
 
   const shortEnd = String(ayEndYear).slice(-2);
-  const yearPair = `${ayStartYear}-${shortEnd}`;
-
-  const ref = (refDate instanceof Date && !isNaN(refDate)) ? refDate : new Date();
-  const refMonth = ref.getMonth() + 1;
-
-  let cycle;
-  // Explicit single-term bounds
-  if (e && !isNaN(e.getTime()) && e.getFullYear() === ayStartYear && endMonth <= 12) {
-    cycle = 'Winter';
-  } else if (e && !isNaN(e.getTime()) && startMonth < 7 && endMonth <= 7) {
-    cycle = 'Summer';
-  } else {
-    // Spanning academic year: determine from reference month
-    cycle = (refMonth >= 7 && refMonth <= 12) ? 'Winter' : 'Summer';
-  }
-
-  return `${yearPair} (${cycle})`;
+  return `${ayStartYear}-${shortEnd} (${cycle})`;
 }
 
 /**
- * Resolves the academic session details for a given date.
- * Default academic calendar start: July 1st.
- * E.g., September 19, 2026 -> "2026 Session" (2026-07-01 to 2027-06-30).
- * Next rollover: July 1, 2027 -> "2027 Session".
+ * Resolves the academic semester details for a given date.
+ * Strict Institutional 6-month cycles:
+ * - Odd Semester: July 1 to December 31
+ * - Even Semester: January 1 to June 30
  */
-function resolveSession(date = new Date(), startMonth = 7, startDay = 1) {
+function resolveSession(date = new Date()) {
   const d = new Date(date);
   const currentYear = d.getFullYear();
   const currentMonth = d.getMonth() + 1; // 1-12
-  const currentDay = d.getDate();
 
   let sessionYear;
+  let ayEndYear;
+  let cycle;
+  let termType;
+  let termName;
   let startDate;
   let endDate;
   let nextRolloverDate;
+  let nextStart;
+  let nextEnd;
+  let nextCycle;
+  let nextSessionYear;
+  let nextAyEndYear;
 
-  // Compare against startMonth and startDay
-  const isAfterStart = (currentMonth > startMonth) || (currentMonth === startMonth && currentDay >= startDay);
-
-  if (isAfterStart) {
+  if (currentMonth >= 7) {
+    // July 1 - December 31 (Odd Semester)
     sessionYear = currentYear;
-    startDate = new Date(Date.UTC(sessionYear, startMonth - 1, startDay));
-    endDate = new Date(Date.UTC(sessionYear + 1, startMonth - 1, startDay - 1, 23, 59, 59, 999));
-    nextRolloverDate = new Date(Date.UTC(sessionYear + 1, startMonth - 1, startDay));
+    ayEndYear = currentYear + 1;
+    cycle = 'Odd Semester';
+    termType = 'ODD';
+    termName = 'Odd Semester (July - Dec)';
+
+    startDate = new Date(Date.UTC(sessionYear, 6, 1));
+    endDate = new Date(Date.UTC(sessionYear, 11, 31, 23, 59, 59, 999));
+    nextRolloverDate = new Date(Date.UTC(sessionYear + 1, 0, 1));
+
+    nextSessionYear = sessionYear;
+    nextAyEndYear = sessionYear + 1;
+    nextCycle = 'Even Semester';
+    nextStart = new Date(Date.UTC(sessionYear + 1, 0, 1));
+    nextEnd = new Date(Date.UTC(sessionYear + 1, 5, 30, 23, 59, 59, 999));
   } else {
+    // January 1 - June 30 (Even Semester)
     sessionYear = currentYear - 1;
-    startDate = new Date(Date.UTC(sessionYear, startMonth - 1, startDay));
-    endDate = new Date(Date.UTC(sessionYear + 1, startMonth - 1, startDay - 1, 23, 59, 59, 999));
-    nextRolloverDate = new Date(Date.UTC(sessionYear + 1, startMonth - 1, startDay));
+    ayEndYear = currentYear;
+    cycle = 'Even Semester';
+    termType = 'EVEN';
+    termName = 'Even Semester (Jan - June)';
+
+    startDate = new Date(Date.UTC(currentYear, 0, 1));
+    endDate = new Date(Date.UTC(currentYear, 5, 30, 23, 59, 59, 999));
+    nextRolloverDate = new Date(Date.UTC(currentYear, 6, 1));
+
+    nextSessionYear = currentYear;
+    nextAyEndYear = currentYear + 1;
+    nextCycle = 'Odd Semester';
+    nextStart = new Date(Date.UTC(currentYear, 6, 1));
+    nextEnd = new Date(Date.UTC(currentYear, 11, 31, 23, 59, 59, 999));
   }
 
   const formatDate = (dt) => dt.toISOString().split('T')[0];
   const startStr = formatDate(startDate);
   const endStr = formatDate(endDate);
-  const sessionLabel = computeAutoSessionLabel(startStr, endStr, d);
+  const shortEnd = String(ayEndYear).slice(-2);
+  const sessionLabel = `${sessionYear}-${shortEnd} (${cycle})`;
 
-  // Next session bounds: start + 1 year, end + 1 year
-  const nextStart = new Date(Date.UTC(sessionYear + 1, startMonth - 1, startDay));
-  const nextEnd = new Date(Date.UTC(sessionYear + 2, startMonth - 1, startDay - 1, 23, 59, 59, 999));
-  const nextSessionLabel = computeAutoSessionLabel(formatDate(nextStart), formatDate(nextEnd), nextStart);
+  const nextShortEnd = String(nextAyEndYear).slice(-2);
+  const nextSessionLabel = `${nextSessionYear}-${nextShortEnd} (${nextCycle})`;
 
   const diffMs = nextRolloverDate.getTime() - d.getTime();
   const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
@@ -103,6 +112,9 @@ function resolveSession(date = new Date(), startMonth = 7, startDay = 1) {
     session_label: sessionLabel,
     auto_session_label: sessionLabel,
     next_session_label: nextSessionLabel,
+    cycle,
+    term_type: termType,
+    term_name: termName,
     start_date: startStr,
     end_date: endStr,
     next_rollover_date: formatDate(nextRolloverDate),
@@ -164,9 +176,12 @@ async function syncAcademicSession(targetDate = new Date()) {
       currentAyId = activeRecord.id;
 
       const currentLabel = activeRecord.label;
-      // Upgrade legacy 'YYYY Session' or bare 'YYYY-YY' to canonical automatic institutional label (e.g. 2026-27 (Winter))
+      // Upgrade legacy 'YYYY Session', bare 'YYYY-YY', or legacy '(Winter)' / '(Summer)' to canonical institutional label (e.g. 2026-27 (Odd Semester))
       let targetLabel = resolved.session_label;
-      if (currentLabel && !/^\d{4}\s+Session$/i.test(currentLabel.trim()) && !/^\d{4}-\d{2}$/.test(currentLabel.trim())) {
+      if (currentLabel && 
+          !/^\d{4}\s+Session$/i.test(currentLabel.trim()) && 
+          !/^\d{4}-\d{2}$/.test(currentLabel.trim()) &&
+          !/Winter|Summer/i.test(currentLabel.trim())) {
         targetLabel = currentLabel.trim();
       }
 

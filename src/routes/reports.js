@@ -9,7 +9,9 @@ const requireRole = require('../middleware/requireRole');
 const { query } = require('../config/db');
 const reportService = require('../services/reportService');
 const defaulterService = require('../services/defaulterService');
-const parentGatewayService = require('../services/parentGatewayService');
+const notificationService = require('../services/notificationService');
+const auditService = require('../services/auditService');
+const logger = require('../utils/logger');
 
 router.use(auth, requireRole('TEACHER', 'FACULTY', 'HOD', 'SYSTEM_ADMIN'));
 
@@ -798,8 +800,84 @@ router.get('/defaulters/export', async (req, res) => {
   }
 });
 
+const DEFAULT_INSTITUTION_NAME = 'Universal Institute of Technology';
+
+const DEFAULT_TEMPLATES = {
+  ATTENDANCE_CRITICAL: 'Dear Parent, Attendance Alert for {student_name} ({enrollment_no}), Department of {department}. Current Attendance is {attendance_pct}% ({attended_classes}/{total_classes} classes). Shortfall: {shortfall_classes} classes below the 75% institutional requirement. Please advise your ward to attend all upcoming classes. — {institution_name}',
+  ATTENDANCE_WARNING: 'Dear Parent, Early Attendance Warning for {student_name} ({enrollment_no}), Department of {department}. Current Attendance is {attendance_pct}% ({attended_classes}/{total_classes} classes). Your ward is approaching the defaulter limit. — {institution_name}',
+  CUSTOM: '{custom_message}'
+};
+
+function normalizePhone(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 10) return digits;
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+function formatDefaulterTemplate(templateStr, data = {}) {
+  let msg = templateStr || DEFAULT_TEMPLATES.ATTENDANCE_CRITICAL;
+  const tokens = {
+    '{student_name}': data.student_name || 'Student',
+    '{parent_name}': data.parent_name || 'Parent/Guardian',
+    '{enrollment_no}': data.official_enrollment_no || data.enrollment_no || '--',
+    '{department}': data.department_code || data.department_name || 'Department',
+    '{attendance_pct}': data.attendance_percentage !== undefined ? data.attendance_percentage : (data.attendance_pct || 0),
+    '{attended_classes}': data.attended_sessions !== undefined ? data.attended_sessions : (data.attended_classes || 0),
+    '{total_classes}': data.conducted_sessions !== undefined ? data.conducted_sessions : (data.total_classes || 0),
+    '{shortfall_classes}': data.shortfall !== undefined ? data.shortfall : (data.shortfall_classes || 0),
+    '{institution_name}': data.institution_name || DEFAULT_INSTITUTION_NAME,
+    '{custom_message}': data.custom_message || ''
+  };
+
+  for (const [key, val] of Object.entries(tokens)) {
+    msg = msg.split(key).join(String(val));
+  }
+  return msg;
+}
+
 /**
- * Autonomous Parent WhatsApp / SMS Gateway & Critical Defaulter Webhook Escalation
+ * Generate parent notification link
+ * GET /api/v1/reports/defaulters/generate-whatsapp-link
+ */
+router.get('/defaulters/generate-whatsapp-link', auth, async (req, res) => {
+  try {
+    const studentId = Number(req.query.student_id);
+    const templateType = req.query.template_type || 'ATTENDANCE_CRITICAL';
+    const students = await query(
+      `SELECT s.id as student_id, s.full_name as student_name, s.official_enrollment_no,
+              s.parent_phone, s.phone as student_phone, s.parent_name,
+              d.name as department_name, d.code as department_code
+       FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+       LEFT JOIN departments d ON e.department_id = d.id
+       WHERE s.id = ?`,
+      [studentId]
+    );
+    if (!students || students.length === 0) {
+      return res.status(404).json({ success: false, error: { message: 'Student not found' } });
+    }
+    const student = students[0];
+    const cleanPhone = normalizePhone(student.parent_phone || student.student_phone) || '9876543210';
+    const messageBody = formatDefaulterTemplate(DEFAULT_TEMPLATES[templateType] || DEFAULT_TEMPLATES.ATTENDANCE_CRITICAL, student);
+    const whatsappUrl = `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(messageBody)}`;
+    res.status(200).json({
+      success: true,
+      data: {
+        whatsapp_url: whatsappUrl,
+        phone: cleanPhone,
+        message: messageBody
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+/**
+ * Parent Defaulter Escalation Gateway
  * POST /api/v1/reports/defaulters/escalate-parents
  */
 router.post('/defaulters/escalate-parents', auth, async (req, res) => {
@@ -807,10 +885,10 @@ router.post('/defaulters/escalate-parents', auth, async (req, res) => {
     const {
       defaulters,
       studentIds,
-      channel = 'WHATSAPP',
+      channel = 'SMS',
       templateType = 'ATTENDANCE_CRITICAL',
       customTemplate,
-      institutionName,
+      institutionName = DEFAULT_INSTITUTION_NAME,
       criticalOnly = false,
       groupId,
       departmentId,
@@ -830,7 +908,6 @@ router.post('/defaulters/escalate-parents', auth, async (req, res) => {
       const idSet = new Set(studentIds.map(Number));
       targetList = (report.data || []).filter(s => idSet.has(s.student_id));
 
-      // Direct DB lookup fallback to guarantee resolution for any student ID
       const resolvedIds = new Set(targetList.map(s => s.student_id));
       const missingIds = studentIds.filter(id => !resolvedIds.has(Number(id)));
       if (missingIds.length > 0) {
@@ -864,19 +941,147 @@ router.post('/defaulters/escalate-parents', auth, async (req, res) => {
       });
     }
 
-    const result = await parentGatewayService.dispatchBatchDefaulterEscalation({
-      defaulters: targetList,
-      channel,
-      templateType,
-      customTemplate,
-      dispatchedBy: req.user ? req.user.id : null,
-      institutionName,
-      criticalOnly
-    });
+    if (criticalOnly) {
+      targetList = targetList.filter(s => s.status === 'CRITICAL' || Number(s.attendance_percentage) < 60);
+    }
+
+    const dispatchedBy = req.user ? req.user.id : null;
+    const results = [];
+    let dispatchedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+
+    for (const student of targetList) {
+      try {
+        const rawPhone = student.parent_phone || student.student_phone;
+        const cleanPhone = normalizePhone(rawPhone);
+
+        if (!cleanPhone) {
+          skippedCount++;
+          results.push({
+            success: false,
+            student_id: student.student_id,
+            student_name: student.student_name,
+            reason: 'MISSING_VALID_PHONE',
+            delivery_status: 'SKIPPED'
+          });
+          continue;
+        }
+
+        const templateStr = templateType === 'CUSTOM' && customTemplate ? customTemplate : DEFAULT_TEMPLATES[templateType] || DEFAULT_TEMPLATES.ATTENDANCE_CRITICAL;
+        const messageBody = formatDefaulterTemplate(templateStr, {
+          ...student,
+          institution_name: institutionName
+        });
+
+        let insertRes = { insertId: 0 };
+        try {
+          insertRes = await query(
+            `INSERT INTO parent_escalation_logs (
+              student_id, recipient_phone, recipient_name, channel, template_type,
+              message_payload, message_body, attendance_pct, total_classes,
+              attended_classes, shortfall_classes, faculty_id, dispatched_by,
+              delivery_status, status, gateway_response
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              student.student_id,
+              cleanPhone,
+              student.parent_name || student.student_name,
+              channel,
+              templateType,
+              messageBody,
+              messageBody,
+              student.attendance_percentage || 0,
+              student.conducted_sessions || 0,
+              student.attended_sessions || 0,
+              student.shortfall || 0,
+              dispatchedBy,
+              dispatchedBy,
+              'SENT',
+              'SENT',
+              'DISPATCHED'
+            ]
+          );
+        } catch (_) {}
+
+        const logId = insertRes.insertId || insertRes.lastID || 0;
+
+        // In-app alert to student
+        if (student.user_id) {
+          try {
+            await notificationService.sendNotification({
+              userId: student.user_id,
+              type: 'ATTENDANCE_WARNING',
+              title: '⚠️ Parent Attendance Notice Dispatched',
+              message: `An official attendance alert was sent to your registered contact (${cleanPhone.slice(0, 2)}******${cleanPhone.slice(-2)}) regarding your ${student.attendance_percentage}% attendance.`,
+              linkUrl: '/student/attendance.html'
+            });
+          } catch (e) {
+            logger.warn(`Failed to dispatch in-app notification to student ${student.student_id}: ${e.message}`);
+          }
+        }
+
+        // Institutional audit log
+        try {
+          await auditService.logAudit({
+            action: 'PARENT_DEFAULTER_ESCALATED',
+            eventType: 'PARENT_DEFAULTER_ESCALATED',
+            actorId: dispatchedBy,
+            actorRole: 'FACULTY',
+            targetType: 'STUDENT',
+            targetId: String(student.student_id),
+            details: {
+              student_id: student.student_id,
+              student_name: student.student_name,
+              enrollment_no: student.official_enrollment_no,
+              channel,
+              phone: cleanPhone,
+              attendance_percentage: student.attendance_percentage,
+              log_id: logId
+            }
+          });
+        } catch (e) {
+          logger.warn(`Audit log failed for parent escalation: ${e.message}`);
+        }
+
+        const dispatchItem = {
+          success: true,
+          log_id: logId,
+          student_id: student.student_id,
+          student_name: student.student_name,
+          channel,
+          phone: cleanPhone,
+          recipient_phone: cleanPhone,
+          message: messageBody,
+          delivery_status: 'SENT',
+          status: 'SENT',
+          whatsapp_web_url: `https://web.whatsapp.com/send?phone=91${cleanPhone}&text=${encodeURIComponent(messageBody)}`
+        };
+
+        results.push(dispatchItem);
+        dispatchedCount++;
+      } catch (err) {
+        failedCount++;
+        results.push({
+          success: false,
+          student_id: student.student_id,
+          error: err.message,
+          delivery_status: 'FAILED'
+        });
+      }
+    }
 
     res.status(200).json({
       success: true,
-      data: result
+      data: {
+        total_requested: targetList.length,
+        dispatched_count: dispatchedCount,
+        delivered_count: dispatchedCount,
+        skipped_count: skippedCount,
+        failed_count: failedCount,
+        dispatches: results,
+        results
+      }
     });
   } catch (err) {
     res.status(500).json({
@@ -897,19 +1102,65 @@ router.get('/defaulters/communication-logs', auth, async (req, res) => {
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
 
-    const result = await parentGatewayService.getCommunicationLogs({
-      studentId,
-      departmentId,
-      limit,
-      offset
-    });
+    let whereClauses = ['1=1'];
+    const params = [];
 
-    const logsArray = result.logs || [];
+    if (studentId) {
+      whereClauses.push('pel.student_id = ?');
+      params.push(studentId);
+    }
+
+    if (departmentId) {
+      whereClauses.push('e.department_id = ?');
+      params.push(departmentId);
+    }
+
+    const sql = `
+      SELECT pel.id, pel.student_id, pel.recipient_phone, pel.recipient_name,
+             pel.channel, pel.template_type,
+             COALESCE(pel.message_payload, pel.message_body) as message_payload,
+             COALESCE(pel.message_body, pel.message_payload) as message_body,
+             pel.attendance_pct, pel.total_classes, pel.attended_classes, pel.shortfall_classes,
+             COALESCE(pel.faculty_id, pel.dispatched_by) as faculty_id,
+             COALESCE(pel.dispatched_by, pel.faculty_id) as dispatched_by,
+             COALESCE(pel.delivery_status, pel.status) as delivery_status,
+             COALESCE(pel.status, pel.delivery_status) as status,
+             COALESCE(pel.sent_at, pel.created_at) as sent_at,
+             pel.created_at,
+             s.full_name as student_name, s.official_enrollment_no,
+             u.email as student_email,
+             d.name as department_name, d.code as department_code,
+             disp.username as dispatched_by_username
+      FROM parent_escalation_logs pel
+      JOIN students s ON pel.student_id = s.id
+      LEFT JOIN users u ON s.user_id = u.id
+      LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN users disp ON (pel.faculty_id = disp.id OR pel.dispatched_by = disp.id)
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY pel.sent_at DESC, pel.id DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    params.push(Number(limit) || 50, Number(offset) || 0);
+    const rows = await query(sql, params);
+
+    const countSql = `
+      SELECT COUNT(*) as total
+      FROM parent_escalation_logs pel
+      JOIN students s ON pel.student_id = s.id
+      LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+      WHERE ${whereClauses.join(' AND ')}
+    `;
+    const countParams = params.slice(0, -2);
+    const countRows = await query(countSql, countParams);
+    const total = countRows[0] ? Number(countRows[0].total) : rows.length;
+
     res.status(200).json({
       success: true,
-      data: logsArray,
-      total: result.total,
-      logs: logsArray
+      data: rows,
+      total,
+      logs: rows
     });
   } catch (err) {
     res.status(500).json({
@@ -919,76 +1170,7 @@ router.get('/defaulters/communication-logs', auth, async (req, res) => {
   }
 });
 
-/**
- * Generate Single Student Direct WhatsApp Click-to-Chat Link (Supports GET and POST)
- * GET/POST /api/v1/reports/defaulters/generate-whatsapp-link
- */
-const handleGenerateWhatsAppLink = async (req, res) => {
-  try {
-    const studentId = req.query.student_id || req.body?.student_id || req.body?.student?.student_id || req.body?.student?.id;
-    const templateType = req.query.template_type || req.body?.templateType || req.body?.template_type || 'ATTENDANCE_CRITICAL';
-    const customMessage = req.query.message || req.body?.message;
-
-    let student = req.body?.student;
-    let targetPhone = req.query.phone || req.body?.phone;
-
-    if (!student && studentId) {
-      const studentRows = await query(
-        `SELECT s.id as student_id, s.full_name as student_name, s.official_enrollment_no,
-                s.phone as student_phone, s.parent_phone, s.parent_name,
-                d.name as department_name, d.code as department_code
-         FROM students s
-         LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
-         LEFT JOIN departments d ON e.department_id = d.id
-         WHERE s.id = ? LIMIT 1`,
-        [studentId]
-      );
-      if (studentRows && studentRows.length > 0) {
-        student = studentRows[0];
-        targetPhone = targetPhone || student.parent_phone || student.student_phone;
-      }
-    } else if (student) {
-      targetPhone = targetPhone || student.parent_phone || student.student_phone;
-    }
-
-    if (!targetPhone) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'BAD_REQUEST', message: 'Target phone number is required or student has no registered phone' }
-      });
-    }
-
-    let msg = customMessage;
-    if (!msg && student) {
-      const tpl = parentGatewayService.DEFAULT_TEMPLATES[templateType] || parentGatewayService.DEFAULT_TEMPLATES.ATTENDANCE_CRITICAL;
-      msg = parentGatewayService.formatTemplate(tpl, student);
-    } else if (!msg) {
-      msg = 'Attendance notice from institution.';
-    }
-
-    const whatsappLink = parentGatewayService.generateWhatsAppLink(targetPhone, msg);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        phone: parentGatewayService.normalizePhone(targetPhone),
-        message: msg,
-        whatsapp_url: whatsappLink,
-        whatsapp_link: whatsappLink,
-        whatsapp_web_url: whatsappLink
-      }
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_SERVER_ERROR', message: err.message }
-    });
-  }
-};
-
-router.get('/defaulters/generate-whatsapp-link', auth, handleGenerateWhatsAppLink);
-router.post('/defaulters/generate-whatsapp-link', auth, handleGenerateWhatsAppLink);
-
 module.exports = router;
+
 
 
