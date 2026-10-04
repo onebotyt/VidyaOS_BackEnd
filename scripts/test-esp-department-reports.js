@@ -30,7 +30,7 @@ async function runTests() {
 
   // 1. Admin Endpoint Verification
   console.log('[Step 1] Testing Admin ESP Reports (GET /api/v1/admin/reports/department)...');
-  const adminToken = await login('admin@gmail.com', 'Password@123');
+  const adminToken = await login('admin@gmail.com', 'Admin@123');
   const adminRes = await fetch(`${BASE_URL}/admin/reports/department?department_id=1`, {
     headers: { Authorization: `Bearer ${adminToken}` }
   });

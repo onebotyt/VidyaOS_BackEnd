@@ -7,7 +7,7 @@ async function test() {
   const loginRes = await fetch(`${BASE_URL}/api/v1/auth/faculty/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'Admin@123' })
+    body: JSON.stringify({ username: 'admin', password: 'Admin@123', force_logout: true, device_id: 'admin_students_test' })
   });
   const loginData = await loginRes.json();
   const token = loginData.data.access_token;

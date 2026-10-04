@@ -69,7 +69,7 @@ async function runTests() {
     const loginRes = await request('/api/v1/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'hod@gmail.com', password: 'Password@123' })
+      body: JSON.stringify({ email: 'hod@gmail.com', password: 'Password@123', force_logout: true, device_id: 'test_consolidation_' + Date.now() })
     });
     const loginData = JSON.parse(loginRes.body);
     assert(loginData.success === true, 'Teacher login successful');

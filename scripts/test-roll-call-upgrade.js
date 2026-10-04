@@ -48,7 +48,9 @@ async function testRollCallUpgrade() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email: 'hod@gmail.com',
-      password: 'Password@123'
+      password: 'Password@123',
+      device_id: 'test_roll_call_dev',
+      force_logout: true
     })
   });
   const loginData = await loginRes.json();

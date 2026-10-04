@@ -54,7 +54,7 @@ async function runTest() {
   const loginRes = await fetch(`${BASE_URL}/api/v1/auth/faculty/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@gmail.com', password: 'Password@123' })
+    body: JSON.stringify({ email: 'admin@gmail.com', password: 'Admin@123' })
   });
   const loginData = await loginRes.json();
   if (!loginData.success) throw new Error('Admin login failed: ' + JSON.stringify(loginData));

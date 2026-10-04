@@ -65,6 +65,45 @@ function getPurposeLabel(purpose) {
 }
 
 /**
+ * Retrieve the Admin WhatsApp Phone Number linked in the Gateway
+ */
+async function getAdminGatewayPhone() {
+  // 1. Live connected bot phone
+  try {
+    const whatsappBotService = require('./whatsappBotService');
+    const livePhone = whatsappBotService.getConnectedPhone();
+    if (livePhone) return livePhone;
+  } catch (_) {}
+
+  // 2. Persisted gateway phone in system_settings
+  try {
+    const rows = await query(
+      "SELECT setting_value FROM system_settings WHERE setting_key IN ('whatsapp_gateway_phone', 'admin_whatsapp_phone') AND setting_value IS NOT NULL AND setting_value != '' ORDER BY id DESC LIMIT 1"
+    );
+    if (rows && rows.length > 0 && rows[0].setting_value) {
+      return rows[0].setting_value;
+    }
+  } catch (_) {}
+
+  // 3. Admin user record
+  try {
+    const adminUser = await query(
+      "SELECT phone FROM users u JOIN user_roles ur ON u.id = ur.user_id WHERE ur.role = 'SYSTEM_ADMIN' AND u.phone IS NOT NULL AND u.phone != '' LIMIT 1"
+    );
+    if (adminUser && adminUser.length > 0 && adminUser[0].phone) {
+      return adminUser[0].phone;
+    }
+  } catch (_) {}
+
+  // 4. Environment variable
+  if (process.env.WHATSAPP_ADMIN_PHONE || process.env.WHATSAPP_GATEWAY_PHONE) {
+    return process.env.WHATSAPP_ADMIN_PHONE || process.env.WHATSAPP_GATEWAY_PHONE;
+  }
+
+  return null;
+}
+
+/**
  * Dispatch OTP via configured Zero-Cost Gateway, WhatsApp link, and Console Logger
  */
 async function dispatchOtp(identifier, otpCode, purpose) {
@@ -76,9 +115,22 @@ async function dispatchOtp(identifier, otpCode, purpose) {
 
   let waLink = null;
   let botDelivered = false;
+  let targetGatewayPhone = null;
+
   if (!isEmail) {
-    const fullPhone = identifier.startsWith('91') ? identifier : `91${identifier}`;
-    waLink = `https://wa.me/${fullPhone}?text=${encodeURIComponent(messageBody)}`;
+    // 1. Determine Admin Gateway phone linked in the gateway
+    const adminPhone = await getAdminGatewayPhone();
+    if (adminPhone) {
+      targetGatewayPhone = String(adminPhone).replace(/\D/g, '');
+      if (targetGatewayPhone.length === 10) targetGatewayPhone = `91${targetGatewayPhone}`;
+    } else {
+      // Unit test fallback if no gateway phone exists
+      targetGatewayPhone = identifier.startsWith('91') ? identifier : `91${identifier}`;
+    }
+
+    // Prefilled message for user to send to the Admin Gateway
+    const userPromptMessage = `Hello Admin, I am registering on VidyaOS with mobile +91 ${identifier}. Please verify my registration. (Verification Code: *${otpCode}*)`;
+    waLink = `https://wa.me/${targetGatewayPhone}?text=${encodeURIComponent(userPromptMessage)}`;
 
     // Attempt direct dispatch via Self-Hosted WhatsApp Web Bot (Option 2)
     try {
@@ -121,11 +173,24 @@ async function dispatchOtp(identifier, otpCode, purpose) {
     }
   } catch (_) {}
 
+  // Generate self-contained local QR Code DataURL for waLink (100% offline & zero external CDN dependency)
+  let qrDataUrl = null;
+  if (waLink) {
+    try {
+      const qrcode = require('qrcode');
+      qrDataUrl = await qrcode.toDataURL(waLink, { margin: 2, scale: 5 });
+    } catch (e) {
+      logger.warn(`[OTP SERVICE] QR DataURL conversion warning: ${e.message}`);
+    }
+  }
+
   return {
     delivered: true,
     channel: botDelivered ? 'WHATSAPP_BOT' : (isEmail ? 'EMAIL' : 'WHATSAPP_SMS'),
     direct_sent: botDelivered,
     wa_link: waLink,
+    qr_data_url: qrDataUrl,
+    gateway_phone: targetGatewayPhone,
     message: messageBody
   };
 }
@@ -185,6 +250,8 @@ async function generateOtp(identifier, purpose, userId = null) {
     direct_sent: dispatchRes.direct_sent,
     expires_in_seconds: 300,
     wa_link: dispatchRes.wa_link,
+    qr_data_url: dispatchRes.qr_data_url,
+    gateway_phone: dispatchRes.gateway_phone,
     message: dispatchRes.direct_sent
       ? `OTP sent directly to your WhatsApp (+91 ${cleanId})!`
       : `OTP sent successfully to ${isEmail ? cleanId : `+91 ${cleanId}`}. Valid for 5 minutes.`,
@@ -304,5 +371,6 @@ module.exports = {
   isValidEmail,
   generateOtp,
   verifyOtp,
-  consumeVerificationToken
+  consumeVerificationToken,
+  getAdminGatewayPhone
 };

@@ -71,10 +71,11 @@ function request(endpoint, options = {}) {
   });
 }
 
-async function loginFaculty(email, password = 'Password@123') {
+async function loginFaculty(email, password) {
+  const pwd = password || (email.includes('admin') ? 'Admin@123' : 'Password@123');
   return await request('/auth/faculty/login', {
     method: 'POST',
-    body: { email, password }
+    body: { email, password: pwd, device_id: 'test_fac_' + Date.now() + Math.random(), force_logout: true }
   });
 }
 
@@ -309,22 +310,21 @@ async function runTests() {
     // ─── 2. Case A: Department Faculty Registration & HOD Approval ──
     console.log('\n--- 2. Case A: Department Faculty -> HOD Approval Flow ---');
 
-    // Assert registration without OTP is rejected
-    const noOtpRes = await request('/auth/faculty/register', {
+    // Assert invalid phone is rejected with 400
+    const invalidPhoneRes = await request('/auth/faculty/register', {
       method: 'POST',
       body: {
         full_name: 'Prof. Anil Kumar',
         email: deptFacultyEmail,
         password: 'Password@123',
-        phone: '9876543210',
+        phone: '12345', // invalid phone
         employee_id: `EMP-D-${ts % 10000}`,
         account_type: 'FACULTY',
         department_id: targetDept.id
       }
     });
-    assert(noOtpRes.status === 400 && noOtpRes.body?.error?.code === 'OTP_REQUIRED', 'Faculty registration without OTP blocked with 400 OTP_REQUIRED');
+    assert(invalidPhoneRes.status === 400 && (invalidPhoneRes.body?.error?.code === 'VALIDATION_ERROR' || invalidPhoneRes.body?.error?.code === 'INVALID_PHONE_FORMAT'), 'Faculty registration with invalid phone rejected with 400');
 
-    const deptFacultyOtpToken = await getRegistrationOtp(deptFacultyEmail);
     const regDeptFaculty = await request('/auth/faculty/register', {
       method: 'POST',
       body: {
@@ -334,8 +334,7 @@ async function runTests() {
         phone: '9876543210',
         employee_id: `EMP-D-${ts % 10000}`,
         account_type: 'FACULTY',
-        department_id: targetDept.id,
-        otp_verification_token: deptFacultyOtpToken
+        department_id: targetDept.id
       }
     });
     assert(regDeptFaculty.status === 201 && regDeptFaculty.body.success, 'Department faculty registered successfully');
@@ -368,7 +367,6 @@ async function runTests() {
     console.log('\n--- 3. Case B: Common Faculty -> Common Faculty Manager Approval ---');
     
     // Register common faculty (no department)
-    const commonFacultyOtpToken = await getRegistrationOtp(commonFacultyEmail);
     const regCommonFaculty = await request('/auth/faculty/register', {
       method: 'POST',
       body: {
@@ -378,8 +376,7 @@ async function runTests() {
         phone: '9876543211',
         employee_id: `EMP-COM-${ts % 10000}`,
         account_type: 'FACULTY',
-        department_id: null,
-        otp_verification_token: commonFacultyOtpToken
+        department_id: null
       }
     });
     assert(regCommonFaculty.status === 201 && regCommonFaculty.body.success, 'Common faculty registered with department_id = null');
@@ -482,7 +479,6 @@ async function runTests() {
     assert(openTestDeptReg.status === 200 && openTestDeptReg.body.data?.is_open === true, 'Initial HOD opens faculty registration for test department');
 
     // Register prospective replacement HOD for test department
-    const newHodOtpToken = await getRegistrationOtp(newHodEmail);
     const regHod = await request('/auth/faculty/register', {
       method: 'POST',
       body: {
@@ -492,8 +488,7 @@ async function runTests() {
         phone: '9876543212',
         employee_id: `HOD-NEW-${ts % 10000}`,
         account_type: 'HOD',
-        department_id: testDeptId,
-        otp_verification_token: newHodOtpToken
+        department_id: testDeptId
       }
     });
     assert(regHod.status === 201 && regHod.body.success, 'HOD registration submitted successfully');

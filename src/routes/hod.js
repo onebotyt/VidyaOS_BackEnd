@@ -966,7 +966,7 @@ router.get('/reports', async (req, res) => {
  * GET /api/v1/hod/devices
  * List registered ESP32 terminals for HOD's department
  */
-router.get('/devices', async (req, res) => {
+router.get('/devices', requireHOD(), async (req, res) => {
   const deptId = req.hod_department_id;
   try {
     const devices = await query(

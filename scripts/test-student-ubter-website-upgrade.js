@@ -55,7 +55,9 @@ async function runTests() {
       headers: { 'Content-Type': 'application/json' }
     }, {
       enrollment_no: '24101054001',
-      password: 'Password@123'
+      password: 'Password@123',
+      force_logout: true,
+      device_id: 'ubter_test_dev'
     });
 
     assert(ubterLoginRes.status === 200, 'Student login by UBTER Registration Number (24101054001) returned 200 OK');
@@ -74,7 +76,9 @@ async function runTests() {
       headers: { 'Content-Type': 'application/json' }
     }, {
       enrollment_no: '2024IT001',
-      password: 'Password@123'
+      password: 'Password@123',
+      force_logout: true,
+      device_id: 'ubter_test_dev'
     });
     assert(enrollLoginRes.status === 200, 'Student login by Board Enrollment Number (2024IT001) returned 200 OK');
     assert(enrollLoginRes.data?.data?.user?.registration_no === '24101054001', 'Enrollment login returns registration_no');
@@ -88,7 +92,9 @@ async function runTests() {
       headers: { 'Content-Type': 'application/json' }
     }, {
       email: 'student1@gmail.com',
-      password: 'Password@123'
+      password: 'Password@123',
+      force_logout: true,
+      device_id: 'ubter_test_dev'
     });
     assert(emailLoginRes.status === 200, 'Student login by Gmail (student1@gmail.com) returned 200 OK');
 
@@ -104,7 +110,9 @@ async function runTests() {
       headers: { 'Content-Type': 'application/json' }
     }, {
       email: 'admin',
-      password: 'Admin@123'
+      password: 'Admin@123',
+      force_logout: true,
+      device_id: 'ubter_admin_dev'
     });
     assert(adminLoginRes.status === 200, 'Admin logged in successfully');
     const adminToken = adminLoginRes.data?.data?.access_token;

@@ -75,7 +75,7 @@ async function runTests() {
     method: 'POST'
   }, {
     email: 'admin@gmail.com',
-    password: 'password123'
+    password: 'Admin@123'
   });
 
   assert(loginRes.status === 200 && loginRes.body.success, 'Faculty login succeeded');

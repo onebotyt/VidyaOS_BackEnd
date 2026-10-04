@@ -87,10 +87,11 @@ app.use((req, res, next) => {
 // Admin URL Aliases / Normalization — Consolidated Academic Structure
 app.get('/admin/departments.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
 app.get('/admin/branches.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
-app.get(['/admin/subjects.html', '/admin/subjects', '/faculty/hod-subjects.html', '/faculty/hod-subjects'], (req, res) => res.redirect(301, '/faculty/groups.html'));
+app.get(['/admin/subjects.html', '/admin/subjects'], (req, res) => res.redirect(301, '/faculty/hod-subjects.html'));
 app.get(['/admin/academic-years.html', '/admin/academic_years.html', '/admin/academic_year.html', '/admin/academic-year.html'], (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=academic-years'));
 app.get(['/admin/academic_structure.html', '/admin/academic_structure', '/admin/academic-structure'], (req, res) => res.redirect(301, '/admin/academic-structure.html'));
 app.get(['/admin/audit.html', '/admin/audit'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
+app.get(['/admin/assignments.html', '/admin/assignments'], (req, res) => res.redirect(301, '/admin/faculty.html'));
 app.get(['/admin/whatsapp', '/admin/whatsapp.html', '/admin/whatsapp-gateway', '/admin/whatsapp_gateway', '/admin/whatsapp_gateway.html'], (req, res) => res.redirect(301, '/admin/whatsapp-gateway.html'));
 
 // Faculty URL Aliases / Normalization — Consolidated Pages
@@ -136,9 +137,25 @@ app.get([
   '/student/attendance/'
 ], (req, res) => res.redirect(301, '/student/attendance.html'));
 
-// Login URL Normalization & Redirects
-app.get(['/login', '/login.html', '/faculty/login', '/faculty/login.html'], (req, res) => res.redirect(301, '/login/faculty.html'));
-app.get(['/student/login', '/student/login.html'], (req, res) => res.redirect(301, '/login/student.html'));
+// Login URL Normalization & Redirects (Unified Single Login Page for all roles)
+app.get([
+  '/login',
+  '/login.html',
+  '/faculty/login',
+  '/faculty/login.html',
+  '/student/login',
+  '/student/login.html'
+], (req, res) => res.redirect(301, '/login/index.html'));
+
+app.get(['/login/student', '/login/student.html'], (req, res) => {
+  const queryStr = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
+  res.redirect(301, `/login/index.html?role=student${queryStr}`);
+});
+
+app.get(['/login/faculty', '/login/faculty.html'], (req, res) => {
+  const queryStr = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
+  res.redirect(301, `/login/index.html?role=faculty${queryStr}`);
+});
 
 // Self-Registration Redirects
 app.get(['/register/student.html', '/register/student', '/register', '/register/'], (req, res) => res.redirect(301, '/login/student-register.html'));

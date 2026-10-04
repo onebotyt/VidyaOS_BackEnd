@@ -56,6 +56,10 @@ async function runTests() {
   let passed = 0;
   let failed = 0;
 
+  // Pre-test cleanup: revoke all active sessions for idempotent runs
+  const { query: dbQuery } = require('../src/config/db');
+  await dbQuery("UPDATE user_sessions SET is_revoked = 1 WHERE is_revoked = 0");
+
   function assert(name, condition, extra = '') {
     if (condition) {
       console.log(` ✅ PASS: ${name}`);
@@ -113,7 +117,9 @@ async function runTests() {
 
   const adminLogin = await request('/api/v1/auth/faculty/login', { method: 'POST' }, {
     email: 'admin@gmail.com',
-    password: 'Password@123'
+    password: 'Admin@123',
+    device_id: 'rbactest_admin_dev',
+    force_logout: true
   });
   assert('Admin login successful', adminLogin.statusCode === 200 && adminLogin.json?.data?.access_token);
   const adminToken = adminLogin.json?.data?.access_token;
@@ -135,7 +141,9 @@ async function runTests() {
 
   const hodLogin = await request('/api/v1/auth/faculty/login', { method: 'POST' }, {
     email: 'hod@gmail.com',
-    password: 'Password@123'
+    password: 'Password@123',
+    device_id: 'rbactest_hod_dev',
+    force_logout: true
   });
   assert('HOD login successful', hodLogin.statusCode === 200 && hodLogin.json?.data?.access_token);
   const hodToken = hodLogin.json?.data?.access_token;
@@ -148,7 +156,9 @@ async function runTests() {
   // Log in as Regular Teacher (teacher@gmail.com)
   const regularLogin = await request('/api/v1/auth/faculty/login', { method: 'POST' }, {
     email: 'teacher@gmail.com',
-    password: 'Password@123'
+    password: 'Password@123',
+    device_id: 'rbactest_teacher_dev',
+    force_logout: true
   });
   assert('Regular teacher login successful', regularLogin.statusCode === 200 && regularLogin.json?.data?.access_token);
   const regularToken = regularLogin.json?.data?.access_token;
@@ -194,7 +204,9 @@ async function runTests() {
   // Log in as Class Teacher (classteacher@gmail.com)
   const ctLogin = await request('/api/v1/auth/faculty/login', { method: 'POST' }, {
     email: 'classteacher@gmail.com',
-    password: 'Password@123'
+    password: 'Password@123',
+    device_id: 'rbactest_ct_dev',
+    force_logout: true
   });
   assert('Class Teacher login successful', ctLogin.statusCode === 200 && ctLogin.json?.data?.access_token);
   const ctToken = ctLogin.json?.data?.access_token;
@@ -264,6 +276,9 @@ async function runTests() {
   const hodUser = { ...teacherUserNoSubjects, is_hod: true };
   const g5 = testGuardRoute({ roles: ['TEACHER', 'SYSTEM_ADMIN'], requireHOD: true }, hodUser);
   assert('HOD ALLOWED into hod-* pages', g5.allowed);
+
+  // Post-test cleanup: revoke all test sessions
+  await dbQuery("UPDATE user_sessions SET is_revoked = 1 WHERE is_revoked = 0");
 
   console.log('\n=============================================================');
   console.log(`🏁 TEST COMPLETE: ${passed} Passed, ${failed} Failed`);

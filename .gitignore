@@ -20,6 +20,7 @@ uploads/
 
 # WhatsApp Web Bot session (contains auth credentials)
 whatsapp_session/
+whatsapp_test_session/
 .wwebjs_auth/
 .wwebjs_cache/
 

@@ -19,6 +19,15 @@ const { authLimiter } = require('../middleware/rateLimiter');
 const auth = require('../middleware/auth');
 const { query, withTransaction } = require('../config/db');
 
+function getClientInfo(req) {
+  return {
+    ip: req.ip,
+    userAgent: req.get('User-Agent'),
+    deviceId: req.body?.device_id || req.get('X-Device-Id') || null,
+    forceLogout: req.body?.force_logout === true || req.body?.forceLogout === true
+  };
+}
+
 // ─────────────────────────────────────────────────────────
 // FACULTY LOGIN  (Gmail / Mobile Number + password)
 // POST /api/v1/auth/faculty/login
@@ -32,7 +41,7 @@ router.post('/faculty/login', authLimiter, [
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
   }
   try {
-    const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
+    const clientInfo = getClientInfo(req);
     const result = await authService.facultyLogin(credential, req.body.password, clientInfo);
 
     if (result.refresh_token) {
@@ -43,7 +52,14 @@ router.post('/faculty/login', authLimiter, [
     }
     res.status(200).json({ success: true, data: result });
   } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    res.status(err.status || 500).json({
+      success: false,
+      error: {
+        code: err.code || 'INTERNAL_SERVER_ERROR',
+        message: err.message,
+        active_session: err.active_session || undefined
+      }
+    });
   }
 });
 
@@ -73,7 +89,7 @@ router.post('/student/login', authLimiter, [
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
   }
   try {
-    const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
+    const clientInfo = getClientInfo(req);
     const result = await authService.studentLogin(credential, req.body.password, clientInfo);
 
     if (result.refresh_token) {
@@ -84,7 +100,14 @@ router.post('/student/login', authLimiter, [
     }
     res.status(200).json({ success: true, data: result });
   } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    res.status(err.status || 500).json({
+      success: false,
+      error: {
+        code: err.code || 'INTERNAL_SERVER_ERROR',
+        message: err.message,
+        active_session: err.active_session || undefined
+      }
+    });
   }
 });
 
@@ -101,13 +124,14 @@ router.post('/login', authLimiter, [
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
   }
   try {
-    const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
+    const clientInfo = getClientInfo(req);
     let result;
     try {
       result = await authService.facultyLogin(credential, req.body.password, clientInfo);
     } catch (err) {
       // If enrollment login error, forward directly
       if (err.code === 'ENROLLMENT_LOGIN_DISABLED') throw err;
+      if (err.code === 'ACCOUNT_ALREADY_ACTIVE') throw err;
       result = await authService.studentLogin(credential, req.body.password, clientInfo);
     }
     if (result.refresh_token) {
@@ -118,7 +142,14 @@ router.post('/login', authLimiter, [
     }
     res.status(200).json({ success: true, data: result });
   } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    res.status(err.status || 500).json({
+      success: false,
+      error: {
+        code: err.code || 'INTERNAL_SERVER_ERROR',
+        message: err.message,
+        active_session: err.active_session || undefined
+      }
+    });
   }
 });
 
@@ -146,16 +177,23 @@ router.post('/otp/send', authLimiter, [
 router.get('/whatsapp-settings', async (req, res) => {
   try {
     const rows = await query(
-      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('whatsapp_otp_mandatory', 'whatsapp_bot_enabled')`,
+      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('whatsapp_otp_mandatory', 'whatsapp_bot_enabled', 'whatsapp_gateway_phone', 'admin_whatsapp_phone')`,
     );
     const settings = {};
     (rows || []).forEach(r => { settings[r.setting_key] = r.setting_value; });
     // Default: mandatory is TRUE (opt-out model - admin must explicitly disable)
     const mandatory = settings.whatsapp_otp_mandatory !== 'false';
-    res.json({ success: true, data: { whatsapp_otp_mandatory: mandatory } });
+    const gatewayPhone = await otpService.getAdminGatewayPhone();
+    res.json({
+      success: true,
+      data: {
+        whatsapp_otp_mandatory: mandatory,
+        gateway_phone: gatewayPhone || null
+      }
+    });
   } catch (err) {
     // On error, default to mandatory = true for safety
-    res.json({ success: true, data: { whatsapp_otp_mandatory: true } });
+    res.json({ success: true, data: { whatsapp_otp_mandatory: true, gateway_phone: null } });
   }
 });
 
@@ -190,7 +228,7 @@ router.post('/login-otp', authLimiter, [
     return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
   }
   try {
-    const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
+    const clientInfo = getClientInfo(req);
     const result = await authService.loginWithOtp(credential, req.body.otp_code, clientInfo);
 
     if (result.refresh_token) {
@@ -201,7 +239,14 @@ router.post('/login-otp', authLimiter, [
     }
     res.status(200).json({ success: true, data: result });
   } catch (err) {
-    res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    res.status(err.status || 500).json({
+      success: false,
+      error: {
+        code: err.code || 'INTERNAL_SERVER_ERROR',
+        message: err.message,
+        active_session: err.active_session || undefined
+      }
+    });
   }
 });
 
@@ -392,7 +437,7 @@ router.get('/google/callback', async (req, res) => {
             if (payload.action === 'STUDENT_REGISTER') {
               window.location.href = origin + '/login/student-register.html?google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
             } else if (payload.action === 'PENDING_APPROVAL') {
-              window.location.href = origin + '/login/student.html?google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
+              window.location.href = origin + '/login/index.html?role=student&google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
             } else if (payload.action === 'NOT_REGISTERED') {
               window.location.href = origin + '/login/student-register.html?google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
             } else if (payload.access_token) {
@@ -428,8 +473,8 @@ router.get('/google/callback', async (req, res) => {
           <p style="color: #5f6368; font-size: 0.95rem; line-height: 1.4; margin: 0 0 1.5rem 0;">${errorMsg}</p>
           <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
             <a href="${frontendBase || ''}/login/student-register.html" style="background: #1a73e8; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">← Student Register</a>
-            <a href="${frontendBase || ''}/login/student.html" style="background: #34a853; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Student Login</a>
-            <a href="${frontendBase || ''}/login/faculty.html" style="background: #5f6368; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Faculty Login</a>
+            <a href="${frontendBase || ''}/login/index.html?role=student" style="background: #34a853; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Student Login</a>
+            <a href="${frontendBase || ''}/login/index.html?role=faculty" style="background: #5f6368; color: white; border: none; padding: 0.65rem 1.2rem; border-radius: 6px; cursor: pointer; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Faculty Login</a>
           </div>
         </div>
         <script>
@@ -555,10 +600,43 @@ router.post('/refresh', async (req, res) => {
 // POST /api/v1/auth/logout
 // ─────────────────────────────────────────────────────────
 router.post('/logout', async (req, res) => {
-  const refreshToken = req.cookies?.refreshToken || req.body.refresh_token;
-  if (refreshToken) await authService.logout(refreshToken);
-  res.clearCookie('refreshToken');
-  res.status(200).json({ success: true, message: 'Logged out successfully' });
+  try {
+    const refreshToken = req.cookies?.refreshToken || req.body?.refresh_token;
+    let sessionId = req.body?.session_id;
+    let userId = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const { verifyAccessToken } = require('../utils/tokenHelper');
+        const decoded = verifyAccessToken(authHeader.split(' ')[1]);
+        if (decoded) {
+          userId = decoded.user_id;
+          sessionId = sessionId || decoded.session_id;
+        }
+      } catch (_) {}
+    }
+
+    await authService.logout({ refreshToken, sessionId, userId });
+    res.clearCookie('refreshToken');
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (err) {
+    res.status(200).json({ success: true, message: 'Logged out' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// HEARTBEAT / SESSION KEEP-ALIVE
+// GET /api/v1/auth/heartbeat
+// ─────────────────────────────────────────────────────────
+router.get('/heartbeat', auth, (req, res) => {
+  res.status(200).json({
+    success: true,
+    active: true,
+    user_id: req.user.id,
+    session_id: req.user.session_id || null,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Student activation (legacy — kept for backwards compat)
@@ -949,55 +1027,9 @@ router.post('/student/register', authLimiter, [
       }
     }
 
-    // 4c. Conditional OTP Verification Check (WhatsApp / Mobile)
-    // Only mandatory when admin has enabled it from the WhatsApp Gateway page
-    const waSettingRow = await query(
-      `SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_otp_mandatory' LIMIT 1`
-    );
-    const isOtpMandatory = !waSettingRow || waSettingRow.length === 0 || waSettingRow[0].setting_value !== 'false';
+    // Phone verified flag - always 0 since OTP verification has been removed
+    const isPhoneVerified = 0;
 
-    if (isOtpMandatory && (!otp_verification_token || !otp_verification_token.trim())) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'OTP_REQUIRED',
-          message: 'WhatsApp OTP verification is mandatory. Please verify your WhatsApp mobile number before submitting.'
-        }
-      });
-    }
-
-    let tokenData = null;
-    let isPhoneVerified = 0;
-
-    if (otp_verification_token && otp_verification_token.trim()) {
-      try {
-        tokenData = await otpService.consumeVerificationToken(otp_verification_token.trim(), 'REGISTRATION');
-      } catch (otpErr) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_OTP_TOKEN',
-            message: otpErr.message || 'Invalid or expired OTP verification token. Please request a new WhatsApp OTP code.'
-          }
-        });
-      }
-
-      const tokenIdentifier = (tokenData.identifier || '').toLowerCase();
-      const matchesEmail = Boolean(email && tokenIdentifier === email.toLowerCase());
-      const matchesPhone = Boolean(cleanPhone && tokenIdentifier === cleanPhone);
-
-      if (!matchesEmail && !matchesPhone) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'OTP_IDENTIFIER_MISMATCH',
-            message: 'The verified OTP does not match the submitted WhatsApp mobile number.'
-          }
-        });
-      }
-
-      isPhoneVerified = matchesPhone ? 1 : 0;
-    }
 
     // 5. Hash the student's chosen password
     const passwordHash = await bcrypt.hash(password, 12);
@@ -1233,52 +1265,7 @@ router.post('/faculty/register', authLimiter, [
       }
     }
 
-    // Conditional OTP Verification Check (WhatsApp / Mobile)
-    // Only mandatory when admin has enabled it from the WhatsApp Gateway page
-    const waFacSettingRow = await query(
-      `SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_otp_mandatory' LIMIT 1`
-    );
-    const isFacOtpMandatory = !waFacSettingRow || waFacSettingRow.length === 0 || waFacSettingRow[0].setting_value !== 'false';
-
-    if (isFacOtpMandatory && (!otp_verification_token || !otp_verification_token.trim())) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'OTP_REQUIRED',
-          message: 'WhatsApp OTP verification is mandatory. Please verify your WhatsApp mobile number before submitting.'
-        }
-      });
-    }
-
-    let facTokenData = null;
-
-    if (otp_verification_token && otp_verification_token.trim()) {
-      try {
-        facTokenData = await otpService.consumeVerificationToken(otp_verification_token.trim(), 'REGISTRATION');
-      } catch (otpErr) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_OTP_TOKEN',
-            message: otpErr.message || 'Invalid or expired OTP verification token. Please request a new WhatsApp OTP code.'
-          }
-        });
-      }
-
-      const facTokenIdentifier = (facTokenData.identifier || '').toLowerCase();
-      const facMatchesEmail = Boolean(email && facTokenIdentifier === email.toLowerCase());
-      const facMatchesPhone = Boolean(cleanPhone && facTokenIdentifier === cleanPhone);
-
-      if (!facMatchesEmail && !facMatchesPhone) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'OTP_IDENTIFIER_MISMATCH',
-            message: 'The verified OTP does not match the submitted WhatsApp mobile number.'
-          }
-        });
-      }
-    }
+    // OTP verification removed - phone is optional, no verification required
 
     // 4. Hash password
     const passwordHash = await bcrypt.hash(password, 12);

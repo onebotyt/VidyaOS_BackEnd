@@ -32,6 +32,27 @@ async function auth(req, res, next) {
       });
     }
 
+    // Verify session state if bound to user_sessions
+    if (decoded.session_id) {
+      const sessionRows = await query(
+        `SELECT id, is_revoked FROM user_sessions WHERE id = ?`,
+        [decoded.session_id]
+      );
+      if (sessionRows && sessionRows.length > 0) {
+        if (sessionRows[0].is_revoked === 1) {
+          return res.status(401).json({
+            success: false,
+            error: {
+              code: 'SESSION_REVOKED',
+              message: 'Your session has ended because this account was logged in from another device or signed out.'
+            }
+          });
+        }
+        // Update heartbeat / last_active_at asynchronously
+        query(`UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
+      }
+    }
+
     // Verify user exists and is active in database
     const users = await query(
       `SELECT u.id, u.username, u.email, u.status 
@@ -121,6 +142,7 @@ async function auth(req, res, next) {
       }
     }
 
+    user.session_id = decoded.session_id || null;
     req.user = user;
     next();
   } catch (err) {

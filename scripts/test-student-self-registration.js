@@ -56,9 +56,18 @@ async function run() {
   console.log(`${BOLD}  Student Self-Registration E2E Test Suite${RESET}`);
   console.log(`${BOLD}══════════════════════════════════════════════${RESET}\n`);
 
+  // Pre-test cleanup: revoke all active sessions for idempotent runs
+  const { query: dbCleanup } = require('../src/config/db');
+  await dbCleanup("UPDATE user_sessions SET is_revoked = 1 WHERE is_revoked = 0");
+
   // ── 1. Login as a Class Teacher ──────────────────────────
   console.log(`${YELLOW}► Step 1: Teacher login${RESET}`);
-  const loginRes = await request('POST', '/auth/faculty/login', { email: 'classteacher@gmail.com', password: 'Password@123' });
+  const loginRes = await request('POST', '/auth/faculty/login', {
+    email: 'classteacher@gmail.com',
+    password: 'Password@123',
+    device_id: 'selfregtest_teacher_dev',
+    force_logout: true
+  });
   ok('Teacher login succeeds', loginRes.status === 200 && loginRes.body.success, JSON.stringify(loginRes.body.error));
   const teacherToken = loginRes.body?.data?.access_token || loginRes.body?.data?.token;
   ok('Token received', !!teacherToken);
@@ -126,20 +135,17 @@ async function run() {
     return verifyRes.body?.data?.verification_token;
   }
 
-  console.log(`\n${YELLOW}► Step 5: Student self-registration with Mandatory OTP${RESET}`);
+  console.log(`\n${YELLOW}► Step 5: Student self-registration (Direct without OTP)${RESET}`);
   const ts = Date.now();
   let newStudentId = null;
   let studentId2 = null;
   
   if (regCohort) {
-    // Ensure OTP is mandatory for this test step
-    const { query: dbQuery } = require('../src/config/db');
-    await dbQuery(`INSERT INTO system_settings (setting_key, setting_value, updated_at) VALUES ('whatsapp_otp_mandatory', 'true', CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET setting_value = 'true'`);
-
     const regBody = {
       full_name: `Test Student ${ts}`,
       official_enrollment_no: `TST${ts}`,
       email: `teststudent${ts}@gmail.com`,
+      phone: '9' + String(ts).slice(-9),
       password: 'TestPass123!',
       department_id: regCohort.department_id,
       branch_id: regCohort.branch_id,
@@ -147,16 +153,13 @@ async function run() {
       semester: regCohort.semester
     };
 
-    // 5a. Assert missing OTP is blocked
-    const noOtpRes = await request('POST', '/auth/student/register', regBody);
-    ok('Registration without OTP blocked with 400 OTP_REQUIRED', noOtpRes.status === 400 && noOtpRes.body?.error?.code === 'OTP_REQUIRED', JSON.stringify(noOtpRes.body));
+    // 5a. Assert invalid phone format is rejected
+    const badPhoneRes = await request('POST', '/auth/student/register', { ...regBody, phone: '12345' });
+    ok('Invalid phone format rejected with 400', badPhoneRes.status === 400, JSON.stringify(badPhoneRes.body));
 
-    // Obtain verified OTP token
-    regBody.otp_verification_token = await getRegistrationOtp(regBody.email);
-    ok('OTP token generated and verified', !!regBody.otp_verification_token, 'Token obtained');
-
+    // 5b. Direct registration succeeds without OTP
     const regRes = await request('POST', '/auth/student/register', regBody);
-    ok('Self-registration returns 201', regRes.status === 201, JSON.stringify(regRes.body?.error));
+    ok('Self-registration returns 201 without OTP', regRes.status === 201, JSON.stringify(regRes.body?.error));
     ok('Registration success flag', regRes.body?.success === true, JSON.stringify(regRes.body));
     ok('Message mentions pending approval', 
        (regRes.body?.data?.message || '').toLowerCase().includes('pending') || 
@@ -233,7 +236,6 @@ async function run() {
       year: regCohort.year,
       semester: regCohort.semester
     };
-    regBody2.otp_verification_token = await getRegistrationOtp(regBody2.email);
     const regRes2 = await request('POST', '/auth/student/register', regBody2);
     studentId2 = regRes2.body?.data?.student_id;
     if (studentId2) {

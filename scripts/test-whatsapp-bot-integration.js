@@ -129,7 +129,8 @@ async function run() {
     const testPhone = '9876543210';
     const otpRes = await otpService.generateOtp(testPhone, 'REGISTRATION');
     assert(otpRes.success, 'OTP generation succeeds');
-    assert(otpRes.wa_link.includes('wa.me/919876543210'), 'wa_link contains WhatsApp direct URI');
+    assert(otpRes.wa_link && otpRes.wa_link.includes('wa.me/'), 'wa_link contains WhatsApp direct URI');
+    assert(otpRes.wa_link.includes(encodeURIComponent('Hello Admin, I am registering on VidyaOS')), 'wa_link contains prefilled user verification text');
     assert.strictEqual(otpRes.direct_sent, false, 'direct_sent is false when bot offline');
     assert.strictEqual(otpRes.channel, 'WHATSAPP_SMS', 'channel is WHATSAPP_SMS fallback when bot offline');
     pass('OTP Service generates fallback WhatsApp link when bot is unlinked');

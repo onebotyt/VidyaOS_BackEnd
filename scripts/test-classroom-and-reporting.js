@@ -80,7 +80,7 @@ async function runTests() {
     // Admin login
     const adminRes = await api('/api/v1/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email: 'admin@gmail.com', password: 'Password@123' })
+      body: JSON.stringify({ email: 'admin@gmail.com', password: 'Admin@123' })
     });
     assert(adminRes.ok, `Admin login ok: ${JSON.stringify(adminRes.data)}`);
     adminToken = adminRes.data.data.access_token || adminRes.data.data.token;

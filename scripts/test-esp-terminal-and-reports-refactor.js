@@ -32,7 +32,7 @@ async function run() {
   // Test 1: Admin Department Report with ESP cohort_summary
   // -------------------------------------------------------------
   console.log('[Test 1] Testing Admin Department Attendance Report (cohort_summary from ESP)...');
-  const adminToken = await login('admin@gmail.com', 'Password@123');
+  const adminToken = await login('admin@gmail.com', 'Admin@123');
   const adminRes = await fetch(`${BASE_URL}/admin/reports/department?department_id=1`, {
     headers: { Authorization: `Bearer ${adminToken}` }
   });

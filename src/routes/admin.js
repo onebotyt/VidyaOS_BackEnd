@@ -2067,7 +2067,49 @@ router.post('/whatsapp/mandatory-toggle', [
 router.get('/whatsapp/status', async (req, res) => {
   try {
     const status = whatsappBotService.getStatus();
-    res.json({ success: true, data: status });
+    const rows = await query(
+      "SELECT setting_value FROM system_settings WHERE setting_key = 'whatsapp_gateway_phone' LIMIT 1"
+    );
+    const persistedPhone = rows && rows.length > 0 ? rows[0].setting_value : null;
+    res.json({
+      success: true,
+      data: {
+        ...status,
+        persisted_phone: persistedPhone,
+        gateway_phone: status.connected_user?.phone || persistedPhone || null
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/v1/admin/whatsapp/gateway-phone
+ * Update the Admin Gateway WhatsApp Phone Number in settings
+ */
+router.post('/whatsapp/gateway-phone', [
+  body('phone').trim().notEmpty().withMessage('Valid phone number is required'),
+  validate
+], async (req, res) => {
+  const { phone } = req.body;
+  let clean = phone.replace(/\D/g, '');
+  if (clean.length === 10) clean = `91${clean}`;
+  if (!clean || clean.length < 10) {
+    return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid 10-digit mobile number is required' } });
+  }
+  try {
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+       VALUES ('whatsapp_gateway_phone', ?, 'Institutional Admin WhatsApp phone number linked in gateway', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+      [clean, req.user?.id || 1]
+    );
+    res.json({
+      success: true,
+      message: `Admin Gateway WhatsApp phone updated to +${clean}`,
+      data: { gateway_phone: clean }
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
@@ -2079,7 +2121,8 @@ router.get('/whatsapp/status', async (req, res) => {
  */
 router.post('/whatsapp/initialize', async (req, res) => {
   try {
-    const initRes = await whatsappBotService.initialize();
+    const clearSession = req.body?.clear_session === true || req.body?.clearSession === true;
+    const initRes = await whatsappBotService.initialize({ clearSession });
     res.json(initRes);
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });

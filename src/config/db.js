@@ -241,6 +241,9 @@ function getSqliteDb() {
       try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN dispatched_by INTEGER;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN sent_at DATETIME DEFAULT CURRENT_TIMESTAMP;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE user_sessions ADD COLUMN device_id TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE user_sessions ADD COLUMN last_active_at DATETIME;'); } catch (_) {}
+      try { sqliteDb.exec("UPDATE user_sessions SET last_active_at = COALESCE(updated_at, created_at, datetime('now')) WHERE last_active_at IS NULL;"); } catch (_) {}
 
       // Synchronize action <-> event_type, user_id <-> actor_id, entity_type <-> target_type
       sqliteDb.exec(`

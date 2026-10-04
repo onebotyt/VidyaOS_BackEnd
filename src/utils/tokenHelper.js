@@ -18,15 +18,15 @@ const REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
  * Invariant: Never bake dynamic academic scopes (cohort/subjects) into token.
  */
 function generateAccessToken(payload) {
-  return jwt.sign(
-    {
-      user_id: payload.id || payload.user_id,
-      username: payload.username,
-      roles: payload.roles || []
-    },
-    ACCESS_SECRET,
-    { expiresIn: ACCESS_EXPIRY }
-  );
+  const tokenData = {
+    user_id: payload.id || payload.user_id,
+    username: payload.username,
+    roles: payload.roles || []
+  };
+  if (payload.session_id || payload.sessionId) {
+    tokenData.session_id = payload.session_id || payload.sessionId;
+  }
+  return jwt.sign(tokenData, ACCESS_SECRET, { expiresIn: ACCESS_EXPIRY });
 }
 
 /**

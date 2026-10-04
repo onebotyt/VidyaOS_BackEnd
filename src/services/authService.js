@@ -126,15 +126,65 @@ async function verifyGoogleToken(idToken) {
 }
 
 // ─── Session helpers ──────────────────────────────────────
-async function persistSession(userId, clientInfo) {
+async function enforceSingleActiveSession(userId, clientInfo = {}) {
+  const deviceId = clientInfo.deviceId || clientInfo.device_id || null;
+  const forceLogout = clientInfo.forceLogout === true || clientInfo.force_logout === true;
+
+  // Active session threshold: is_revoked = 0, not expired, and active within the last 15 minutes
+  const activeSessions = await query(
+    `SELECT id, device_id, ip_address, user_agent, last_active_at, created_at
+     FROM user_sessions
+     WHERE user_id = ? 
+       AND is_revoked = 0 
+       AND expires_at > CURRENT_TIMESTAMP
+       AND datetime(last_active_at, '+15 minutes') > datetime('now')
+     ORDER BY id DESC`,
+    [userId]
+  );
+
+  if (activeSessions && activeSessions.length > 0) {
+    const currentSession = activeSessions[0];
+
+    // Check if re-authenticating from the SAME device or same test client environment
+    const isSameDevice = (deviceId && currentSession.device_id && deviceId === currentSession.device_id) ||
+                         (!deviceId && !currentSession.device_id && currentSession.ip_address === clientInfo.ip && currentSession.user_agent === clientInfo.userAgent);
+
+    if (forceLogout || isSameDevice) {
+      // Cleanly revoke previous session(s)
+      await query(
+        `UPDATE user_sessions 
+         SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ? AND is_revoked = 0`,
+        [userId]
+      );
+    } else {
+      // Reject login because this account is actively being used on another device/PC
+      throw {
+        status: 409,
+        code: 'ACCOUNT_ALREADY_ACTIVE',
+        message: 'This account is currently active on another device. Simultaneous logins into the same account are not permitted.',
+        active_session: {
+          device_id: currentSession.device_id || 'Other PC',
+          ip_address: currentSession.ip_address || 'Remote IP',
+          last_active_at: currentSession.last_active_at
+        }
+      };
+    }
+  }
+}
+
+async function persistSession(userId, clientInfo = {}) {
+  const deviceId = clientInfo.deviceId || clientInfo.device_id || null;
   const refreshToken = generateRefreshToken({ id: userId });
   const tokenHash = hashToken(refreshToken);
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  await query(
-    `INSERT INTO user_sessions (user_id, refresh_token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
-    [userId, tokenHash, clientInfo.userAgent || null, clientInfo.ip || null, expiresAt]
+  const result = await query(
+    `INSERT INTO user_sessions (user_id, refresh_token_hash, user_agent, ip_address, device_id, last_active_at, expires_at) 
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+    [userId, tokenHash, clientInfo.userAgent || null, clientInfo.ip || null, deviceId, expiresAt]
   );
-  return refreshToken;
+  const sessionId = result[0]?.insertId ?? result.lastInsertRowid ?? result.insertId;
+  return { refreshToken, sessionId };
 }
 
 async function buildUserPayload(user) {
@@ -303,27 +353,19 @@ class AuthService {
     }
 
     const trimmedPass = (password || '').trim();
-    let isMatch = user.password_hash ? await bcrypt.compare(trimmedPass, user.password_hash) : false;
-    const lowerPass = trimmedPass.toLowerCase();
-    if (!isMatch && (
-      lowerPass === 'password@123' ||
-      lowerPass === 'password123' ||
-      lowerPass === 'admin@123' ||
-      lowerPass === 'admin123' ||
-      lowerPass === 'admin' ||
-      lowerPass === 'adminpassword123!' ||
-      lowerPass === 'demo@1234'
-    )) {
-      isMatch = true;
-    }
+    const isMatch = user.password_hash ? await bcrypt.compare(trimmedPass, user.password_hash) : false;
     if (!isMatch) {
       throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid credentials' };
     }
 
+    // Enforce single active session
+    await enforceSingleActiveSession(user.id, clientInfo);
+
     user.roles = userRoles;
     const payload = await buildUserPayload(user);
+    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+    payload.session_id = sessionId;
     const accessToken = generateAccessToken(payload);
-    const refreshToken = await persistSession(user.id, clientInfo);
 
     return {
       must_change_password: false,
@@ -438,10 +480,7 @@ class AuthService {
 
     // Provisioned: use temp password
     if (user.status === 'PROVISIONED' || user.must_change_password) {
-      let matchTemp = user.temp_password_hash ? await bcrypt.compare(password, user.temp_password_hash) : false;
-      if (!matchTemp && (password === 'Password@123' || password === 'Student@2024' || password === 'Demo@1234')) {
-        matchTemp = true;
-      }
+      const matchTemp = user.temp_password_hash ? await bcrypt.compare(password, user.temp_password_hash) : false;
       if (!matchTemp) throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid temporary password' };
 
       const activationToken = generateActivationToken(user);
@@ -460,26 +499,19 @@ class AuthService {
     }
 
     const trimmedPass = (password || '').trim();
-    let isMatch = user.password_hash ? await bcrypt.compare(trimmedPass, user.password_hash) : false;
-    const lowerPass = trimmedPass.toLowerCase();
-    if (!isMatch && (
-      lowerPass === 'password@123' ||
-      lowerPass === 'password123' ||
-      lowerPass === 'student@2024' ||
-      lowerPass === 'student123' ||
-      lowerPass === 'demo@1234' ||
-      lowerPass === 'admin@123'
-    )) {
-      isMatch = true;
-    }
+    const isMatch = user.password_hash ? await bcrypt.compare(trimmedPass, user.password_hash) : false;
     if (!isMatch) throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid password' };
+
+    // Enforce single active session
+    await enforceSingleActiveSession(user.id, clientInfo);
 
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     user.roles = roles.map(r => r.role);
     user.full_name = student?.full_name || user.username;
 
+    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+    user.session_id = sessionId;
     const accessToken = generateAccessToken(user);
-    const refreshToken = await persistSession(user.id, clientInfo);
 
     return {
       must_change_password: false,
@@ -625,12 +657,15 @@ class AuthService {
       throw { status: 403, code: 'FORBIDDEN', message: `Account status: ${user.status}. Contact administrator.` };
     }
 
+    await enforceSingleActiveSession(user.id, clientInfo);
+
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     user.roles = roles.map(r => r.role);
 
     const payload2 = await buildUserPayload(user);
+    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+    payload2.session_id = sessionId;
     const accessToken = generateAccessToken(payload2);
-    const refreshToken = await persistSession(user.id, clientInfo);
 
     return {
       access_token: accessToken,
@@ -686,12 +721,15 @@ class AuthService {
     // Verify OTP using otpService
     await otpService.verifyOtp(cred.value, otpCode, 'LOGIN');
 
+    await enforceSingleActiveSession(user.id, clientInfo);
+
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     user.roles = roles.map(r => r.role);
 
     const payload = await buildUserPayload(user);
+    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+    payload.session_id = sessionId;
     const accessToken = generateAccessToken(payload);
-    const refreshToken = await persistSession(user.id, clientInfo);
 
     // Audit log
     await auditService.logAudit({
@@ -766,11 +804,14 @@ class AuthService {
       ipAddress: clientInfo.ip
     });
 
+    await enforceSingleActiveSession(user.id, clientInfo);
+
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     user.roles = roles.map(r => r.role);
     const payload = await buildUserPayload(user);
+    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+    payload.session_id = sessionId;
     const accessToken = generateAccessToken(payload);
-    const refreshToken = await persistSession(user.id, clientInfo);
 
     return {
       success: true,
@@ -950,12 +991,15 @@ class AuthService {
         sUser.google_sub = googleSub;
       }
 
+      await enforceSingleActiveSession(sUser.id, clientInfo);
+
       const sRoles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [sUser.id]);
       sUser.roles = sRoles.map(r => r.role);
 
       const payload = await buildUserPayload(sUser);
+      const { refreshToken, sessionId } = await persistSession(sUser.id, clientInfo);
+      payload.session_id = sessionId;
       const accessToken = generateAccessToken(payload);
-      const refreshToken = await persistSession(sUser.id, clientInfo);
 
       return {
         action: 'LOGIN',
@@ -1027,14 +1071,17 @@ class AuthService {
       throw { status: 403, code: 'FORBIDDEN', message: `Account status: ${user.status}. Contact administrator.` };
     }
 
+    await enforceSingleActiveSession(user.id, clientInfo);
+
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     user.roles = roles.map(r => r.role);
 
     // If user is a student
     if (user.roles.includes('STUDENT') && !user.roles.includes('TEACHER') && !user.roles.includes('SYSTEM_ADMIN')) {
       const payload = await buildUserPayload(user);
+      const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+      payload.session_id = sessionId;
       const accessToken = generateAccessToken(payload);
-      const refreshToken = await persistSession(user.id, clientInfo);
 
       return {
         action: 'LOGIN',
@@ -1057,8 +1104,9 @@ class AuthService {
     }
 
     const payload = await buildUserPayload(user);
+    const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
+    payload.session_id = sessionId;
     const accessToken = generateAccessToken(payload);
-    const refreshToken = await persistSession(user.id, clientInfo);
 
     return {
       action: 'LOGIN',
@@ -1109,18 +1157,19 @@ class AuthService {
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     user.roles = roles.map(r => r.role);
 
-    const newAccessToken = generateAccessToken(user);
-    const newRefreshToken = generateRefreshToken(user);
-    const newHash = hashToken(newRefreshToken);
-    const newExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
+    let newSessionId = null;
     await withTransaction(async (conn) => {
       await conn.execute(`UPDATE user_sessions SET is_revoked = 1 WHERE id = ?`, [session.id]);
-      await conn.execute(
-        `INSERT INTO user_sessions (user_id, refresh_token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)`,
-        [user.id, newHash, clientInfo.userAgent || null, clientInfo.ip || null, newExpiry]
+      const insRes = await conn.query(
+        `INSERT INTO user_sessions (user_id, refresh_token_hash, user_agent, ip_address, device_id, last_active_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`,
+        [user.id, newHash, clientInfo.userAgent || null, clientInfo.ip || null, clientInfo.deviceId || null, newExpiry]
       );
+      newSessionId = insRes[0]?.insertId ?? insRes.lastInsertRowid ?? insRes.insertId;
     });
+
+    user.session_id = newSessionId;
+    const newAccessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user);
 
     return { access_token: newAccessToken, refresh_token: newRefreshToken };
   }
@@ -1132,10 +1181,24 @@ class AuthService {
   // ─────────────────────────────────────────────────────────
   // LOGOUT
   // ─────────────────────────────────────────────────────────
-  async logout(refreshToken) {
-    if (!refreshToken) return;
-    const tokenHash = hashToken(refreshToken);
-    await query(`UPDATE user_sessions SET is_revoked = 1 WHERE refresh_token_hash = ?`, [tokenHash]);
+  async logout(param) {
+    if (!param) return;
+    if (typeof param === 'string') {
+      const tokenHash = hashToken(param);
+      await query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE refresh_token_hash = ?`, [tokenHash]);
+      return;
+    }
+    const { refreshToken, sessionId, userId } = param;
+    if (sessionId) {
+      await query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [sessionId]);
+    }
+    if (refreshToken) {
+      const tokenHash = hashToken(refreshToken);
+      await query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE refresh_token_hash = ?`, [tokenHash]);
+    }
+    if (userId && !sessionId && !refreshToken) {
+      await query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND is_revoked = 0`, [userId]);
+    }
   }
 }
 

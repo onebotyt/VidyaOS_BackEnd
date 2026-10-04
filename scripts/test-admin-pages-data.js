@@ -24,7 +24,7 @@ async function testAdminPages() {
       res.on('end', () => resolve(JSON.parse(data)));
     });
     req.on('error', reject);
-    req.write(JSON.stringify({ username: 'admin@gmail.com', password: 'Password@123' }));
+    req.write(JSON.stringify({ username: 'admin@gmail.com', password: 'Admin@123' }));
     req.end();
   });
 

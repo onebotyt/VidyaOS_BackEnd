@@ -42,7 +42,7 @@ async function run() {
       path: u.endpoint,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
-    }, { email: u.email, password: 'Password@123' });
+    }, { email: u.email, password: u.role === 'Admin' ? 'Admin@123' : 'Password@123' });
 
     if (res.status === 200 && res.body.success) {
       console.log(`✓ [${u.role}] Logged in successfully with Gmail: ${u.email}`);

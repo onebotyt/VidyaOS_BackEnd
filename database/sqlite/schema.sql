@@ -357,6 +357,8 @@ CREATE TABLE user_sessions (
   refresh_token_hash TEXT NOT NULL UNIQUE,
   user_agent TEXT,
   ip_address TEXT,
+  device_id TEXT,
+  last_active_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME NOT NULL,
   is_revoked INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

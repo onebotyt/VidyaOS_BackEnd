@@ -29,7 +29,12 @@ async function testLiveLogCheckIn() {
   const loginRes = await fetch('http://localhost:3000/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'hod@gmail.com', password: 'Password@123' })
+    body: JSON.stringify({
+      email: 'hod@gmail.com',
+      password: 'Password@123',
+      device_id: 'test_live_log_dev',
+      force_logout: true
+    })
   });
   const loginData = await loginRes.json();
   assert(loginRes.ok && loginData.success, 'Faculty login succeeded');

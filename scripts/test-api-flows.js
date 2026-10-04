@@ -48,13 +48,17 @@ async function runTests() {
   console.log('   STARTING COLLEGE ATTENDANCE SYSTEM API TESTS   ');
   console.log('==================================================\n');
 
+  // Pre-test cleanup: revoke all active sessions for a clean slate
+  const { query } = require('../src/config/db');
+  await query("UPDATE user_sessions SET is_revoked = 1 WHERE is_revoked = 0");
+
   let passed = 0;
   function assert(condition, message) {
     if (!condition) {
-      console.error(`❌ FAILED: ${message}`);
+      console.error(`\u274c FAILED: ${message}`);
       throw new Error(`Assertion failed: ${message}`);
     }
-    console.log(`✓ PASS: ${message}`);
+    console.log(`\u2713 PASS: ${message}`);
     passed++;
   }
 
@@ -62,10 +66,12 @@ async function runTests() {
   const health = await apiRequest('GET', '/health');
   assert(health.status === 200 && health.body?.data?.status === 'ONLINE', '1. Health Check returns 200 ONLINE');
 
-  // 2. Admin Login
+  // 2. Admin Login (force_logout ensures no 409 on re-runs)
   const adminLogin = await apiRequest('POST', '/auth/login', {
     email: 'admin@gmail.com',
-    password: 'Admin@123'
+    password: 'Admin@123',
+    device_id: 'apitest_admin_dev',
+    force_logout: true
   });
   assert(adminLogin.status === 200 && adminLogin.body?.success === true, '2. Admin Login successful');
   const adminToken = adminLogin.body?.data?.access_token || adminLogin.body?.data?.token;
@@ -77,7 +83,9 @@ async function runTests() {
   // 4. Faculty Login (HOD)
   const facultyLogin = await apiRequest('POST', '/auth/login', {
     email: 'hod@gmail.com',
-    password: 'Password@123'
+    password: 'Password@123',
+    device_id: 'apitest_hod_dev',
+    force_logout: true
   });
   assert(facultyLogin.status === 200 && facultyLogin.body?.success === true, '4. Faculty Login successful');
   const facultyToken = facultyLogin.body?.data?.access_token || facultyLogin.body?.data?.token;
@@ -89,7 +97,9 @@ async function runTests() {
   // 6. Student Login
   const studentLogin = await apiRequest('POST', '/auth/login', {
     email: 'student1@gmail.com',
-    password: 'Password@123'
+    password: 'Password@123',
+    device_id: 'apitest_student_dev',
+    force_logout: true
   });
   assert(studentLogin.status === 200 && studentLogin.body?.success === true, '6. Student Login successful');
   const studentToken = studentLogin.body?.data?.access_token || studentLogin.body?.data?.token;
@@ -193,6 +203,9 @@ async function runTests() {
   const sessionStatus = await apiRequest('GET', '/admin/session/status', null, adminToken);
   assert(sessionStatus.status === 200 && sessionStatus.body?.data?.session_label != null, '25. Autonomous Academic Session Engine reports active status');
 
+  // Post-test cleanup
+  await query("UPDATE user_sessions SET is_revoked = 1 WHERE is_revoked = 0");
+
   console.log('\n==================================================');
   console.log(`       ALL SYSTEM FLOW TESTS PASSED (${passed}/${passed})        `);
   console.log('==================================================');
@@ -201,6 +214,6 @@ async function runTests() {
 runTests().then(() => {
   process.exit(0);
 }).catch(err => {
-  console.error('\n❌ TEST RUN FAILED:', err);
+  console.error('\n\u274c TEST RUN FAILED:', err);
   process.exit(1);
 });
