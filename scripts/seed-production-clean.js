@@ -6,7 +6,7 @@
  * - ZERO demo faculty (no fake HODs, no fake teachers)
  * - ZERO fake attendance sessions / scans / registers
  * - 6 Standard Polytechnic Departments (ECE, EE, IT, ME, CE, PHARM) ready for real HOD appointment
- * - Academic Year 2026-27 (Winter)
+ * - Academic Year 2026-27 (Odd Semester)
  * - EXACTLY 1 user: System Administrator (admin@gmail.com / Admin@123)
  */
 
