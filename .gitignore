@@ -56,6 +56,5 @@ scripts/capture-*
 scripts/inspect-*
 *.test.js
 *.spec.js
-tests/
 test/
-
+scratch/

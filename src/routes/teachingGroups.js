@@ -1463,10 +1463,14 @@ router.get('/:id/tests/:testId/scores', auth, async (req, res) => {
 
     const cleaned = scores.map(s => {
       let rem = s.remarks;
+      let question_scores = null;
+      let questions = null;
       if (rem && typeof rem === 'string' && rem.startsWith('{')) {
         try {
           const parsed = JSON.parse(rem);
           if (parsed.remarks !== undefined) rem = parsed.remarks;
+          if (parsed.question_scores) question_scores = parsed.question_scores;
+          if (parsed.questions) questions = parsed.questions;
         } catch { /* raw string */ }
       }
       return {
@@ -1474,6 +1478,8 @@ router.get('/:id/tests/:testId/scores', auth, async (req, res) => {
         marks_obtained: s.marks_obtained,
         is_absent: Boolean(s.is_absent),
         remarks: rem,
+        question_scores,
+        questions,
         status: s.status
       };
     });
@@ -1506,7 +1512,12 @@ router.post(
           const isAbsent = Boolean(s.is_absent);
           const marks = isAbsent ? null : (s.marks_obtained !== undefined && s.marks_obtained !== null && s.marks_obtained !== '' ? Number(s.marks_obtained) : null);
           const status = isAbsent ? 'ABSENT' : (marks !== null ? 'GRADED' : 'SUBMITTED');
-          const feedbackPayload = JSON.stringify({ is_absent: isAbsent, remarks: s.remarks || null });
+          const feedbackPayload = JSON.stringify({
+            is_absent: isAbsent,
+            remarks: s.remarks || null,
+            question_scores: s.question_scores || null,
+            questions: s.questions || null
+          });
 
           await conn.execute(
             `INSERT INTO assessment_submissions (assessment_id, student_id, marks_obtained, feedback, graded_by, status)
