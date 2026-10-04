@@ -1309,7 +1309,14 @@ router.post(
       const groupId = Number(req.params.id);
       const { title, description, due_date, max_marks = 100 } = req.body;
 
-      const grp = await query(`SELECT * FROM teaching_groups WHERE id = ?`, [groupId]);
+      const grp = await query(
+        `SELECT tg.*, COALESCE(ar.department_id, t.department_id, 1) as department_id
+         FROM teaching_groups tg
+         LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
+         LEFT JOIN teachers t ON tg.teacher_id = t.id
+         WHERE tg.id = ?`,
+        [groupId]
+      );
       if (!grp.length) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teaching group not found' } });
       const g = grp[0];
 
@@ -1356,6 +1363,16 @@ router.delete('/:id/assignments/:assignmentId', auth, requireRole('TEACHER', 'SY
   }
 });
 
+// Ensure questions column exists in assessments table (fail-safe idempotent)
+(async () => {
+  try {
+    const cols = await query(`PRAGMA table_info(assessments)`);
+    if (Array.isArray(cols) && !cols.some(c => c.name === 'questions')) {
+      await query(`ALTER TABLE assessments ADD COLUMN questions TEXT`);
+    }
+  } catch (_) {}
+})();
+
 /**
  * List Group Class Tests
  * GET /api/v1/teaching-groups/:id/tests
@@ -1364,7 +1381,7 @@ router.get('/:id/tests', auth, async (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const rows = await query(
-      `SELECT a.id, a.title as name, a.title, a.description, a.due_date as test_date, a.due_date, a.max_marks, a.created_at,
+      `SELECT a.id, a.title as name, a.title, a.description, a.due_date as test_date, a.due_date, a.max_marks, a.created_at, a.questions,
               (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as graded_count,
               (SELECT AVG(sub.marks_obtained) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as avg_score,
               (SELECT (COUNT(CASE WHEN sub.marks_obtained >= (a.max_marks * 0.4) THEN 1 END) * 100.0 / NULLIF(COUNT(sub.id), 0))
@@ -1374,7 +1391,24 @@ router.get('/:id/tests', auth, async (req, res) => {
        ORDER BY a.created_at DESC`,
       [groupId]
     );
-    res.status(200).json({ success: true, data: rows });
+
+    const formatted = rows.map(r => {
+      let qList = null;
+      if (r.questions) {
+        try {
+          qList = typeof r.questions === 'string' ? JSON.parse(r.questions) : r.questions;
+        } catch {
+          qList = null;
+        }
+      }
+      return {
+        ...r,
+        questions: qList,
+        num_questions: Array.isArray(qList) ? qList.length : null
+      };
+    });
+
+    res.status(200).json({ success: true, data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
@@ -1396,15 +1430,43 @@ router.post(
   async (req, res) => {
     try {
       const groupId = Number(req.params.id);
-      const { name, test_date, max_marks = 20, description } = req.body;
+      const { name, test_date, max_marks = 20, description, num_questions, questions } = req.body;
 
-      const grp = await query(`SELECT * FROM teaching_groups WHERE id = ?`, [groupId]);
+      const grp = await query(
+        `SELECT tg.*, COALESCE(ar.department_id, t.department_id, 1) as department_id
+         FROM teaching_groups tg
+         LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
+         LEFT JOIN teachers t ON tg.teacher_id = t.id
+         WHERE tg.id = ?`,
+        [groupId]
+      );
       if (!grp.length) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teaching group not found' } });
       const g = grp[0];
 
+      // Build structured question definitions
+      let questionsPayload = null;
+      if (Array.isArray(questions) && questions.length > 0) {
+        questionsPayload = questions.map((q, idx) => ({
+          num: idx + 1,
+          label: q.label || ('Q' + (idx + 1)),
+          max: Number(q.max) || Math.round((Number(max_marks) / questions.length) * 10) / 10
+        }));
+      } else if (num_questions && Number(num_questions) > 0) {
+        const count = parseInt(num_questions, 10);
+        const marksNum = Number(max_marks) || 20;
+        const perQ = Math.round((marksNum / count) * 10) / 10;
+        questionsPayload = Array.from({ length: count }, (_, i) => ({
+          num: i + 1,
+          label: 'Q' + (i + 1),
+          max: perQ
+        }));
+      }
+
+      const questionsJson = questionsPayload ? JSON.stringify(questionsPayload) : null;
+
       const result = await query(
-        `INSERT INTO assessments (teacher_id, group_id, semester, academic_year_id, type, title, description, due_date, max_marks, department_id, year)
-         VALUES (?, ?, ?, ?, 'EXAM', ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO assessments (teacher_id, group_id, semester, academic_year_id, type, title, description, due_date, max_marks, questions, department_id, year)
+         VALUES (?, ?, ?, ?, 'EXAM', ?, ?, ?, ?, ?, ?, ?)`,
         [
           g.teacher_id,
           groupId,
@@ -1414,6 +1476,7 @@ router.post(
           description || null,
           test_date || null,
           max_marks,
+          questionsJson,
           g.department_id || null,
           Math.ceil(g.semester / 2)
         ]
@@ -1422,7 +1485,11 @@ router.post(
       res.status(201).json({
         success: true,
         message: 'Class test scheduled successfully',
-        data: { id: result.insertId || result.lastInsertRowid }
+        data: {
+          id: result.insertId || result.lastInsertRowid,
+          questions: questionsPayload,
+          num_questions: questionsPayload ? questionsPayload.length : null
+        }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
