@@ -208,7 +208,7 @@ router.get('/', auth, async (req, res) => {
 router.post(
   '/',
   auth,
-  requireRole('TEACHER'),
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
   [
     body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Group name required (2-100 chars)'),
     body('subject_name').trim().isLength({ min: 2, max: 100 }).withMessage('Subject name required (2-100 chars)'),
@@ -492,7 +492,7 @@ router.get('/:id/members', auth, async (req, res) => {
 router.post(
   '/:id/members',
   auth,
-  requireRole('TEACHER'),
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
   requireTeachingGroupOwner('id'),
   async (req, res) => {
     const groupId = Number(req.params.id);
@@ -565,7 +565,7 @@ router.post(
 router.delete(
   '/:id/members/:studentId',
   auth,
-  requireRole('TEACHER'),
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
   requireTeachingGroupOwner('id'),
   async (req, res) => {
     const groupId = Number(req.params.id);
@@ -821,7 +821,7 @@ router.put(
  * Move Class to Trash Bin (7-Day Recoverable Soft Delete)
  * POST /api/v1/teaching-groups/:id/trash
  */
-router.post(['/:id/trash', '/:id/delete'], auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), async (req, res) => {
+const handleTrashDelete = async (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const groups = await query(`SELECT * FROM teaching_groups WHERE id = ?`, [groupId]);
@@ -855,7 +855,9 @@ router.post(['/:id/trash', '/:id/delete'], auth, requireRole('TEACHER', 'SYSTEM_
   } catch (err) {
     res.status(500).json({ success: false, error: { message: err.message } });
   }
-});
+};
+router.post(['/:id/trash', '/:id/delete'], auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), handleTrashDelete);
+router.delete('/:id', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), handleTrashDelete);
 
 /**
  * Restore Class from Trash Bin
@@ -924,7 +926,7 @@ router.delete('/:id/permanent', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), as
  * Get Students Eligible for Group but Not Yet Enrolled
  * GET /api/v1/teaching-groups/:id/unenrolled-students
  */
-router.get('/:id/unenrolled-students', auth, requireRole('TEACHER'), async (req, res) => {
+router.get('/:id/unenrolled-students', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), async (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const groups = await query('SELECT * FROM teaching_groups WHERE id = ?', [groupId]);
@@ -979,7 +981,7 @@ router.get('/:id/unenrolled-students', auth, requireRole('TEACHER'), async (req,
 router.post(
   '/:id/promote',
   auth,
-  requireRole('TEACHER'),
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
   requireTeachingGroupOwner('id'),
   [
     body('new_name').trim().isLength({ min: 2, max: 100 }).withMessage('New group name required'),
@@ -1112,7 +1114,7 @@ router.post(
 router.post(
   '/broadcast-notice',
   auth,
-  requireRole('TEACHER'),
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
   [
     body('title').trim().isLength({ min: 2, max: 200 }).withMessage('Notice title required (2-200 chars)'),
     body('content').trim().isLength({ min: 5, max: 3000 }).withMessage('Notice content required (5-3000 chars)'),
