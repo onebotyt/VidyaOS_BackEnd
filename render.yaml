@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: vidyaos-backend
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+
+      - key: NODE_VERSION
+        value: 22
+
+      # ─── DATABASE CONFIGURATION ────────────────────────────────────────────
+      # Option 1 (Default): SQLite with persistent disk (Starter plan) or auto-snapshots
+      # Option 2 (Recommended for Render Free Tier): 100% Free TiDB Serverless / Aiven MySQL
+      - key: DB_CLIENT
+        value: sqlite
+
+      # If using Render Persistent Disk (mountPath: /var/data), uncomment below:
+      # - key: SQLITE_FILE
+      #   value: /var/data/college_attendance.sqlite
+
+      # MySQL / Cloud DB Settings (Used when DB_CLIENT=mysql):
+      - key: DB_HOST
+        sync: false          # Fill in Render dashboard (e.g. gateway01...tidbcloud.com)
+      - key: DB_PORT
+        value: 3306
+      - key: DB_USER
+        sync: false          # Fill in Render dashboard
+      - key: DB_PASSWORD
+        sync: false          # Fill in Render dashboard
+      - key: DB_NAME
+        value: college_attendance
+      - key: DB_CONNECTION_LIMIT
+        value: 10
+
+      # ─── SECURITY ──────────────────────────────────────────────────────────
+      - key: JWT_ACCESS_SECRET
+        generateValue: true  # Render auto-generates a secure random value
+      - key: JWT_REFRESH_SECRET
+        generateValue: true  # Render auto-generates a secure random value
+      - key: JWT_ACCESS_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+
+      # ─── OPERATIONAL ───────────────────────────────────────────────────────
+      - key: DEFAULT_ATTENDANCE_THRESHOLD
+        value: 75
+      - key: AUTO_CLOSE_CHECK_INTERVAL_SECONDS
+        value: 60

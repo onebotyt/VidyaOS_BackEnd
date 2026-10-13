@@ -1,0 +1,60 @@
+# Node.js
+node_modules/
+package-lock.json
+
+# Environment variables (NEVER commit these)
+.env
+.env.local
+.env.production
+
+# Local SQLite database (development only)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.bak*
+*.db
+
+# File uploads
+uploads/
+
+# WhatsApp Web Bot session (contains auth credentials)
+whatsapp_session/
+whatsapp_test_session/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Docker runtime data
+server-data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Test screenshots & captures
+*.png
+*.jpg
+test-*.js.snap
+scripts/*.png
+scripts/*.jpg
+
+# Test & verification scripts (local development only, NEVER push to GitHub)
+scripts/test-*
+scripts/test_*
+scripts/verify-*
+scripts/simulate-*
+scripts/check-*
+scripts/scan-*
+scripts/find-*
+scripts/take-*
+scripts/capture-*
+scripts/inspect-*
+*.test.js
+*.spec.js
+test/
+scratch/
