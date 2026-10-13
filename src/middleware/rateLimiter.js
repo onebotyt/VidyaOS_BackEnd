@@ -35,7 +35,8 @@ const deviceWebhookLimiter = rateLimit({
 
 const generalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 300,
+  max: process.env.NODE_ENV === 'production' ? 1000 : 50000,
+  skip: (req) => process.env.NODE_ENV !== 'production' || req.ip === '127.0.0.1' || req.ip === '::1' || req.ip?.includes('127.0.0.1') || req.path.startsWith('/css/') || req.path.startsWith('/js/') || req.path.startsWith('/shared/'),
   standardHeaders: true,
   legacyHeaders: false
 });

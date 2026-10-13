@@ -24,7 +24,16 @@ router.use(auth, requireRole('TEACHER', 'FACULTY', 'HOD', 'SYSTEM_ADMIN'));
 router.get('/analytics', async (req, res) => {
   try {
     const teacherId = req.user.teacher_id;
-    if (!teacherId) return res.json({ success: true, data: { classes: [], trend: [], defaulter_count: 0 } });
+    const isHod = Boolean(req.user.is_hod || req.user.roles?.includes('HOD'));
+    const deptId = req.user.department_id;
+
+    if (!teacherId && !isHod) return res.json({ success: true, data: { classes: [], trend: [], defaulter_count: 0 } });
+
+    // Scoping: HOD gets department-wide visibility across all classes; faculty gets personal classes
+    const whereClause = isHod && deptId 
+      ? '(r.teacher_id = ? OR r.department_id = ? OR sub.department_id = ?)' 
+      : 'r.teacher_id = ?';
+    const params = isHod && deptId ? [teacherId || -1, deptId, deptId] : [teacherId];
 
     const classes = await query(
       `SELECT r.id as register_id,
@@ -38,10 +47,10 @@ router.get('/analytics', async (req, res) => {
        LEFT JOIN subjects sub ON sub.id = r.subject_id
        JOIN attendance_sessions s ON s.register_id = r.id AND s.state = 'FINALIZED'
        LEFT JOIN register_attendance ra ON ra.session_id = s.id
-       WHERE r.teacher_id = ?
+       WHERE ${whereClause}
        GROUP BY r.id, tg.id, sub.id
        ORDER BY subject_name ASC`,
-      [teacherId]
+      params
     );
 
     const classSummary = classes.map(c => ({
@@ -55,6 +64,11 @@ router.get('/analytics', async (req, res) => {
         : 0
     }));
 
+    const trendWhere = isHod && deptId
+      ? '(r.teacher_id = ? OR r.department_id = ?)'
+      : 'r.teacher_id = ?';
+    const trendParams = isHod && deptId ? [teacherId || -1, deptId] : [teacherId];
+
     const trend = await query(
       `SELECT s.session_date,
               SUM(CASE WHEN ra.attendance_status IN ('PRESENT','LATE') THEN 1 ELSE 0 END) as attended_marks,
@@ -62,11 +76,11 @@ router.get('/analytics', async (req, res) => {
        FROM attendance_registers r
        JOIN attendance_sessions s ON s.register_id = r.id AND s.state = 'FINALIZED'
        LEFT JOIN register_attendance ra ON ra.session_id = s.id
-       WHERE r.teacher_id = ?
+       WHERE ${trendWhere}
        GROUP BY s.session_date
        ORDER BY s.session_date DESC
        LIMIT 14`,
-      [teacherId]
+      trendParams
     );
 
     const trendData = trend.reverse().map(t => ({
@@ -85,11 +99,11 @@ router.get('/analytics', async (req, res) => {
          JOIN attendance_sessions s ON s.register_id = r.id AND s.state = 'FINALIZED'
          JOIN attendance_session_students ass ON ass.session_id = s.id AND ass.included = 1
          LEFT JOIN register_attendance ra ON ra.session_id = s.id AND ra.student_id = ass.student_id
-         WHERE r.teacher_id = ?
+         WHERE ${trendWhere}
          GROUP BY ass.student_id
          HAVING total > 0 AND (CAST(attended AS REAL) / total) * 100 < 75
        ) d`,
-      [teacherId]
+      trendParams
     );
 
     res.json({

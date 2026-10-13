@@ -102,12 +102,12 @@ router.get('/', async (req, res) => {
         const rows = await query(
           `SELECT a.*, COALESCE(sub.name, tg.subject_name, 'General Subject') as subject_name, t.full_name as teacher_name,
                   sub2.file_path as my_file_path, sub2.status as my_status, sub2.marks_obtained as my_marks, sub2.feedback as my_feedback, sub2.submitted_at as my_submitted_at
-           FROM assignments a
+           FROM assessments a
            LEFT JOIN subjects sub ON sub.id = a.subject_id
            LEFT JOIN teaching_groups tg ON tg.id = a.group_id
            JOIN teachers t ON t.id = a.teacher_id
-           LEFT JOIN assignment_submissions sub2 ON sub2.assignment_id = a.id AND sub2.student_id = ?
-           WHERE a.group_id = ?
+           LEFT JOIN assessment_submissions sub2 ON sub2.assessment_id = a.id AND sub2.student_id = ?
+           WHERE a.group_id = ? AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')
            ORDER BY a.due_date IS NULL, a.due_date ASC, a.id DESC`,
           [req.user.student_id, req.query.group_id]
         );
@@ -123,13 +123,14 @@ router.get('/', async (req, res) => {
       const rows = await query(
         `SELECT a.*, COALESCE(sub.name, tg.subject_name, 'General Subject') as subject_name, t.full_name as teacher_name,
                 sub2.file_path as my_file_path, sub2.status as my_status, sub2.marks_obtained as my_marks, sub2.feedback as my_feedback, sub2.submitted_at as my_submitted_at
-         FROM assignments a
+         FROM assessments a
          LEFT JOIN subjects sub ON sub.id = a.subject_id
          LEFT JOIN teaching_groups tg ON tg.id = a.group_id
          JOIN teachers t ON t.id = a.teacher_id
-         LEFT JOIN assignment_submissions sub2 ON sub2.assignment_id = a.id AND sub2.student_id = ?
+         LEFT JOIN assessment_submissions sub2 ON sub2.assessment_id = a.id AND sub2.student_id = ?
          WHERE ((a.department_id = ? AND a.year = ? AND a.semester = ? AND a.academic_year_id = ?)
                 OR (a.group_id IN (SELECT group_id FROM teaching_group_members WHERE student_id = ? AND (status = 'ACTIVE' OR status = 'ENROLLED'))))
+               AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')
          ORDER BY a.due_date IS NULL, a.due_date ASC, a.id DESC`,
         [req.user.student_id, c.department_id || 0, c.year || 0, c.semester || 0, c.academic_year_id || 0, req.user.student_id]
       );
@@ -139,7 +140,7 @@ router.get('/', async (req, res) => {
     // Teacher / Admin view
     let sql = `
       SELECT a.*, COALESCE(sub.name, tg.subject_name, 'General Subject') as subject_name, d.name as department_name, d.name as branch_name,
-             (SELECT COUNT(*) FROM assignment_submissions s WHERE s.assignment_id = a.id) as submission_count,
+             (SELECT COUNT(*) FROM assessment_submissions s WHERE s.assessment_id = a.id) as submission_count,
              CASE
                WHEN a.group_id IS NOT NULL THEN
                  (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = a.group_id AND (tgm.status = 'ACTIVE' OR tgm.status = 'ENROLLED'))
@@ -147,7 +148,7 @@ router.get('/', async (req, res) => {
                  (SELECT COUNT(*) FROM enrollments e WHERE e.department_id = a.department_id
                     AND e.year = a.year AND e.semester = a.semester AND e.academic_year_id = a.academic_year_id AND e.status = 'ENROLLED')
              END as class_size
-      FROM assignments a
+      FROM assessments a
       LEFT JOIN subjects sub ON sub.id = a.subject_id
       LEFT JOIN teaching_groups tg ON tg.id = a.group_id
       LEFT JOIN departments d ON d.id = a.department_id
@@ -239,29 +240,94 @@ router.get('/:id/submissions', requireRole('TEACHER', 'SYSTEM_ADMIN'), async (re
 });
 
 /**
- * Student: submit (or replace) their file for an assignment.
+ * Upload a document (used by student uploading individual requirements or single files)
+ * POST /api/v1/assignments/upload-document
+ */
+router.post('/upload-document', requireRole('STUDENT', 'TEACHER', 'SYSTEM_ADMIN'), uploadSubmission.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'Please select a file to upload' } });
+  }
+  const filePath = `/uploads/submissions/${req.file.filename}`;
+  res.json({
+    success: true,
+    data: {
+      file_path: filePath,
+      original_filename: req.file.originalname,
+      size: req.file.size
+    }
+  });
+});
+
+/**
+ * Student: submit (or replace) their file for an assignment or practical.
  * POST /api/v1/assignments/:id/submit  (multipart/form-data, field name: file)
  */
 router.post('/:id/submit', requireRole('STUDENT'), uploadSubmission.single('file'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Please choose a file to upload (PPT, DOC, PDF, etc.)' } });
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Please choose a file to upload (PDF, DOCX, ZIP, etc.)' } });
     }
-    const aRows = await query(`SELECT due_date FROM assignments WHERE id = ?`, [req.params.id]);
-    if (!aRows.length) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Assignment not found' } });
+    const aRows = await query(`SELECT due_date, type FROM assessments WHERE id = ?`, [req.params.id]);
+    if (!aRows.length) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Work item not found' } });
 
     const isLate = aRows[0].due_date && new Date() > new Date(aRows[0].due_date);
     const filePath = `/uploads/submissions/${req.file.filename}`;
 
-    await query(
-      `INSERT INTO assessment_submissions (assessment_id, student_id, file_path, original_filename, status)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE file_path = VALUES(file_path), original_filename = VALUES(original_filename),
-         status = VALUES(status), submitted_at = CURRENT_TIMESTAMP`,
-      [req.params.id, req.user.student_id, filePath, req.file.originalname, isLate ? 'LATE' : 'SUBMITTED']
-    );
+    const existing = await query('SELECT id FROM assessment_submissions WHERE assessment_id = ? AND student_id = ?', [req.params.id, req.user.student_id]);
+    if (existing.length > 0) {
+      await query(
+        `UPDATE assessment_submissions
+         SET file_path = ?, original_filename = ?, status = ?, submitted_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [filePath, req.file.originalname, isLate ? 'LATE' : 'SUBMITTED', existing[0].id]
+      );
+    } else {
+      await query(
+        `INSERT INTO assessment_submissions (assessment_id, student_id, file_path, original_filename, status)
+         VALUES (?, ?, ?, ?, ?)`,
+        [req.params.id, req.user.student_id, filePath, req.file.originalname, isLate ? 'LATE' : 'SUBMITTED']
+      );
+    }
 
     res.json({ success: true, message: 'Submission uploaded successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * Student: finalize and submit all required final documents.
+ * POST /api/v1/assignments/:id/submit-final-docs  { documents: [ { requirement_name, file_path, original_filename } ] }
+ */
+router.post('/:id/submit-final-docs', requireRole('STUDENT'), async (req, res) => {
+  try {
+    const { documents } = req.body;
+    if (!Array.isArray(documents) || documents.length === 0) {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_DOCUMENTS', message: 'Please upload all required documents before submitting' } });
+    }
+    const aRows = await query(`SELECT due_date, type FROM assessments WHERE id = ?`, [req.params.id]);
+    if (!aRows.length) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Work item not found' } });
+
+    const isLate = aRows[0].due_date && new Date() > new Date(aRows[0].due_date);
+    const docsJson = JSON.stringify(documents);
+
+    const existing = await query('SELECT id FROM assessment_submissions WHERE assessment_id = ? AND student_id = ?', [req.params.id, req.user.student_id]);
+    if (existing.length > 0) {
+      await query(
+        `UPDATE assessment_submissions
+         SET file_path = ?, original_filename = 'Final Documents Bundle', status = ?, submitted_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [docsJson, isLate ? 'LATE' : 'SUBMITTED', existing[0].id]
+      );
+    } else {
+      await query(
+        `INSERT INTO assessment_submissions (assessment_id, student_id, file_path, original_filename, status)
+         VALUES (?, ?, ?, 'Final Documents Bundle', ?)`,
+        [req.params.id, req.user.student_id, docsJson, isLate ? 'LATE' : 'SUBMITTED']
+      );
+    }
+
+    res.json({ success: true, message: 'All final documents submitted successfully for evaluation!' });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }

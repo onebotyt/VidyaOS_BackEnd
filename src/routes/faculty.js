@@ -115,6 +115,110 @@ router.get('/registers', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// MY STUDENTS — 1-Click Roster across all teacher's classes
+// GET /api/v1/faculty/my-students
+// ─────────────────────────────────────────────────────────
+router.get('/my-students', async (req, res) => {
+  const teacherId = req.user.teacher_id;
+  try {
+    let studentRows = [];
+    if (teacherId) {
+      studentRows = await query(
+        `SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+                COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+                u.email, u.phone,
+                e.year, e.semester,
+                d.name as department_name,
+                tg.id as group_id, tg.name as group_name, tg.subject_name
+         FROM teaching_groups tg
+         JOIN teaching_group_members tgm ON tgm.group_id = tg.id AND tgm.status IN ('ENROLLED', 'ACTIVE')
+         JOIN students st ON tgm.student_id = st.id
+         JOIN users u ON st.user_id = u.id
+         LEFT JOIN enrollments e ON e.student_id = st.id AND e.status = 'ENROLLED'
+         LEFT JOIN departments d ON e.department_id = d.id
+         WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE'
+         ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC`,
+        [teacherId]
+      );
+    }
+
+    if (!studentRows.length && teacherId) {
+      studentRows = await query(
+        `SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+                COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+                u.email, u.phone,
+                e.year, e.semester,
+                d.name as department_name,
+                ar.id as group_id, ar.name as group_name, s.name as subject_name
+         FROM attendance_registers ar
+         LEFT JOIN subjects s ON ar.subject_id = s.id
+         JOIN enrollments e ON e.department_id = ar.department_id AND e.year = ar.year AND e.semester = ar.semester AND e.status = 'ENROLLED'
+         JOIN students st ON e.student_id = st.id
+         JOIN users u ON st.user_id = u.id
+         LEFT JOIN departments d ON e.department_id = d.id
+         WHERE ar.teacher_id = ? AND ar.is_active = 1
+         ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC`,
+        [teacherId]
+      );
+    }
+
+    const studentMap = new Map();
+    for (const r of studentRows) {
+      if (!studentMap.has(r.student_id)) {
+        studentMap.set(r.student_id, {
+          student_id: r.student_id,
+          full_name: r.full_name,
+          official_enrollment_no: r.official_enrollment_no || '—',
+          registration_no: r.registration_no || '—',
+          class_roll_no: r.class_roll_no,
+          email: r.email || '—',
+          phone: r.phone || '—',
+          year: r.year,
+          semester: r.semester,
+          department_name: r.department_name,
+          classes: []
+        });
+      }
+      const item = studentMap.get(r.student_id);
+      if (r.group_name && !item.classes.includes(r.group_name)) {
+        item.classes.push(r.group_name);
+      }
+    }
+
+    const students = Array.from(studentMap.values());
+    if (students.length > 0 && teacherId) {
+      const studentIds = students.map(s => s.student_id);
+      const attStats = await query(
+        `SELECT ra.student_id,
+                COUNT(ra.id) as total_sessions,
+                SUM(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) as attended_sessions
+         FROM register_attendance ra
+         JOIN attendance_sessions asess ON asess.id = ra.session_id AND asess.state = 'FINALIZED'
+         JOIN attendance_registers ar ON ar.id = asess.register_id
+         WHERE ar.teacher_id = ? AND ra.student_id IN (${studentIds.map(() => '?').join(',')})
+         GROUP BY ra.student_id`,
+        [teacherId, ...studentIds]
+      );
+      const statMap = new Map(attStats.map(s => [s.student_id, s]));
+
+      for (const st of students) {
+        const stat = statMap.get(st.student_id) || { total_sessions: 0, attended_sessions: 0 };
+        st.total_sessions = stat.total_sessions || 0;
+        st.attended_sessions = stat.attended_sessions || 0;
+        st.attendance_pct = st.total_sessions > 0
+          ? Math.round((st.attended_sessions / st.total_sessions) * 100)
+          : 100;
+        st.is_defaulter = st.attendance_pct < 75 && st.total_sessions > 0;
+      }
+    }
+
+    res.json({ success: true, data: students, total: students.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
 // REGISTER DETAIL — opens register, auto-creates today's session
 // GET /api/v1/faculty/registers/:id
 // Returns: register info + grid data (students × dates) + session list
@@ -202,7 +306,7 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
 
     // ── FETCH ALL SESSIONS FOR THIS REGISTER ──
     const sessions = await query(
-      `SELECT asess.id, asess.session_date, asess.label, asess.state, asess.session_type,
+      `SELECT asess.id, asess.session_date, asess.period_number, asess.label, asess.state, asess.session_type,
               asess.start_time, asess.end_time, asess.auto_close_at,
               COUNT(ass.id) as roster_count,
               SUM(CASE WHEN ra.attendance_status = 'PRESENT' THEN 1 ELSE 0 END) as present_count,
@@ -213,7 +317,7 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
        LEFT JOIN register_attendance ra ON ra.session_id = asess.id AND ra.student_id = ass.student_id
        WHERE asess.register_id = ?
        GROUP BY asess.id
-       ORDER BY asess.session_date DESC`,
+       ORDER BY asess.session_date DESC, asess.period_number ASC, asess.id ASC`,
       [registerId]
     );
 
@@ -354,7 +458,7 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
 
       // Bulk query all attendance marks for this register's finalized sessions
       const attendanceRows = await query(
-        `SELECT ra.student_id, ra.attendance_status, s.session_date
+        `SELECT ra.student_id, ra.attendance_status, s.id as session_id, s.session_date, s.period_number, s.label
          FROM register_attendance ra
          JOIN attendance_sessions s ON s.id = ra.session_id
          WHERE s.register_id = ? AND s.state = 'FINALIZED'`,
@@ -362,21 +466,29 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
       );
 
       const studentAttMap = new Map();
+      const studentSessionMarks = new Map();
       for (const row of attendanceRows) {
         if (!studentAttMap.has(row.student_id)) {
           studentAttMap.set(row.student_id, new Map());
+          studentSessionMarks.set(row.student_id, new Map());
         }
+        studentSessionMarks.get(row.student_id).set(row.session_id, row.attendance_status);
         studentAttMap.get(row.student_id).set(row.session_date, row.attendance_status);
+        studentAttMap.get(row.student_id).set(`${row.session_date}_p${row.period_number || 1}`, row.attendance_status);
       }
 
       for (const st of students) {
         const marks = {};
+        const sessionMarks = {};
+        const sessMap = studentSessionMarks.get(st.student_id) || new Map();
         const datesMap = studentAttMap.get(st.student_id) || new Map();
 
         let monthAtt = 0, monthAbs = 0;
         for (const sess of monthFinalizedSessions) {
-          const status = datesMap.get(sess.session_date);
+          const status = sessMap.get(sess.id) || datesMap.get(`${sess.session_date}_p${sess.period_number || 1}`) || datesMap.get(sess.session_date);
           if (status) {
+            sessionMarks[sess.id] = status;
+            marks[`${sess.session_date}_p${sess.period_number || 1}`] = status;
             marks[sess.session_date] = status;
             if (status === 'PRESENT' || status === 'LATE') monthAtt++;
             else if (status === 'ABSENT') monthAbs++;
@@ -385,7 +497,7 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
 
         let prevAtt = 0, prevAbs = 0;
         for (const sess of prevFinalizedSessions) {
-          const status = datesMap.get(sess.session_date);
+          const status = sessMap.get(sess.id) || datesMap.get(`${sess.session_date}_p${sess.period_number || 1}`) || datesMap.get(sess.session_date);
           if (status === 'PRESENT' || status === 'LATE') prevAtt++;
           else if (status === 'ABSENT') prevAbs++;
         }
@@ -403,6 +515,7 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
           official_enrollment_no: st.official_enrollment_no,
           enrollment_status: st.enrollment_status,
           attendance_marks: marks,
+          session_marks: sessionMarks,
           month_attended: monthAtt,
           month_absent: monthAbs,
           prev_attended: prevAtt,
@@ -418,10 +531,19 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
       // Compute daily present & absent summary row
       for (const d of monthDays) {
         let pres = 0, abs = 0, hasData = false;
+        const daySessions = monthFinalizedSessions.filter(s => s.session_date === d.date);
         for (const st of gridData) {
-          const m = st.attendance_marks[d.date];
-          if (m === 'PRESENT' || m === 'LATE') { pres++; hasData = true; }
-          else if (m === 'ABSENT') { abs++; hasData = true; }
+          if (daySessions.length > 0) {
+            for (const ds of daySessions) {
+              const sm = st.session_marks ? st.session_marks[ds.id] : null;
+              if (sm === 'PRESENT' || sm === 'LATE') { pres++; hasData = true; }
+              else if (sm === 'ABSENT') { abs++; hasData = true; }
+            }
+          } else {
+            const m = st.attendance_marks[d.date];
+            if (m === 'PRESENT' || m === 'LATE') { pres++; hasData = true; }
+            else if (m === 'ABSENT') { abs++; hasData = true; }
+          }
         }
         dailyTotals[d.date] = hasData ? { present: pres, absent: abs } : null;
       }
@@ -432,6 +554,15 @@ router.get('/registers/:id', [param('id').isInt(), validate], async (req, res) =
       sessions,
       grid: {
         dates: allFinalizedSessions.map(s => s.session_date),
+        finalized_sessions: monthFinalizedSessions.map(s => ({
+          id: s.id,
+          session_date: s.session_date,
+          day: parseInt(s.session_date.slice(8, 10), 10),
+          period_number: s.period_number || 1,
+          label: s.label || `Period ${s.period_number || 1}`,
+          session_type: s.session_type,
+          state: s.state
+        })),
         students: gridData,
         month: targetMonth,
         available_months: availableMonths,
@@ -472,15 +603,25 @@ router.put('/registers/:id/mark-cell', [
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
     }
 
-    // 1. Find or create finalized session for this date
-    let sess = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ? LIMIT 1`, [registerId, date]))[0];
+    // 1. Find or create finalized session for this date & period
+    const periodNumber = parseInt(req.body.period_number) || 1;
+    let sess;
+    if (req.body.session_id) {
+      sess = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND id = ?`, [registerId, req.body.session_id]))[0];
+    }
+    if (!sess) {
+      sess = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ? AND period_number = ? LIMIT 1`, [registerId, date, periodNumber]))[0];
+    }
+    if (!sess && !req.body.period_number) {
+      sess = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ? LIMIT 1`, [registerId, date]))[0];
+    }
     if (!sess) {
       const cnt = (await query(`SELECT COUNT(*) as c FROM attendance_sessions WHERE register_id = ?`, [registerId]))[0]?.c || 0;
       const ins = await query(
         `INSERT INTO attendance_sessions
-         (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, start_time, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'FINALIZED')`,
-        [registerId, reg.teacher_id, reg.subject_id, reg.department_id, reg.year, reg.semester, reg.academic_year_id, reg.session_type_scope || 'THEORY', `Class ${cnt + 1}`, date, `${date} 09:00:00`]
+         (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, period_number, start_time, state)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'FINALIZED')`,
+        [registerId, reg.teacher_id, reg.subject_id, reg.department_id, reg.year, reg.semester, reg.academic_year_id, reg.session_type_scope || 'THEORY', `Class ${cnt + 1} (P${periodNumber})`, date, periodNumber, `${date} 09:00:00`]
       );
       const sessId = ins[0]?.insertId ?? ins.lastInsertRowid;
       sess = { id: sessId };
@@ -651,31 +792,32 @@ router.post('/registers/:id/sessions', [
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
     }
 
+    const periodNumber = parseInt(req.body.period_number) || 1;
     const existing = await query(
-      `SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ?`,
-      [registerId, req.body.session_date]
+      `SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ? AND period_number = ?`,
+      [registerId, req.body.session_date, periodNumber]
     );
     if (existing.length) {
-      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `A session already exists for ${req.body.session_date} in this register` } });
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `A session already exists for Period ${periodNumber} on ${req.body.session_date} in this register` } });
     }
 
     const cnt = (await query(`SELECT COUNT(*) as cnt FROM attendance_sessions WHERE register_id = ?`, [registerId]))[0]?.cnt || 0;
-    const label = req.body.label || `Class ${cnt + 1}`;
+    const label = req.body.label || `Class ${cnt + 1} (Period ${periodNumber})`;
     const autoCloseAt = req.body.auto_close_minutes
       ? new Date(Date.now() + req.body.auto_close_minutes * 60 * 1000).toISOString()
       : null;
 
     await query(
       `INSERT INTO attendance_sessions 
-       (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, auto_close_at, state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
+       (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, period_number, auto_close_at, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
       [registerId, register.teacher_id, register.subject_id, register.department_id,
        register.year, register.semester, register.academic_year_id,
        register.session_type_scope === 'PRACTICAL' ? 'PRACTICAL' : 'THEORY',
-       label, req.body.session_date, autoCloseAt]
+       label, req.body.session_date, periodNumber, autoCloseAt]
     );
 
-    const newSession = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ?`, [registerId, req.body.session_date]))[0];
+    const newSession = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ? AND period_number = ? ORDER BY id DESC LIMIT 1`, [registerId, req.body.session_date, periodNumber]))[0];
 
     // Freeze roster snapshot
     if (newSession && (register.group_id || register.department_id)) {
@@ -888,7 +1030,23 @@ router.post('/cohorts/registration-toggle', requireDepartmentFaculty(), [
         [branchKey, isOpen ? '1' : '0', req.user.id]
       );
 
-      // Also update or set cohort keys for active cohorts in this department
+      // Also update or set cohort keys for ALL semesters in this department
+      const deptRows = await query(`SELECT degree_duration_years FROM departments WHERE id = ?`, [effDeptId]);
+      const maxYears = deptRows[0]?.degree_duration_years || 3;
+      const totalSemesters = maxYears * 2;
+      for (let sem = 1; sem <= totalSemesters; sem++) {
+        const yr = Math.min(maxYears, Math.ceil(sem / 2));
+        const cKey = `cohort_reg_${effDeptId}_${effDeptId}_${yr}_${sem}_${ayId}`;
+        await query(
+          `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+           VALUES (?, ?, 'Cohort Self-Registration Open/Closed', ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(setting_key)
+           DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+          [cKey, isOpen ? '1' : '0', req.user.id]
+        );
+      }
+
+      // Also update any active cohorts in teacher_assignments or enrollments
       const cohorts = await query(
         `SELECT DISTINCT year, semester FROM teacher_assignments WHERE department_id = ? AND is_active = 1
          UNION
@@ -908,8 +1066,8 @@ router.post('/cohorts/registration-toggle', requireDepartmentFaculty(), [
 
       return res.json({
         success: true,
-        message: `Student self-registration is now ${isOpen ? 'OPEN' : 'CLOSED'} for all cohorts in this department`,
-        data: { is_open: Boolean(isOpen), department_wide: true, department_id: effDeptId }
+        message: `Student self-registration is now ${isOpen ? 'OPEN' : 'CLOSED'} for all semesters in this department`,
+        data: { is_open: Boolean(isOpen), is_dept_open: Boolean(isOpen), department_wide: true, department_id: effDeptId }
       });
     }
 
@@ -954,7 +1112,8 @@ router.get('/cohorts/registration-status', requireDepartmentFaculty(), async (re
     const ayId = academic_year_id || (await query(`SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1`))[0]?.id;
     const branchKey = `cohort_reg_dept_${effDeptId}`;
     const branchSetting = await query(`SELECT setting_value FROM system_settings WHERE setting_key = ?`, [branchKey]);
-    const isDeptOpen = branchSetting.length > 0 && branchSetting[0].setting_value === '1';
+    const hasBranchSetting = branchSetting.length > 0;
+    const isDeptOpen = hasBranchSetting && branchSetting[0].setting_value === '1';
 
     let isCohortOpen = false;
     let settingKey = branchKey;
@@ -964,7 +1123,14 @@ router.get('/cohorts/registration-status', requireDepartmentFaculty(), async (re
       isCohortOpen = cohortSetting.length > 0 && cohortSetting[0].setting_value === '1';
     }
 
-    const isOpen = isDeptOpen || isCohortOpen;
+    // If department-level setting isn't explicitly defined, check if any cohorts are open
+    let anyCohortOpen = false;
+    if (!hasBranchSetting) {
+      const anyOpen = await query(`SELECT setting_value FROM system_settings WHERE setting_key LIKE ? AND setting_value = '1' LIMIT 1`, [`cohort_reg_${effDeptId}_${effDeptId}_%`]);
+      anyCohortOpen = anyOpen.length > 0;
+    }
+
+    const isOpen = isDeptOpen || isCohortOpen || anyCohortOpen;
     res.json({
       success: true,
       data: {

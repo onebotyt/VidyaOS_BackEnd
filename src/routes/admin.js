@@ -23,6 +23,7 @@ const { query, withTransaction } = require('../config/db');
 const sessionService = require('../services/sessionService');
 const departmentService = require('../services/departmentService');
 const auditService = require('../services/auditService');
+const { generateDepartmentReportsExcel } = require('../services/excelExportService');
 
 // All admin routes require SYSTEM_ADMIN role
 router.use(auth, requireRole('SYSTEM_ADMIN'));
@@ -34,7 +35,10 @@ router.use(auth, requireRole('SYSTEM_ADMIN'));
 /** GET /api/v1/admin/stats */
 router.get('/stats', async (req, res) => {
   try {
-    const [studentsCount] = await query(`SELECT COUNT(*) as total FROM students`);
+    const [allTimeStudents] = await query(`SELECT COUNT(*) as total FROM students`);
+    const [activeStudents] = await query(
+      `SELECT COUNT(DISTINCT s.id) as total FROM students s JOIN users u ON s.user_id = u.id WHERE u.status = 'ACTIVE'`
+    );
     const [teachersCount] = await query(`SELECT COUNT(*) as total FROM teachers`);
     const [hodsCount] = await query(
       `SELECT COUNT(DISTINCT teacher_id) as total FROM teacher_assignments WHERE assignment_type = 'HOD' AND is_active = 1`
@@ -49,8 +53,9 @@ router.get('/stats', async (req, res) => {
     );
 
     res.json({ success: true, data: {
-      total_students: studentsCount?.total || 0,
+      total_students: activeStudents?.total || allTimeStudents?.total || 0,
       total_teachers: teachersCount?.total || 0,
+      total_enrolled_students: allTimeStudents?.total || 0,
       total_hods: hodsCount?.total || 0,
       total_departments: deptsCount?.total || 0,
       active_terminals: devicesCount?.total || 0,
@@ -975,7 +980,7 @@ router.put('/settings', [
 // GET /api/v1/admin/reports/department?department_id=1&academic_year_id=1
 // ─────────────────────────────────────────────────────────
 
-router.get('/reports/department', async (req, res) => {
+router.get(['/reports/department', '/reports/attendance'], async (req, res) => {
   let { department_id, branch_id, year, semester, date_preset, date_from, date_to } = req.query;
 
   try {
@@ -1260,6 +1265,249 @@ router.get('/reports/department', async (req, res) => {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
+
+/**
+ * GET & POST /api/v1/admin/reports/export
+ * Downloads attendance reports as Excel (.xlsx) or CSV with visual charts
+ */
+const handleReportsExport = async (req, res) => {
+  const src = req.method === 'POST' ? { ...req.query, ...req.body } : req.query;
+  let { department_id, branch_id, year, semester, date_preset, date_from, date_to, format, chart_trend, chart_cohort } = src;
+  const exportFormat = (format || 'excel').toLowerCase();
+  try {
+    const whereClauses = [];
+    const params = [];
+
+    if (department_id) {
+      whereClauses.push('d.id = ?');
+      params.push(department_id);
+    } else if (branch_id) {
+      whereClauses.push('d.id = ?');
+      params.push(branch_id);
+    }
+    if (year) {
+      whereClauses.push('COALESCE(e.year, dev.year) = ?');
+      params.push(year);
+    }
+    if (semester) {
+      whereClauses.push('COALESCE(e.semester, dev.semester) = ?');
+      params.push(semester);
+    }
+    if (date_preset === 'today') {
+      whereClauses.push('DATE(ep.scan_time) = CURRENT_DATE');
+    } else if (date_preset === '7days') {
+      whereClauses.push("DATE(ep.scan_time) >= DATE(datetime('now', '-7 days'))");
+    } else if (date_preset === '30days') {
+      whereClauses.push("DATE(ep.scan_time) >= DATE(datetime('now', '-30 days'))");
+    } else if (date_from && date_to) {
+      whereClauses.push('DATE(ep.scan_time) BETWEEN ? AND ?');
+      params.push(date_from, date_to);
+    }
+
+    const whereSql = whereClauses.length ? whereClauses.join(' AND ') : '1=1';
+
+    const records = await query(
+      `SELECT 
+         ep.id as scan_id,
+         ep.scan_time,
+         st.id as student_id,
+         st.full_name as student_name,
+         st.official_enrollment_no,
+         e.class_roll_no,
+         d.name as department_name,
+         d.code as department_code,
+         COALESCE(e.year, dev.year) as year,
+         COALESCE(e.semester, dev.semester) as semester,
+         dev.device_uid,
+         dev.name as device_name,
+         'PRESENT' as status
+       FROM esp32_presence ep
+       JOIN students st ON ep.student_id = st.id
+       LEFT JOIN enrollments e ON e.student_id = st.id
+       JOIN devices dev ON ep.device_id = dev.id
+       JOIN departments d ON dev.department_id = d.id
+       WHERE ${whereSql}
+       ORDER BY ep.scan_time DESC
+       LIMIT 1000`,
+      params
+    );
+
+    if (exportFormat === 'csv') {
+      const csvRows = [
+        ['Scan ID', 'Scan Time', 'Student Roll No', 'Enrollment No', 'Student Name', 'Department', 'Year', 'Semester', 'Device UID', 'Terminal Name', 'Status']
+      ];
+
+      records.forEach(r => {
+        csvRows.push([
+          r.scan_id,
+          `"${r.scan_time}"`,
+          r.class_roll_no || '--',
+          `"${r.official_enrollment_no || ''}"`,
+          `"${(r.student_name || '').replace(/"/g, '""')}"`,
+          `"${r.department_code || r.department_name || ''}"`,
+          r.year || '--',
+          r.semester || '--',
+          `"${r.device_uid || ''}"`,
+          `"${(r.device_name || '').replace(/"/g, '""')}"`,
+          r.status
+        ]);
+      });
+
+      const csvContent = csvRows.map(row => row.join(',')).join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="attendance-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+      return res.send(csvContent);
+    }
+
+    // Default: Multi-sheet Analytical Excel Workbook (.xlsx)
+    // 1. KPI Summary
+    const kpiRows = await query(
+      `SELECT 
+         COUNT(ep.id) as total_scans,
+         COUNT(DISTINCT ep.student_id) as unique_students,
+         COUNT(DISTINCT dev.id) as active_terminals,
+         SUM(CASE WHEN DATE(ep.scan_time) = CURRENT_DATE THEN 1 ELSE 0 END) as today_scans
+       FROM esp32_presence ep
+       JOIN devices dev ON ep.device_id = dev.id
+       JOIN departments d ON dev.department_id = d.id
+       LEFT JOIN students st ON ep.student_id = st.id
+       LEFT JOIN enrollments e ON e.student_id = st.id
+       WHERE ${whereSql}`,
+      params
+    );
+
+    const kpis = {
+      total_scans: Number(kpiRows[0]?.total_scans) || 0,
+      unique_students: Number(kpiRows[0]?.unique_students) || 0,
+      active_terminals: Number(kpiRows[0]?.active_terminals) || 0,
+      today_scans: Number(kpiRows[0]?.today_scans) || 0
+    };
+
+    // 2. Daily Trend
+    const trendRows = await query(
+      `SELECT 
+         DATE(ep.scan_time) as date,
+         COUNT(ep.id) as scan_count,
+         COUNT(DISTINCT ep.student_id) as unique_students
+       FROM esp32_presence ep
+       JOIN devices dev ON ep.device_id = dev.id
+       JOIN departments d ON dev.department_id = d.id
+       LEFT JOIN students st ON ep.student_id = st.id
+       LEFT JOIN enrollments e ON e.student_id = st.id
+       WHERE ${whereSql}
+       GROUP BY DATE(ep.scan_time)
+       ORDER BY date ASC
+       LIMIT 30`,
+      params
+    );
+
+    // 3. Cohort summaries
+    let cohortWhere = ["e.status = 'ENROLLED'"];
+    let cohortParams = [];
+    if (department_id) {
+      cohortWhere.push('d.id = ?');
+      cohortParams.push(department_id);
+    } else if (branch_id) {
+      cohortWhere.push('d.id = ?');
+      cohortParams.push(branch_id);
+    }
+    if (year) {
+      cohortWhere.push('e.year = ?');
+      cohortParams.push(year);
+    }
+    if (semester) {
+      cohortWhere.push('e.semester = ?');
+      cohortParams.push(semester);
+    }
+
+    const cohortList = await query(
+      `SELECT 
+         d.id as department_id,
+         d.name as department_name,
+         d.code as department_code,
+         e.year,
+         e.semester,
+         COUNT(DISTINCT e.student_id) as enrolled_students
+       FROM enrollments e
+       JOIN departments d ON e.department_id = d.id
+       WHERE ${cohortWhere.join(' AND ')}
+       GROUP BY d.id, e.year, e.semester
+       ORDER BY d.name, e.year, e.semester`,
+      cohortParams
+    );
+
+    const scanStatsRows = await query(
+      `SELECT 
+         d.id as department_id,
+         COALESCE(e.year, dev.year) as year,
+         COALESCE(e.semester, dev.semester) as semester,
+         COUNT(DISTINCT ep.student_id) as present_students,
+         COUNT(ep.id) as total_scans,
+         COUNT(DISTINCT dev.id) as active_terminals,
+         GROUP_CONCAT(DISTINCT dev.device_uid) as terminal_uids
+       FROM esp32_presence ep
+       JOIN devices dev ON ep.device_id = dev.id
+       JOIN departments d ON dev.department_id = d.id
+       LEFT JOIN students st ON ep.student_id = st.id
+       LEFT JOIN enrollments e ON e.student_id = st.id
+       WHERE ${whereSql}
+       GROUP BY d.id, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)`,
+      params
+    );
+
+    const scanStatsMap = new Map();
+    scanStatsRows.forEach(s => {
+      const key = `${s.department_id}_${s.year}_${s.semester}`;
+      scanStatsMap.set(key, s);
+    });
+
+    const cohortSummaries = cohortList.map(c => {
+      const key = `${c.department_id}_${c.year}_${c.semester}`;
+      const scanData = scanStatsMap.get(key) || {};
+      const enrolled = Number(c.enrolled_students || 0);
+      const present = Number(scanData.present_students || 0);
+      const turnoutRate = enrolled > 0 ? Math.min(100, Math.round((present / enrolled) * 100)) : 0;
+      return {
+        department_name: c.department_name,
+        department_code: c.department_code,
+        year: c.year,
+        semester: c.semester,
+        enrolled_students: enrolled,
+        present_students: present,
+        turnout_rate: turnoutRate,
+        total_scans: Number(scanData.total_scans || 0),
+        active_terminals: Number(scanData.active_terminals || 0),
+        terminal_uids: scanData.terminal_uids ? scanData.terminal_uids.split(',') : []
+      };
+    });
+
+    let filterDesc = 'All Recorded Scans';
+    if (date_preset === 'today') filterDesc = 'Today Scans';
+    else if (date_preset === '7days') filterDesc = 'Last 7 Days Scans';
+    else if (date_preset === '30days') filterDesc = 'Last 30 Days Scans';
+
+    const excelBuffer = await generateDepartmentReportsExcel({
+      kpis,
+      cohort_summaries: cohortSummaries,
+      daily_trend: trendRows,
+      records,
+      filter_description: filterDesc,
+      chart_trend,
+      chart_cohort
+    });
+
+    const filenameDate = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Attendance-Analytics-Report-${filenameDate}.xlsx"`);
+    res.send(excelBuffer);
+  } catch (err) {
+    console.error('Export reports error:', err);
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+};
+
+router.get('/reports/export', handleReportsExport);
+router.post('/reports/export', handleReportsExport);
 
 // ─────────────────────────────────────────────────────────
 // AUDITED ATTENDANCE CORRECTIONS (Post-Finalization, Admin Only)

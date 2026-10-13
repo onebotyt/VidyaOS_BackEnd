@@ -60,24 +60,18 @@ class ReportService {
         message: 'No finalized sessions conducted yet.'
       };
     } else if (currentPercentage >= threshold) {
-      // Safe absences formula: X = floor((P - T*C) / T)
-      const X = Math.max(0, Math.floor((P - T * C) / T));
       prediction = {
         status: 'SAFE',
-        safe_absences_remaining: X,
+        safe_absences_remaining: 0,
         classes_needed_to_recover: 0,
-        message: X > 0
-          ? `You can miss up to ${X} consecutive class(es) and remain above ${threshold}%.`
-          : `You are on the ${threshold}% margin. Attending the next class is recommended.`
+        message: `Attendance satisfies the statutory ${threshold}% institutional requirement.`
       };
     } else {
-      // Recovery classes formula: Y = ceil((T*C - P) / (1 - T))
-      const Y = Math.max(1, Math.ceil((T * C - P) / (1 - T)));
       prediction = {
         status: 'DEFICIT',
         safe_absences_remaining: 0,
-        classes_needed_to_recover: Y,
-        message: `ATTENDANCE DEFICIT: Attend the next ${Y} consecutive class(es) to recover above ${threshold}%.`
+        classes_needed_to_recover: 0,
+        message: `Attendance is currently ${currentPercentage}%, below the statutory ${threshold}% requirement.`
       };
     }
 

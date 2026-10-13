@@ -40,6 +40,8 @@ const examRoutes = require('./src/routes/exams');
 const curriculumRoutes = require('./src/routes/curriculum');
 const teachingGroupRoutes = require('./src/routes/teachingGroups');
 const notificationRoutes = require('./src/routes/notifications');
+const courseFileRoutes = require('./src/routes/courseFile');
+const mediaRoutes = require('./src/routes/media');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -92,8 +94,9 @@ app.get(['/admin/subjects.html', '/admin/subjects', '/faculty/hod-subjects.html'
 app.get(['/admin/academic-years.html', '/admin/academic_years.html', '/admin/academic_year.html', '/admin/academic-year.html'], (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=academic-years'));
 app.get(['/admin/academic_structure.html', '/admin/academic_structure', '/admin/academic-structure'], (req, res) => res.redirect(301, '/admin/academic-structure.html'));
 app.get(['/admin/audit.html', '/admin/audit'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
-app.get(['/admin/assignments.html', '/admin/assignments'], (req, res) => res.redirect(301, '/admin/faculty.html'));
+app.get(['/admin/students.html', '/admin/students', '/admin/students/'], (req, res) => res.redirect(301, '/admin/reports.html'));
 app.get(['/admin/whatsapp', '/admin/whatsapp.html', '/admin/whatsapp-gateway', '/admin/whatsapp_gateway', '/admin/whatsapp_gateway.html'], (req, res) => res.redirect(301, '/admin/whatsapp-gateway.html'));
+app.get(['/api-explorer.html', '/api-explorer', '/api_explorer.html', '/api_explorer', '/admin/api-explorer.html', '/admin/api-explorer', '/admin/api_explorer.html', '/admin/api_explorer'], (req, res) => res.redirect(301, '/admin/dashboard.html'));
 
 // Faculty URL Aliases / Normalization — Consolidated Pages
 app.get(['/faculty/analytics.html', '/faculty/analytics'], (req, res) => res.redirect(301, '/faculty/reports.html?tab=analytics'));
@@ -107,24 +110,52 @@ app.get('/faculty/tests', (req, res) => {
   const idQuery = regId ? `?id=${regId}` : '';
   res.redirect(301, `/faculty/tests.html${idQuery}`);
 });
-app.get('/faculty/assignments', (req, res) => {
-  const regId = req.query.id || req.query.register_id;
-  const idQuery = regId ? `?id=${regId}` : '';
-  res.redirect(301, `/faculty/assignments.html${idQuery}`);
+app.get('/faculty/assignments.html', (req, res) => {
+  const modularPath = path.join(__dirname, '../frontend/faculty/assignments/index.html');
+  res.sendFile(modularPath);
+});
+app.get('/faculty/assignments', (req, res, next) => {
+  if (req.path === '/faculty/assignments') {
+    const regId = req.query.id || req.query.register_id;
+    const idQuery = regId ? `?id=${regId}` : '';
+    return res.redirect(301, `/faculty/assignments/${idQuery}`);
+  }
+  next();
 });
 app.get(['/faculty/evaluation', '/faculty/internal-evaluation', '/faculty/internal-evaluation.html'], (req, res) => {
   const regId = req.query.id || req.query.register_id;
   const idQuery = regId ? `?id=${regId}` : '';
   res.redirect(301, `/faculty/evaluation.html${idQuery}`);
 });
-app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick', '/faculty/attendance/quick/'], (req, res) => res.redirect(301, '/faculty/registers.html'));
+app.get(['/faculty/sheets', '/faculty/sheets-studio', '/faculty/sheet-studio'], (req, res, next) => {
+  if (req.path === '/faculty/sheets/') return next();
+  const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect(301, `/faculty/sheets/${q}`);
+});
+app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick', '/faculty/attendance/quick/'], (req, res) => res.redirect(301, '/faculty/registers/'));
 app.get(['/faculty/register-view.html', '/faculty/register-view'], (req, res) => {
   const regId = req.query.id || req.query.register_id;
-  if (regId) return res.redirect(301, `/faculty/registers.html?id=${regId}`);
-  res.redirect(301, '/faculty/registers.html');
+  if (regId) return res.redirect(301, `/faculty/registers/?id=${regId}`);
+  res.redirect(301, '/faculty/registers/');
 });
-app.get(['/faculty/groups', '/faculty/teaching-groups'], (req, res) => res.redirect(301, '/faculty/groups.html'));
-app.get(['/student/groups', '/student/teaching-groups'], (req, res) => res.redirect(301, '/student/groups.html'));
+app.get(['/faculty/groups', '/faculty/teaching-groups'], (req, res) => res.redirect(301, '/faculty/groups/'));
+app.get(['/faculty/media.html', '/faculty/media', '/faculty/media/', '/faculty/drive', '/faculty/drive.html'], (req, res) => {
+  const modularPath = path.join(__dirname, '../frontend/faculty/media/index.html');
+  res.sendFile(modularPath);
+});
+
+// Student Teaching Groups consolidated into Home Dashboard
+app.get([
+  '/student/groups.html', '/student/groups', '/student/groups/',
+  '/student/teaching-groups', '/student/teaching-groups/',
+  '/student/teaching_groups', '/student/teaching_groups.html'
+], (req, res) => res.redirect(301, '/student/dashboard.html'));
+
+// HOD Page Consolidation (Only 3 exclusive pages: dashboard, hod-teachers, hod-settings; others use shared faculty pages)
+app.get(['/faculty/hod-students.html', '/faculty/hod-students', '/faculty/hod-students/'], (req, res) => res.redirect(301, '/faculty/students.html'));
+app.get(['/faculty/hod-reports.html', '/faculty/hod-reports', '/faculty/hod-reports/'], (req, res) => res.redirect(301, '/faculty/reports.html'));
+app.get(['/faculty/hod-archive.html', '/faculty/hod-archive', '/faculty/hod-archive/'], (req, res) => res.redirect(301, '/faculty/students.html'));
+app.get(['/faculty/hod-devices.html', '/faculty/hod-devices', '/faculty/hod-devices/'], (req, res) => res.redirect(301, '/faculty/hod-settings.html'));
 
 // Student URL Aliases / Normalization — Consolidated Attendance & Calendar
 app.get([
@@ -133,10 +164,15 @@ app.get([
   '/student/attendance/history.html',
   '/student/attendance/history',
   '/student/attendance/active.html',
-  '/student/attendance/active',
-  '/student/attendance',
-  '/student/attendance/'
-], (req, res) => res.redirect(301, '/student/attendance.html'));
+  '/student/attendance/active'
+], (req, res) => res.redirect(301, '/student/attendance/'));
+
+app.get('/student/attendance', (req, res, next) => {
+  if (req.path === '/student/attendance') {
+    return res.redirect(301, '/student/attendance/');
+  }
+  next();
+});
 
 // Login URL Normalization & Redirects (Unified Single Login Page for all roles)
 app.get([
@@ -192,6 +228,43 @@ if (fs.existsSync(sharedDir)) {
   app.use('/js', express.static(path.join(sharedDir, 'js'), staticOptions));
   app.use('/css', express.static(path.join(sharedDir, 'css'), staticOptions));
 }
+
+// Serve Shared Components Library (Modular Component Architecture)
+const componentsDir = path.join(__dirname, '../frontend/components');
+if (fs.existsSync(componentsDir)) {
+  app.use('/components', express.static(componentsDir, staticOptions));
+}
+
+// Universal rewrite for legacy .html requests to modular folder index.html
+app.get('/:section/:page.html', (req, res, next) => {
+  const { section, page } = req.params;
+  const modularPath = path.join(__dirname, `../frontend/${section}/${page}/index.html`);
+  if (fs.existsSync(modularPath)) {
+    return res.sendFile(modularPath);
+  }
+  next();
+});
+
+// Fallback handlers for direct asset requests: /:section/:page.css & /:section/:page.js
+app.get('/:section/:page.css', (req, res, next) => {
+  const { section, page } = req.params;
+  const cssPath = path.join(__dirname, `../frontend/${section}/${page}/${page}.css`);
+  if (fs.existsSync(cssPath)) {
+    res.setHeader('Content-Type', 'text/css');
+    return res.sendFile(cssPath);
+  }
+  next();
+});
+
+app.get('/:section/:page.js', (req, res, next) => {
+  const { section, page } = req.params;
+  const jsPath = path.join(__dirname, `../frontend/${section}/${page}/${page}.js`);
+  if (fs.existsSync(jsPath)) {
+    res.setHeader('Content-Type', 'application/javascript');
+    return res.sendFile(jsPath);
+  }
+  next();
+});
 
 // Serve Frontend Static Web Client (when co-located or in Docker)
 const frontendDir = path.join(__dirname, '../frontend');
@@ -260,6 +333,9 @@ app.use('/api/v1/exams', examRoutes);
 app.use('/api/v1/curriculum', curriculumRoutes);
 app.use('/api/v1/teaching-groups', teachingGroupRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/course-files', courseFileRoutes);
+app.use('/api/v1/media', mediaRoutes);
+app.use('/api/v1/search', mediaRoutes);
 
 // Fallback Route for SPA/Frontend
 app.get('*', (req, res, next) => {

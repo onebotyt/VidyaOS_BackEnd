@@ -17,11 +17,14 @@ function ensureDir(dir) {
 }
 
 const ALLOWED_EXTENSIONS = [
-  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
-  '.txt', '.zip', '.jpg', '.jpeg', '.png'
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv',
+  '.txt', '.rtf', '.zip', '.rar', '.7z', '.tar', '.gz',
+  '.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif',
+  '.mp4', '.webm', '.mov', '.mkv', '.avi',
+  '.json', '.md', '.py', '.java', '.cpp', '.c', '.html', '.css', '.js', '.ts'
 ];
 
-function makeUploader(subfolder) {
+function makeUploader(subfolder, maxFileSizeMb = 100) {
   const dest = path.join(UPLOAD_ROOT, subfolder);
   ensureDir(dest);
 
@@ -38,7 +41,7 @@ function makeUploader(subfolder) {
 
   return multer({
     storage,
-    limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+    limits: { fileSize: maxFileSizeMb * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase();
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
@@ -49,4 +52,4 @@ function makeUploader(subfolder) {
   });
 }
 
-module.exports = { makeUploader, UPLOAD_ROOT };
+module.exports = { makeUploader, UPLOAD_ROOT, ALLOWED_EXTENSIONS };

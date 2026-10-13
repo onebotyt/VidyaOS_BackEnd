@@ -347,6 +347,228 @@ router.delete('/teachers/:id', requireHOD(), [param('id').isInt(), validate], as
 });
 
 // ─────────────────────────────────────────────────────────
+// HOD 1-CLICK OPERATIONS: FACULTY, STUDENTS & CLASS ATTENDANCE
+// ─────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/hod/faculty-roster
+ * 1-Click list of faculty under HOD's department with teaching load & subjects
+ */
+router.get('/faculty-roster', async (req, res) => {
+  try {
+    const deptId = req.hod_department_id;
+    const teachers = await query(
+      `SELECT t.id, t.employee_id, t.full_name, t.phone,
+              u.email, u.status, u.username as gmail,
+              (SELECT COUNT(*) FROM teacher_assignments ta WHERE ta.teacher_id = t.id AND ta.is_active = 1) as assignment_count,
+              (SELECT COUNT(*) FROM teaching_groups tg WHERE tg.teacher_id = t.id AND tg.status = 'ACTIVE') as active_groups_count
+       FROM teachers t
+       JOIN users u ON t.user_id = u.id
+       WHERE t.department_id = ?
+       ORDER BY t.full_name ASC`,
+      [deptId]
+    );
+
+    const teacherIds = teachers.map(t => t.id);
+    let assignedSubjects = [];
+    if (teacherIds.length) {
+      assignedSubjects = await query(
+        `SELECT ta.teacher_id, s.name as subject_name, s.code as subject_code, ta.session_type_scope,
+                ta.year, ta.semester
+         FROM teacher_assignments ta
+         JOIN subjects s ON ta.subject_id = s.id
+         WHERE ta.teacher_id IN (${teacherIds.map(() => '?').join(',')}) AND ta.is_active = 1`,
+        teacherIds
+      );
+    }
+
+    const data = teachers.map(t => {
+      const subs = assignedSubjects.filter(s => s.teacher_id === t.id);
+      return {
+        ...t,
+        teaching_load: (t.assignment_count || 0) + (t.active_groups_count || 0),
+        subjects: subs
+      };
+    });
+
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * GET /api/v1/hod/students-roster
+ * 1-Click list of all enrolled students in HOD's department with overall attendance %
+ */
+router.get('/students-roster', async (req, res) => {
+  try {
+    const deptId = req.hod_department_id;
+    const students = await query(
+      `SELECT st.id as student_id, st.full_name, u.email, st.official_enrollment_no, st.registration_no,
+              COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+              e.year, e.semester, e.status as enrollment_status,
+              d.name as department_name, d.code as department_code
+       FROM students st
+       JOIN users u ON st.user_id = u.id
+       JOIN enrollments e ON e.student_id = st.id
+       JOIN departments d ON e.department_id = d.id
+       WHERE e.department_id = ? AND e.status != 'WITHDRAWN'
+       ORDER BY e.year, e.semester, COALESCE(st.class_roll_no, e.class_roll_no) ASC`,
+      [deptId]
+    );
+
+    if (students.length) {
+      const studentIds = students.map(s => s.student_id);
+      const attStats = await query(
+        `SELECT ra.student_id,
+                COUNT(ra.id) as total_sessions,
+                SUM(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) as attended_sessions
+         FROM register_attendance ra
+         JOIN attendance_sessions asess ON asess.id = ra.session_id AND asess.state = 'FINALIZED'
+         JOIN attendance_registers ar ON ar.id = asess.register_id
+         WHERE ar.department_id = ? AND ra.student_id IN (${studentIds.map(() => '?').join(',')})
+         GROUP BY ra.student_id`,
+        [deptId, ...studentIds]
+      );
+      const statMap = new Map(attStats.map(s => [s.student_id, s]));
+
+      for (const st of students) {
+        const stat = statMap.get(st.student_id) || { total_sessions: 0, attended_sessions: 0 };
+        st.total_sessions = stat.total_sessions || 0;
+        st.attended_sessions = stat.attended_sessions || 0;
+        st.attendance_pct = st.total_sessions > 0
+          ? Math.round((st.attended_sessions / st.total_sessions) * 100)
+          : 100;
+        st.is_defaulter = st.attendance_pct < 75 && st.total_sessions > 0;
+      }
+    }
+
+    res.json({ success: true, data: students, total: students.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * GET /api/v1/hod/department-classes
+ * 1-Click list of all subject classes active under HOD's department with attendance statistics
+ */
+router.get('/department-classes', async (req, res) => {
+  try {
+    const deptId = req.hod_department_id;
+    const classes = await query(
+      `SELECT ar.id as register_id, ar.name as register_name, ar.year, ar.semester,
+              ar.session_type_scope, ar.is_official,
+              s.name as subject_name, s.code as subject_code,
+              t.id as teacher_id, t.full_name as teacher_name, u.email as teacher_email,
+              (SELECT COUNT(*) FROM attendance_sessions s2 WHERE s2.register_id = ar.id AND s2.state = 'FINALIZED') as finalized_sessions,
+              (SELECT ROUND(AVG(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 100.0 ELSE 0.0 END), 1)
+               FROM register_attendance ra
+               JOIN attendance_sessions s3 ON s3.id = ra.session_id AND s3.state = 'FINALIZED'
+               WHERE s3.register_id = ar.id) as avg_attendance_pct,
+              (SELECT COUNT(DISTINCT e.student_id) FROM enrollments e WHERE e.department_id = ar.department_id AND e.year = ar.year AND e.semester = ar.semester AND e.status = 'ENROLLED') as total_enrolled
+       FROM attendance_registers ar
+       LEFT JOIN subjects s ON ar.subject_id = s.id
+       LEFT JOIN teachers t ON ar.teacher_id = t.id
+       LEFT JOIN users u ON t.user_id = u.id
+       WHERE ar.department_id = ? AND ar.is_active = 1
+       ORDER BY ar.year, ar.semester, ar.name ASC`,
+      [deptId]
+    );
+
+    res.json({ success: true, data: classes });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * GET /api/v1/hod/department-classes/:registerId/attendance
+ * 1-Click student-by-student attendance breakdown for a specific department subject class
+ */
+router.get('/department-classes/:registerId/attendance', async (req, res) => {
+  try {
+    const registerId = req.params.registerId;
+    const deptId = req.hod_department_id;
+
+    const reg = (await query(`SELECT * FROM attendance_registers WHERE id = ? AND department_id = ?`, [registerId, deptId]))[0];
+    if (!reg) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Subject class not found in your department' } });
+
+    let students = [];
+    if (reg.group_id) {
+      students = await query(
+        `SELECT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+                COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no
+         FROM teaching_group_members tgm
+         JOIN students st ON tgm.student_id = st.id
+         LEFT JOIN enrollments e ON e.student_id = st.id AND e.status = 'ENROLLED'
+         WHERE tgm.group_id = ? AND tgm.status IN ('ENROLLED', 'ACTIVE')
+         ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC`,
+        [reg.group_id]
+      );
+    } else {
+      students = await query(
+        `SELECT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+                COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no
+         FROM enrollments e
+         JOIN students st ON e.student_id = st.id
+         WHERE e.department_id = ? AND e.year = ? AND e.semester = ? AND e.status = 'ENROLLED'
+         ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC`,
+        [reg.department_id, reg.year, reg.semester]
+      );
+    }
+
+    const totalSessions = (await query(
+      `SELECT COUNT(*) as cnt FROM attendance_sessions WHERE register_id = ? AND state = 'FINALIZED'`,
+      [registerId]
+    ))[0]?.cnt || 0;
+
+    const studentIds = students.map(s => s.student_id);
+    let attMarks = [];
+    if (studentIds.length && totalSessions > 0) {
+      attMarks = await query(
+        `SELECT ra.student_id,
+                COUNT(ra.id) as sessions_recorded,
+                SUM(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) as attended
+         FROM register_attendance ra
+         JOIN attendance_sessions asess ON asess.id = ra.session_id AND asess.state = 'FINALIZED'
+         WHERE asess.register_id = ? AND ra.student_id IN (${studentIds.map(() => '?').join(',')})
+         GROUP BY ra.student_id`,
+        [registerId, ...studentIds]
+      );
+    }
+    const markMap = new Map(attMarks.map(m => [m.student_id, m]));
+
+    const roster = students.map(st => {
+      const m = markMap.get(st.student_id) || { attended: 0, sessions_recorded: 0 };
+      const attended = m.attended || 0;
+      const pct = totalSessions > 0 ? Math.round((attended / totalSessions) * 100) : 100;
+      return {
+        ...st,
+        total_sessions: totalSessions,
+        attended_sessions: attended,
+        absent_sessions: Math.max(0, totalSessions - attended),
+        attendance_percentage: pct,
+        is_defaulter: pct < 75 && totalSessions > 0
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        register_id: reg.id,
+        register_name: reg.name,
+        total_sessions: totalSessions,
+        students: roster
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+// ─────────────────────────────────────────────────────────
 // SUBJECT MANAGEMENT
 // HOD creates subjects for their dept. No Theory/Practical here —
 // that is determined at assignment time.
@@ -1959,7 +2181,7 @@ router.get('/promotion/preview', requireHOD(), async (req, res) => {
 
 router.post('/promotion/execute', requireHOD(), async (req, res) => {
   const deptId = req.hod_department_id;
-  const { action = 'promote', exceptions = [], confirm_code } = req.body;
+  const { action = 'promote', exceptions = [], promoted_student_ids, selected_student_ids, confirm_code } = req.body;
 
   try {
     const deptRow = (await query('SELECT degree_duration_years, active_term, code FROM departments WHERE id = ?', [deptId]))[0];
@@ -1994,7 +2216,13 @@ router.post('/promotion/execute', requireHOD(), async (req, res) => {
         [deptId, ayId]
       );
 
-      const skippedIds = new Set((exceptions || []).map(Number));
+      let skippedIds;
+      if (Array.isArray(selected_student_ids)) {
+        const selSet = new Set(selected_student_ids.map(Number));
+        skippedIds = new Set(enrollments.filter(e => !selSet.has(Number(e.student_id))).map(e => Number(e.student_id)));
+      } else {
+        skippedIds = new Set((exceptions || []).map(Number));
+      }
       let demotedCount = 0;
       const cohortsToReindex = new Set();
 
@@ -2089,7 +2317,16 @@ router.post('/promotion/execute', requireHOD(), async (req, res) => {
       [deptId, ayId]
     );
 
-    const detainedIds = new Set((exceptions || []).map(Number));
+    let detainedIds;
+    if (Array.isArray(promoted_student_ids)) {
+      const passSet = new Set(promoted_student_ids.map(Number));
+      detainedIds = new Set(enrollments.filter(e => !passSet.has(Number(e.student_id))).map(e => Number(e.student_id)));
+    } else if (Array.isArray(selected_student_ids)) {
+      const passSet = new Set(selected_student_ids.map(Number));
+      detainedIds = new Set(enrollments.filter(e => !passSet.has(Number(e.student_id))).map(e => Number(e.student_id)));
+    } else {
+      detainedIds = new Set((exceptions || []).map(Number));
+    }
     let promotedCount = 0;
     let graduatedCount = 0;
     let detainedCount = 0;

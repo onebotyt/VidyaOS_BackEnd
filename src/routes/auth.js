@@ -325,7 +325,7 @@ router.get('/google/callback', async (req, res) => {
             } else if (payload.access_token) {
               let target = '/faculty/dashboard.html';
               if (payload.user && payload.user.roles && payload.user.roles.includes('STUDENT')) {
-                target = '/student/attendance.html';
+                target = '/student/dashboard.html';
               } else if (payload.user && payload.user.roles && payload.user.roles.includes('SYSTEM_ADMIN')) {
                 target = '/admin/dashboard.html';
               }
@@ -555,12 +555,48 @@ router.get('/student/registration/cohorts', async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
-    // Parse setting_key format: cohort_reg_{dept}_{branch}_{year}_{sem}_{ayId}
+    // Parse setting_key format: cohort_reg_{dept}_{branch}_{year}_{sem}_{ayId} or cohort_reg_dept_{deptId}
     const cohorts = [];
+    const seenCohorts = new Set();
+    const ayRows = await query(`SELECT id, label FROM academic_years WHERE is_current = 1 LIMIT 1`);
+    const defaultAyId = ayRows[0]?.id || 1;
+    const defaultAyLabel = ayRows[0]?.label || '2026-27';
+
     for (const s of settings) {
+      if (s.setting_key.startsWith('cohort_reg_dept_')) {
+        const dId = parseInt(s.setting_key.replace('cohort_reg_dept_', ''), 10);
+        const deptInfo = await query(`SELECT id, name, code, degree_duration_years FROM departments WHERE id = ?`, [dId]);
+        if (deptInfo && deptInfo.length > 0) {
+          const d = deptInfo[0];
+          const dur = d.degree_duration_years || 3;
+          for (let sm = 1; sm <= dur * 2; sm++) {
+            const yr = Math.min(dur, Math.ceil(sm / 2));
+            const cKey = `${d.id}_${yr}_${sm}`;
+            if (!seenCohorts.has(cKey)) {
+              seenCohorts.add(cKey);
+              cohorts.push({
+                department_id: d.id,
+                department_name: d.name,
+                department_code: d.code,
+                branch_id: d.id,
+                branch_name: d.name,
+                branch_code: d.code,
+                academic_year_id: defaultAyId,
+                academic_year_label: defaultAyLabel,
+                year: yr,
+                semester: sm
+              });
+            }
+          }
+        }
+        continue;
+      }
+
       const parts = s.setting_key.replace('cohort_reg_', '').split('_');
       if (parts.length < 5) continue;
       const [deptId, branchId, year, semester, ayId] = parts.map(Number);
+      const cKey = `${deptId}_${year}_${semester}`;
+      if (seenCohorts.has(cKey)) continue;
 
       const info = await query(
         `SELECT d.id as department_id, d.name as department_name, d.code as department_code,
@@ -569,10 +605,11 @@ router.get('/student/registration/cohorts', async (req, res) => {
          FROM departments d
          JOIN academic_years ay ON ay.id = ?
          WHERE d.id = ?`,
-        [ayId, deptId]
+        [ayId || defaultAyId, deptId]
       );
 
       if (info && info.length > 0) {
+        seenCohorts.add(cKey);
         cohorts.push({
           ...info[0],
           year: Number(year),

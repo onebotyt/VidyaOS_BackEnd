@@ -11,6 +11,8 @@
 
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const { body, param, query: queryValidator } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
@@ -19,6 +21,15 @@ const validate = require('../middleware/validate');
 const { query, withTransaction } = require('../config/db');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
+const excelExportService = require('../services/excelExportService');
+const { makeUploader } = require('../middleware/upload');
+
+const uploadStream = makeUploader('stream', 100);
+
+// Ensure subject_code column exists in teaching_groups
+try {
+  query('ALTER TABLE teaching_groups ADD COLUMN subject_code TEXT;').catch(() => {});
+} catch (_) {}
 
 function generateInviteCode(prefix = '') {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -68,7 +79,7 @@ router.get('/overview', auth, async (req, res) => {
 
     // 1. Groups overview & attendance stats for chart
     const groups = await query(`
-      SELECT tg.id, tg.name, tg.subject_name, tg.component, tg.semester,
+      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.semester,
              ar.id as register_id,
              (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as member_count,
              (SELECT COUNT(DISTINCT s.id) FROM attendance_sessions s WHERE s.register_id = ar.id AND s.state != 'DRAFT') as session_count,
@@ -139,11 +150,11 @@ router.get('/overview', auth, async (req, res) => {
  * List Teaching Groups for Teacher (or Admin)
  * GET /api/v1/teaching-groups
  */
-router.get('/', auth, async (req, res) => {
+router.get(['/', '/teacher/my-groups', '/my-groups'], auth, async (req, res) => {
   try {
     const statusFilter = req.query.status || 'ACTIVE'; // 'ACTIVE' | 'ARCHIVED' | 'TRASH' | 'ALL'
     let sql = `
-      SELECT tg.id, tg.name, tg.subject_name, tg.component, tg.teacher_id,
+      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label,
              tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at, tg.deleted_at,
              t.full_name as teacher_name, t.department_id as teacher_department_id,
@@ -209,7 +220,8 @@ router.post(
   [
     body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Group name required (2-100 chars)'),
     body('subject_name').trim().isLength({ min: 2, max: 100 }).withMessage('Subject name required (2-100 chars)'),
-    body('component').optional().isIn(['THEORY', 'PRACTICAL']).withMessage('Component must be THEORY or PRACTICAL'),
+    body('subject_code').optional().trim(),
+    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL']).withMessage('Component must be THEORY, PRACTICAL, or THEORY_PRACTICAL'),
     body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester must be between 1 and 6'),
     body('enrollment_mode').optional().isIn(['INVITE_CODE', 'COHORT']).withMessage('Enrollment mode must be INVITE_CODE or COHORT'),
     body('department_id').optional({ nullable: true }).isInt(),
@@ -217,7 +229,7 @@ router.post(
     validate
   ],
   async (req, res) => {
-    const { name, subject_name, component = 'THEORY', semester, enrollment_mode = 'INVITE_CODE', department_id } = req.body;
+    const { name, subject_name, subject_code, component = 'THEORY', semester, enrollment_mode = 'INVITE_CODE', department_id } = req.body;
 
     try {
       // Resolve active academic year if not provided
@@ -246,11 +258,12 @@ router.post(
 
       // Execute in transaction: Create Teaching Group + Auto-Create Official Register
       const result = await withTransaction(async (conn) => {
+        const finalCode = (subject_code || '').trim() || (subject_name || '').split(/[\s-]+/).map(w => w[0]).join('').toUpperCase().slice(0, 8);
         const groupInsert = await conn.query(
           `INSERT INTO teaching_groups 
-            (name, subject_name, component, teacher_id, academic_year_id, semester, invite_code, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
-          [name, subject_name, component, effTeacherId, ayId, semester, inviteCode]
+            (name, subject_name, subject_code, component, teacher_id, academic_year_id, semester, invite_code, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
+          [name, subject_name, finalCode, component, effTeacherId, ayId, semester, inviteCode]
         );
         const groupId = groupInsert.insertId || groupInsert.lastInsertRowid;
 
@@ -298,7 +311,7 @@ router.post(
           [req.user.id, String(groupId), JSON.stringify({ name, subject_name, component, semester, register_id: registerId, invite_code: inviteCode, enrollment_mode, auto_enrolled_count: autoEnrolledCount })]
         );
 
-        return { groupId, registerId, inviteCode, autoEnrolledCount };
+        return { groupId, registerId, inviteCode, autoEnrolledCount, subjectCode: finalCode };
       });
 
       res.status(201).json({
@@ -308,6 +321,7 @@ router.post(
           id: result.groupId,
           name,
           subject_name,
+          subject_code: result.subjectCode,
           component,
           semester,
           academic_year_id: ayId,
@@ -587,17 +601,25 @@ router.delete(
 router.get('/student/my-groups', auth, requireRole('STUDENT'), async (req, res) => {
   try {
     const groups = await query(
-      `SELECT tg.id, tg.name, tg.subject_name, tg.component, tg.semester,
+      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.semester,
               ay.label as academic_year_label, tg.status, tgm.joined_at,
               t.full_name as teacher_name, d.name as department_name, d.code as department_code,
-              (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'ASSIGNMENT') as assignment_count,
-              (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'EXAM') as exam_count
+              (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')) as assignment_count,
+              (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'EXAM') as exam_count,
+              (SELECT COUNT(*) FROM assessments a 
+               WHERE a.group_id = tg.id 
+                 AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')
+                 AND NOT EXISTS (
+                   SELECT 1 FROM assessment_submissions sub 
+                   WHERE sub.assessment_id = a.id AND sub.student_id = tgm.student_id AND sub.status IN ('SUBMITTED', 'GRADED')
+                 )
+              ) as pending_work_count
        FROM teaching_group_members tgm
        JOIN teaching_groups tg ON tgm.group_id = tg.id
        JOIN teachers t ON tg.teacher_id = t.id
        LEFT JOIN departments d ON t.department_id = d.id
        JOIN academic_years ay ON tg.academic_year_id = ay.id
-       WHERE tgm.student_id = ? AND tgm.status = 'ENROLLED'
+       WHERE tgm.student_id = ? AND (tgm.status = 'ENROLLED' OR tgm.status = 'ACTIVE')
        ORDER BY tg.status ASC, tg.created_at DESC`,
       [req.user.student_id]
     );
@@ -638,25 +660,48 @@ router.get('/:id/stream', auth, async (req, res) => {
 });
 
 /**
- * Post Announcement to Classroom Stream
+ * Post Announcement to Classroom Stream (Supports Document & File Attachments)
  * POST /api/v1/teaching-groups/:id/stream
  */
 router.post(
   '/:id/stream',
   auth,
+  (req, res, next) => {
+    const ct = req.headers['content-type'] || '';
+    if (ct.includes('multipart/form-data')) {
+      uploadStream.single('attachment')(req, res, (err) => {
+        if (err) {
+          return res.status(400).json({ success: false, error: { code: 'UPLOAD_ERROR', message: err.message } });
+        }
+        if (req.file && (!req.body.content || !req.body.content.trim())) {
+          req.body.content = req.file.originalname;
+        }
+        next();
+      });
+    } else {
+      next();
+    }
+  },
   [
     body('content').trim().isLength({ min: 1, max: 2000 }).withMessage('Post content required (1-2000 chars)'),
     validate
   ],
   async (req, res) => {
     const groupId = Number(req.params.id);
-    const { content, attachment_path, attachment_name } = req.body;
+    const content = req.body.content;
+    let attachmentPath = req.body.attachment_path || null;
+    let attachmentName = req.body.attachment_name || null;
+
+    if (req.file) {
+      attachmentPath = `/uploads/stream/${req.file.filename}`;
+      attachmentName = req.file.originalname;
+    }
 
     try {
       const result = await query(
         `INSERT INTO classroom_posts (group_id, author_id, content, attachment_path, attachment_name, created_at)
          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        [groupId, req.user.id, content, attachment_path || null, attachment_name || null]
+        [groupId, req.user.id, content, attachmentPath, attachmentName]
       );
 
       res.status(201).json({
@@ -667,6 +712,8 @@ router.post(
           group_id: groupId,
           author_id: req.user.id,
           content,
+          attachment_path: attachmentPath,
+          attachment_name: attachmentName,
           created_at: new Date().toISOString()
         }
       });
@@ -675,6 +722,25 @@ router.post(
     }
   }
 );
+
+/**
+ * Delete Announcement from Classroom Stream
+ * DELETE /api/v1/teaching-groups/:id/stream/:postId
+ */
+router.delete('/:id/stream/:postId', auth, async (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const postId = Number(req.params.postId);
+
+    await query('DELETE FROM classroom_post_comments WHERE post_id = ?', [postId]);
+    await query('DELETE FROM classroom_posts WHERE id = ? AND group_id = ?', [postId, groupId]);
+
+    res.status(200).json({ success: true, message: 'Announcement deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
 
 /**
  * Archive Teaching Group (Section 21, 61)
@@ -777,7 +843,7 @@ router.put(
   [
     body('name').optional().trim().isLength({ min: 2, max: 100 }),
     body('subject_name').optional().trim().isLength({ min: 2, max: 100 }),
-    body('component').optional().isIn(['THEORY', 'PRACTICAL']),
+    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL']),
     validate
   ],
   async (req, res) => {
@@ -793,10 +859,10 @@ router.put(
         return res.status(403).json({ success: false, error: { message: 'Forbidden' } });
       }
 
-      const { name = g.name, subject_name = g.subject_name, component = g.component } = req.body;
+      const { name = g.name, subject_name = g.subject_name, subject_code = g.subject_code, component = g.component } = req.body;
       await query(
-        `UPDATE teaching_groups SET name = ?, subject_name = ?, component = ? WHERE id = ?`,
-        [name, subject_name, component, groupId]
+        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ? WHERE id = ?`,
+        [name, subject_name, subject_code, component, groupId]
       );
       await query(
         `UPDATE attendance_registers SET name = ?, session_type_scope = ? WHERE group_id = ?`,
@@ -806,7 +872,7 @@ router.put(
       res.status(200).json({
         success: true,
         message: 'Class updated successfully',
-        data: { id: groupId, name, subject_name, component }
+        data: { id: groupId, name, subject_name, subject_code, component }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { message: err.message } });
@@ -1278,21 +1344,37 @@ router.get('/:id/assignments', auth, async (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const rows = await query(
-      `SELECT a.id, a.title, a.description, a.due_date, a.max_marks, a.created_at,
-              (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id) as submission_count
+      `SELECT a.id, a.type, a.title, a.description, a.due_date, a.max_marks, a.created_at, a.questions,
+              (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as submission_count
        FROM assessments a
-       WHERE a.group_id = ? AND a.type = 'ASSIGNMENT'
+       WHERE a.group_id = ? AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')
        ORDER BY a.created_at DESC`,
       [groupId]
     );
-    res.status(200).json({ success: true, data: rows });
+
+    const formatted = rows.map(r => {
+      let qList = null;
+      if (r.questions) {
+        try {
+          qList = typeof r.questions === 'string' ? JSON.parse(r.questions) : r.questions;
+        } catch (_) {
+          qList = null;
+        }
+      }
+      return {
+        ...r,
+        questions: qList
+      };
+    });
+
+    res.status(200).json({ success: true, data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
 
 /**
- * Create Group Assignment
+ * Create Group Assignment / Practical Work / Final Documents Request
  * POST /api/v1/teaching-groups/:id/assignments
  */
 router.post(
@@ -1300,14 +1382,14 @@ router.post(
   auth,
   requireRole('TEACHER', 'SYSTEM_ADMIN'),
   [
-    body('title').trim().isLength({ min: 2, max: 200 }).withMessage('Assignment title required'),
-    body('max_marks').optional().isFloat({ min: 1 }).withMessage('Max marks must be positive number'),
+    body('title').trim().isLength({ min: 2, max: 200 }).withMessage('Title required'),
+    body('type').optional().isIn(['ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS']).withMessage('Invalid work type'),
     validate
   ],
   async (req, res) => {
     try {
       const groupId = Number(req.params.id);
-      const { title, description, due_date, max_marks = 100 } = req.body;
+      const { title, description, due_date, max_marks, type = 'ASSIGNMENT', post_to_stream = true, questions } = req.body;
 
       const grp = await query(
         `SELECT tg.*, COALESCE(ar.department_id, t.department_id, 1) as department_id
@@ -1320,27 +1402,66 @@ router.post(
       if (!grp.length) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teaching group not found' } });
       const g = grp[0];
 
+      let qJson = null;
+      if (questions) {
+        qJson = typeof questions === 'string' ? questions : JSON.stringify(questions);
+      }
+
+      // Final docs do not require max marks input from teacher, default safely to 100 for SQLite NOT NULL constraint
+      const effectiveMaxMarks = max_marks !== undefined && max_marks !== null && max_marks !== ''
+        ? Number(max_marks)
+        : (type === 'FINAL_DOCS' ? 100 : (type === 'PRACTICAL' ? 25 : 100));
+
       const result = await query(
-        `INSERT INTO assessments (teacher_id, group_id, semester, academic_year_id, type, title, description, due_date, max_marks, department_id, year)
-         VALUES (?, ?, ?, ?, 'ASSIGNMENT', ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO assessments (teacher_id, group_id, semester, academic_year_id, type, title, description, due_date, max_marks, questions, department_id, year)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           g.teacher_id,
           groupId,
           g.semester,
           g.academic_year_id,
+          type,
           title,
           description || null,
           due_date || null,
-          max_marks,
+          effectiveMaxMarks,
+          qJson,
           g.department_id || null,
           Math.ceil(g.semester / 2)
         ]
       );
+      const insertId = result.insertId || result.lastInsertRowid;
+
+      // Send notifications directly to enrolled students (do not post to stream)
+      try {
+        const enrolledStudents = await query(
+          `SELECT s.user_id 
+           FROM teaching_group_members tgm 
+           JOIN students s ON tgm.student_id = s.id 
+           WHERE tgm.group_id = ? AND (tgm.status = 'ACTIVE' OR tgm.status = 'ENROLLED')`,
+          [groupId]
+        );
+        const studentUserIds = (enrolledStudents || []).map(r => r.user_id).filter(Boolean);
+        if (studentUserIds.length > 0) {
+          const typeLabel = type === 'PRACTICAL' ? 'New Lab Practical' : type === 'FINAL_DOCS' ? 'Final Documents Submission Request' : 'New Assignment';
+          const notifTitle = `${typeLabel}: ${title}`;
+          const notifMsg = `Posted in ${g.name} (${g.subject_name})${due_date ? ' · Due: ' + due_date : ''}`;
+          await notificationService.sendBatchNotification({
+            userIds: studentUserIds,
+            type: notificationService.NOTIFICATION_TYPES.ASSIGNMENT_POSTED,
+            title: notifTitle,
+            message: notifMsg,
+            linkUrl: `/student/assignments.html?group=${groupId}`
+          });
+        }
+      } catch (notifErr) {
+        console.warn('[ClassworkNotif] Failed to dispatch student notifications:', notifErr.message);
+      }
 
       res.status(201).json({
         success: true,
-        message: 'Assignment published successfully',
-        data: { id: result.insertId || result.lastInsertRowid }
+        message: `${type === 'PRACTICAL' ? 'Practical announcement' : type === 'FINAL_DOCS' ? 'Final documents request' : 'Assignment'} published successfully`,
+        data: { id: insertId, questions: questions || null }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -1349,26 +1470,206 @@ router.post(
 );
 
 /**
- * Delete Group Assignment
+ * Edit Group Assignment / Practical Work / Final Documents Request
+ * PUT /api/v1/teaching-groups/:id/assignments/:assignmentId
+ */
+router.put(
+  '/:id/assignments/:assignmentId',
+  auth,
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
+  async (req, res) => {
+    try {
+      const groupId = Number(req.params.id);
+      const assignmentId = Number(req.params.assignmentId);
+      const { title, description, due_date, max_marks, questions } = req.body;
+
+      const existing = await query('SELECT * FROM assessments WHERE id = ? AND group_id = ?', [assignmentId, groupId]);
+      if (!existing.length) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Classwork item not found' } });
+      }
+
+      let qJson = existing[0].questions;
+      if (questions !== undefined) {
+        qJson = (questions === null || questions === '') ? null : (typeof questions === 'string' ? questions : JSON.stringify(questions));
+      }
+
+      const newTitle = title !== undefined ? title.trim() : existing[0].title;
+      const newDesc = description !== undefined ? (description ? description.trim() : null) : existing[0].description;
+      const newDue = due_date !== undefined ? (due_date ? due_date : null) : existing[0].due_date;
+      const newMarks = max_marks !== undefined ? (max_marks === '' || max_marks === null ? (existing[0].max_marks || 100) : Number(max_marks)) : existing[0].max_marks;
+
+      await query(
+        `UPDATE assessments
+         SET title = ?, description = ?, due_date = ?, max_marks = ?, questions = ?
+         WHERE id = ? AND group_id = ?`,
+        [newTitle, newDesc, newDue, newMarks, qJson, assignmentId, groupId]
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Classwork item updated successfully'
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+);
+
+/**
+ * Get Submissions & Student Roster Status for a Classwork item
+ * GET /api/v1/teaching-groups/:id/assignments/:assignmentId/submissions
+ */
+router.get(
+  '/:id/assignments/:assignmentId/submissions',
+  auth,
+  async (req, res) => {
+    try {
+      const groupId = Number(req.params.id);
+      const assignmentId = Number(req.params.assignmentId);
+
+      const asgnRows = await query('SELECT * FROM assessments WHERE id = ? AND group_id = ?', [assignmentId, groupId]);
+      if (!asgnRows.length) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Item not found' } });
+      }
+      const item = asgnRows[0];
+
+      const roster = await query(
+        `SELECT COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
+                s.id as student_id, s.full_name, s.official_enrollment_no, s.registration_no,
+                sub.id as submission_id, sub.status as submission_status, sub.file_path, sub.original_filename,
+                sub.submitted_at, sub.marks_obtained, sub.feedback
+         FROM teaching_group_members tgm
+         JOIN students s ON tgm.student_id = s.id
+         LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+         LEFT JOIN assessment_submissions sub ON sub.assessment_id = ? AND sub.student_id = s.id
+         WHERE tgm.group_id = ? AND (tgm.status = 'ACTIVE' OR tgm.status = 'ENROLLED')
+         ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 9999) ASC, s.full_name ASC`,
+        [assignmentId, groupId]
+      );
+
+      const formatted = roster.map(r => {
+        let docs = [];
+        if (r.file_path) {
+          try {
+            const parsed = JSON.parse(r.file_path);
+            if (Array.isArray(parsed)) {
+              docs = parsed;
+            } else {
+              docs = [{ requirement_name: 'Submitted Document', file_path: r.file_path, original_filename: r.original_filename || 'document' }];
+            }
+          } catch (_) {
+            docs = [{ requirement_name: 'Submitted Document', file_path: r.file_path, original_filename: r.original_filename || 'document' }];
+          }
+        }
+
+        const isSubmitted = Boolean(r.submission_id && r.submission_status !== 'ABSENT');
+
+        return {
+          student_id: r.student_id,
+          class_roll_no: r.class_roll_no,
+          full_name: r.full_name,
+          official_enrollment_no: r.official_enrollment_no,
+          registration_no: r.registration_no,
+          submission_id: r.submission_id,
+          status: isSubmitted ? (r.submission_status || 'SUBMITTED') : 'NOT_SUBMITTED',
+          is_submitted: isSubmitted,
+          submitted_at: r.submitted_at,
+          marks_obtained: r.marks_obtained,
+          feedback: r.feedback,
+          documents: docs
+        };
+      });
+
+      const submittedCount = formatted.filter(s => s.is_submitted).length;
+      const notSubmittedCount = formatted.length - submittedCount;
+
+      res.status(200).json({
+        success: true,
+        data: {
+          assignment_id: assignmentId,
+          title: item.title,
+          type: item.type,
+          total_students: formatted.length,
+          submitted_count: submittedCount,
+          not_submitted_count: notSubmittedCount,
+          roster: formatted
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+);
+
+/**
+ * Delete Group Assignment / Practical Work / Final Documents Request
  * DELETE /api/v1/teaching-groups/:id/assignments/:assignmentId
  */
 router.delete('/:id/assignments/:assignmentId', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), async (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const assignmentId = Number(req.params.assignmentId);
-    await query(`DELETE FROM assessments WHERE id = ? AND group_id = ? AND type = 'ASSIGNMENT'`, [assignmentId, groupId]);
-    res.status(200).json({ success: true, message: 'Assignment deleted' });
+    const deleteFiles = req.query.delete_files !== 'false' && req.query.delete_files !== '0' && req.body?.delete_files !== false;
+
+    if (deleteFiles) {
+      const uploadRoot = path.join(__dirname, '../../uploads');
+
+      // 1. Check assessment attachment
+      const asgnRows = await query(`SELECT attachment_path FROM assessments WHERE id = ? AND group_id = ?`, [assignmentId, groupId]);
+      if (asgnRows.length && asgnRows[0].attachment_path) {
+        try {
+          const rel = asgnRows[0].attachment_path.replace(/^\/uploads\//, '');
+          const fullPath = path.join(uploadRoot, rel);
+          if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        } catch (_) {}
+      }
+
+      // 2. Unlink student submission files from disk
+      const subs = await query(`SELECT file_path FROM assessment_submissions WHERE assessment_id = ?`, [assignmentId]);
+      for (const s of subs) {
+        if (!s.file_path) continue;
+        let filePaths = [];
+        if (typeof s.file_path === 'string' && s.file_path.startsWith('[')) {
+          try {
+            const arr = JSON.parse(s.file_path);
+            if (Array.isArray(arr)) filePaths = arr.map(d => d.file_path).filter(Boolean);
+          } catch (_) { filePaths = [s.file_path]; }
+        } else {
+          filePaths = [s.file_path];
+        }
+
+        for (const fp of filePaths) {
+          try {
+            const rel = fp.replace(/^\/uploads\//, '');
+            const fullPath = path.join(uploadRoot, rel);
+            if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+          } catch (e) {
+            console.warn('[DeleteFiles] Error deleting file:', fp, e.message);
+          }
+        }
+      }
+    }
+
+    // Cascade delete any submissions first to prevent FK/orphan locks
+    await query(`DELETE FROM assessment_submissions WHERE assessment_id = ?`, [assignmentId]);
+    await query(`DELETE FROM assessments WHERE id = ? AND group_id = ?`, [assignmentId, groupId]);
+    res.status(200).json({ success: true, message: 'Classwork item deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
 });
 
-// Ensure questions column exists in assessments table (fail-safe idempotent)
+// Ensure questions and instructions columns exist in assessments table (fail-safe idempotent)
 (async () => {
   try {
     const cols = await query(`PRAGMA table_info(assessments)`);
-    if (Array.isArray(cols) && !cols.some(c => c.name === 'questions')) {
-      await query(`ALTER TABLE assessments ADD COLUMN questions TEXT`);
+    if (Array.isArray(cols)) {
+      if (!cols.some(c => c.name === 'questions')) {
+        await query(`ALTER TABLE assessments ADD COLUMN questions TEXT`);
+      }
+      if (!cols.some(c => c.name === 'instructions')) {
+        await query(`ALTER TABLE assessments ADD COLUMN instructions TEXT`);
+      }
     }
   } catch (_) {}
 })();
@@ -1381,7 +1682,7 @@ router.get('/:id/tests', auth, async (req, res) => {
   try {
     const groupId = Number(req.params.id);
     const rows = await query(
-      `SELECT a.id, a.title as name, a.title, a.description, a.due_date as test_date, a.due_date, a.max_marks, a.created_at, a.questions,
+      `SELECT a.id, a.title as name, a.title, a.description, a.due_date as test_date, a.due_date, a.max_marks, a.created_at, a.questions, a.instructions,
               (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as graded_count,
               (SELECT AVG(sub.marks_obtained) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as avg_score,
               (SELECT (COUNT(CASE WHEN sub.marks_obtained >= (a.max_marks * 0.4) THEN 1 END) * 100.0 / NULLIF(COUNT(sub.id), 0))
@@ -1401,9 +1702,18 @@ router.get('/:id/tests', auth, async (req, res) => {
           qList = null;
         }
       }
+      let instList = null;
+      if (r.instructions) {
+        try {
+          instList = typeof r.instructions === 'string' ? JSON.parse(r.instructions) : r.instructions;
+        } catch {
+          instList = null;
+        }
+      }
       return {
         ...r,
         questions: qList,
+        instructions: instList,
         num_questions: Array.isArray(qList) ? qList.length : null
       };
     });
@@ -1498,6 +1808,49 @@ router.post(
 );
 
 /**
+ * Edit Group Class Test
+ * PUT /api/v1/teaching-groups/:id/tests/:testId
+ */
+router.put('/:id/tests/:testId', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), async (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const testId = Number(req.params.testId);
+    const { name, test_date, max_marks, description, questions, instructions } = req.body;
+
+    const existing = await query('SELECT * FROM assessments WHERE id = ? AND group_id = ? AND type = ?', [testId, groupId, 'EXAM']);
+    if (!existing.length) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Test not found' } });
+    }
+
+    let qJson = existing[0].questions;
+    if (questions !== undefined) {
+      qJson = questions ? (typeof questions === 'string' ? questions : JSON.stringify(questions)) : null;
+    }
+
+    let instJson = existing[0].instructions;
+    if (instructions !== undefined) {
+      instJson = instructions ? (typeof instructions === 'string' ? instructions : JSON.stringify(instructions)) : null;
+    }
+
+    const newName = name !== undefined ? name.trim() : existing[0].title;
+    const newDesc = description !== undefined ? (description ? description.trim() : null) : existing[0].description;
+    const newDate = test_date !== undefined ? (test_date ? test_date : null) : existing[0].due_date;
+    const newMarks = max_marks !== undefined ? Number(max_marks) : existing[0].max_marks;
+
+    await query(
+      `UPDATE assessments
+       SET title = ?, description = ?, due_date = ?, max_marks = ?, questions = ?, instructions = ?
+       WHERE id = ? AND group_id = ? AND type = 'EXAM'`,
+      [newName, newDesc, newDate, newMarks, qJson, instJson, testId, groupId]
+    );
+
+    res.status(200).json({ success: true, message: 'Class test updated successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
+/**
  * Delete Group Class Test
  * DELETE /api/v1/teaching-groups/:id/tests/:testId
  */
@@ -1505,8 +1858,9 @@ router.delete('/:id/tests/:testId', auth, requireRole('TEACHER', 'SYSTEM_ADMIN')
   try {
     const groupId = Number(req.params.id);
     const testId = Number(req.params.testId);
+    await query(`DELETE FROM assessment_submissions WHERE assessment_id = ?`, [testId]);
     await query(`DELETE FROM assessments WHERE id = ? AND group_id = ? AND type = 'EXAM'`, [testId, groupId]);
-    res.status(200).json({ success: true, message: 'Test deleted' });
+    res.status(200).json({ success: true, message: 'Test deleted successfully' });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
   }
@@ -1571,8 +1925,26 @@ router.post(
   ],
   async (req, res) => {
     try {
+      const groupId = Number(req.params.id);
       const testId = Number(req.params.testId);
-      const { scores } = req.body;
+      const { scores, questions, instructions } = req.body;
+
+      if (questions !== undefined || instructions !== undefined) {
+        const upParts = [];
+        const upVals = [];
+        if (questions !== undefined) {
+          upParts.push('questions = ?');
+          upVals.push(questions ? (typeof questions === 'string' ? questions : JSON.stringify(questions)) : null);
+        }
+        if (instructions !== undefined) {
+          upParts.push('instructions = ?');
+          upVals.push(instructions ? (typeof instructions === 'string' ? instructions : JSON.stringify(instructions)) : null);
+        }
+        if (upParts.length) {
+          upVals.push(testId, groupId);
+          await query(`UPDATE assessments SET ${upParts.join(', ')} WHERE id = ? AND group_id = ? AND type = 'EXAM'`, upVals);
+        }
+      }
 
       await withTransaction(async (conn) => {
         for (const s of scores) {
@@ -1583,7 +1955,8 @@ router.post(
             is_absent: isAbsent,
             remarks: s.remarks || null,
             question_scores: s.question_scores || null,
-            questions: s.questions || null
+            questions: s.questions || questions || null,
+            instructions: instructions || null
           });
 
           await conn.execute(
@@ -1606,6 +1979,160 @@ router.post(
     }
   }
 );
+
+/**
+ * Export Group Class Test Marksheet (Excel, PDF, Word DOC)
+ * POST /api/v1/teaching-groups/:id/tests/:testId/export/:format
+ * GET  /api/v1/teaching-groups/:id/tests/:testId/export/:format
+ */
+router.all('/:id/tests/:testId/export/:format', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), async (req, res) => {
+  try {
+    const groupId = Number(req.params.id);
+    const testId = Number(req.params.testId);
+    const format = (req.params.format || 'excel').toLowerCase();
+
+    // Query test and group metadata
+    const testRows = await query(
+      `SELECT a.*, tg.name as group_name, tg.subject_name, tg.semester, tg.academic_year_id,
+              ay.label as academic_year_label,
+              d.name as department_name, d.code as department_code
+       FROM assessments a
+       JOIN teaching_groups tg ON tg.id = a.group_id
+       LEFT JOIN academic_years ay ON ay.id = tg.academic_year_id
+       LEFT JOIN teachers tech ON tech.user_id = tg.teacher_id
+       LEFT JOIN departments d ON d.id = tech.department_id
+       WHERE a.id = ? AND a.group_id = ? AND a.type = 'EXAM'`,
+      [testId, groupId]
+    );
+
+    if (!testRows.length) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Class test not found' } });
+    }
+    const t = testRows[0];
+
+    const setRows = await query(`SELECT setting_value FROM system_settings WHERE setting_key = 'institution_name'`);
+    const instName = setRows[0]?.setting_value || 'Government Polytechnic College';
+
+    const customData = req.body || {};
+
+    let questions = customData.questions;
+    if (!questions && t.questions) {
+      try { questions = typeof t.questions === 'string' ? JSON.parse(t.questions) : t.questions; } catch {}
+    }
+
+    let instructions = customData.instructions;
+    if (!instructions && t.instructions) {
+      try { instructions = typeof t.instructions === 'string' ? JSON.parse(t.instructions) : t.instructions; } catch {}
+    }
+
+    let roster = customData.roster;
+    if (!Array.isArray(roster) || roster.length === 0) {
+      // Fetch enrolled students and their scores
+      const studRows = await query(
+        `SELECT s.id as student_id, s.class_roll_no, s.registration_no, s.official_enrollment_no,
+                s.full_name,
+                sub.marks_obtained, sub.status, sub.feedback
+         FROM teaching_group_members gm
+         JOIN students s ON s.id = gm.student_id
+         LEFT JOIN assessment_submissions sub ON sub.assessment_id = ? AND sub.student_id = s.id
+         WHERE gm.group_id = ? AND gm.status = 'ENROLLED'
+         ORDER BY CAST(s.class_roll_no AS INTEGER) ASC, s.class_roll_no ASC`,
+        [testId, groupId]
+      );
+
+      roster = studRows.map(s => {
+        let qScores = null;
+        let isAb = s.status === 'ABSENT';
+        if (s.feedback) {
+          try {
+            const fb = JSON.parse(s.feedback);
+            if (fb.is_absent !== undefined) isAb = Boolean(fb.is_absent);
+            if (Array.isArray(fb.question_scores)) qScores = fb.question_scores;
+          } catch {}
+        }
+        return {
+          student_id: s.student_id,
+          class_roll_no: s.class_roll_no,
+          official_enrollment_no: s.official_enrollment_no,
+          registration_no: s.registration_no,
+          full_name: s.full_name,
+          is_absent: isAb,
+          question_scores: qScores,
+          marks_obtained: isAb ? 0 : s.marks_obtained
+        };
+      });
+    }
+
+    // ── ALWAYS enrich roster with official DB enrollment/registration numbers ──
+    // Ensures Enrollment No. and Registration No. appear in exports even when
+    // those columns were hidden in the UI marks modal.
+    if (Array.isArray(roster) && roster.length > 0) {
+      const studentIds = roster.map(r => r.student_id).filter(Boolean);
+      if (studentIds.length > 0) {
+        try {
+          const dbStudents = await query(
+            `SELECT id, official_enrollment_no, registration_no
+             FROM students WHERE id IN (${studentIds.map(() => '?').join(',')})
+             LIMIT 200`,
+            studentIds
+          );
+          const dbMap = {};
+          dbStudents.forEach(s => { dbMap[s.id] = s; });
+          roster = roster.map(r => ({
+            ...r,
+            official_enrollment_no: (dbMap[r.student_id]?.official_enrollment_no) || r.official_enrollment_no || '-',
+            registration_no:        (dbMap[r.student_id]?.registration_no)        || r.registration_no        || '-'
+          }));
+        } catch (_) { /* Non-fatal: continue with existing roster data */ }
+      }
+    }
+
+    const payload = {
+      institution_name: customData.institution_name || instName,
+      session_label: customData.session_label || `Internal Evaluation Sheet ${t.academic_year_label || '2026 Session'}`,
+      department_name: customData.department_name || t.department_name || '',
+      department_code: customData.department_code || t.department_code || '',
+      subject_name: customData.subject_name || t.subject_name || t.group_name || 'Subject',
+      year: customData.year || (t.semester ? Math.ceil(t.semester / 2) : 1),
+      semester: customData.semester || t.semester || 1,
+      title: customData.title || t.title || 'Unit Test',
+      max_marks: customData.max_marks || t.max_marks || 20,
+      exam_date: customData.exam_date || t.due_date,
+      duration: customData.duration || '50 minutes',
+      mode: customData.mode || 'OFFLINE',
+      questions,
+      instructions,
+      question_texts: customData.question_texts,
+      roster
+    };
+
+    const safeTitle = (payload.title || 'Unit_Test').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    if (format === 'excel' || format === 'xlsx') {
+      const buffer = await excelExportService.generateClassTestExcel(payload);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}_Marksheet.xlsx"`);
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    } else if (format === 'pdf') {
+      const buffer = await excelExportService.generateClassTestPdf(payload);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}_Marksheet.pdf"`);
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    } else if (format === 'doc' || format === 'docx' || format === 'word') {
+      const buffer = await excelExportService.generateClassTestDoc(payload);
+      res.setHeader('Content-Type', 'application/msword');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}_Marksheet.doc"`);
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    } else {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_FORMAT', message: 'Format must be excel, pdf, or doc' } });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
 
 /**
  * Auto-Archive Expired Session Teaching Groups (Option 3 Archiving)
