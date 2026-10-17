@@ -229,11 +229,6 @@ if (fs.existsSync(sharedDir)) {
   app.use('/css', express.static(path.join(sharedDir, 'css'), staticOptions));
 }
 
-// Serve Shared Components Library (Modular Component Architecture)
-const componentsDir = path.join(__dirname, '../frontend/components');
-if (fs.existsSync(componentsDir)) {
-  app.use('/components', express.static(componentsDir, staticOptions));
-}
 
 // Universal rewrite for legacy .html requests to modular folder index.html
 app.get('/:section/:page.html', (req, res, next) => {
