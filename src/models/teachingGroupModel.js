@@ -929,9 +929,14 @@ class TeachingGroupModel {
   static async updateGroupTest(testId, groupId, { name, description, testDate, maxMarks, questionsJson, instructionsJson }) {
     await query(
       `UPDATE assessments
-       SET title = ?, description = ?, due_date = ?, max_marks = ?, questions = ?, instructions = ?
+       SET title = COALESCE(?, title),
+           description = COALESCE(?, description),
+           due_date = COALESCE(?, due_date),
+           max_marks = COALESCE(?, max_marks),
+           questions = COALESCE(?, questions),
+           instructions = COALESCE(?, instructions)
        WHERE id = ? AND group_id = ? AND type = 'EXAM'`,
-      [name, description, testDate, maxMarks, questionsJson, instructionsJson, testId, groupId]
+      [name || null, description !== undefined ? description : null, testDate || null, maxMarks !== undefined ? maxMarks : null, questionsJson || null, instructionsJson || null, testId, groupId]
     );
   }
 

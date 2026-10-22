@@ -15,6 +15,7 @@ const TeachingGroupModel = require('../models/teachingGroupModel');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const excelExportService = require('../services/excelExportService');
+const { query } = require('../config/db');
 
 function generateInviteCode(prefix = '') {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -994,7 +995,11 @@ class TeachingGroupController {
     try {
       const groupId = Number(req.params.id);
       const rows = await TeachingGroupModel.getGroupTests(groupId);
-      const formatted = rows.map(r => {
+      const user = req.user || {};
+      const isStudent = user.role === 'STUDENT' || (Array.isArray(user.roles) && user.roles.includes('STUDENT'));
+      const studentId = user.student_id;
+
+      const formatted = await Promise.all(rows.map(async r => {
         let qList = null;
         if (r.questions) {
           try { qList = typeof r.questions === 'string' ? JSON.parse(r.questions) : r.questions; } catch {}
@@ -1003,13 +1008,34 @@ class TeachingGroupController {
         if (r.instructions) {
           try { instList = typeof r.instructions === 'string' ? JSON.parse(r.instructions) : r.instructions; } catch {}
         }
+
+        // Student Visibility Rule:
+        // Student only sees test is scheduled with Title, Date, and Max Marks; CANNOT see questions until teacher gives marks to student.
+        let studentScore = null;
+        let isEvaluated = false;
+        if (isStudent) {
+          if (studentId) {
+            const scores = await TeachingGroupModel.getTestScores(r.id);
+            studentScore = scores.find(s => s.student_id === studentId);
+            isEvaluated = Boolean(studentScore && (studentScore.marks_obtained !== null || studentScore.is_absent));
+          }
+          if (!isEvaluated) {
+            // Questions hidden until marks are entered
+            qList = null;
+            instList = null;
+          }
+        }
+
         return {
           ...r,
           questions: qList,
-          instructions: instList,
-          num_questions: Array.isArray(qList) ? qList.length : null
+          instructions: isStudent && !isEvaluated ? null : instList,
+          num_questions: isStudent && !isEvaluated ? null : (Array.isArray(qList) ? qList.length : null),
+          student_marks: studentScore ? studentScore.marks_obtained : null,
+          student_is_absent: studentScore ? Boolean(studentScore.is_absent) : false,
+          is_evaluated: isEvaluated
         };
-      });
+      }));
       res.status(200).json({ success: true, data: formatted });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -1094,10 +1120,10 @@ class TeachingGroupController {
       let instJson = instructions !== undefined ? (instructions ? (typeof instructions === 'string' ? instructions : JSON.stringify(instructions)) : null) : null;
 
       await TeachingGroupModel.updateGroupTest(testId, groupId, {
-        name,
+        name: name || null,
         description: description || null,
         testDate: test_date || null,
-        maxMarks: max_marks !== undefined ? Number(max_marks) : 20,
+        maxMarks: (max_marks !== undefined && max_marks !== null) ? Number(max_marks) : null,
         questionsJson: qJson,
         instructionsJson: instJson
       });
@@ -1136,7 +1162,37 @@ class TeachingGroupController {
   static async getTestScores(req, res) {
     try {
       const testId = Number(req.params.testId);
+      const groupId = Number(req.params.id);
       const scores = await TeachingGroupModel.getTestScores(testId);
+
+      // Check if digital register has an updated attendance session for this group on the test date
+      const testRow = (await query('SELECT id, due_date, group_id, max_marks FROM assessments WHERE id = ?', [testId]))[0];
+      const absentStudentIds = new Set();
+      let registerDateChecked = null;
+      let sessionFound = false;
+
+      if (testRow && testRow.due_date) {
+        registerDateChecked = String(testRow.due_date).slice(0, 10);
+        const attRows = await query(`
+          SELECT ra.student_id, ra.attendance_status
+          FROM register_attendance ra
+          JOIN attendance_sessions s ON s.id = ra.session_id
+          JOIN attendance_registers ar ON ar.id = s.register_id
+          WHERE (ar.group_id = ? OR ar.teacher_id = (SELECT tg.teacher_id FROM teaching_groups tg WHERE tg.id = ?))
+            AND s.session_date = ?
+            AND s.state != 'DRAFT'
+        `, [groupId, groupId, registerDateChecked]);
+
+        if (attRows && attRows.length > 0) {
+          sessionFound = true;
+          attRows.forEach(row => {
+            if (row.attendance_status === 'ABSENT') {
+              absentStudentIds.add(row.student_id);
+            }
+          });
+        }
+      }
+
       const cleaned = scores.map(s => {
         let rem = s.remarks;
         let question_scores = null;
@@ -1149,17 +1205,50 @@ class TeachingGroupController {
             if (parsed.questions) questions = parsed.questions;
           } catch {}
         }
+
+        const isRegAbsent = absentStudentIds.has(s.student_id);
+        const isAbsent = Boolean(s.is_absent) || (isRegAbsent && (s.marks_obtained === null || s.marks_obtained === undefined || s.marks_obtained === 0));
+
         return {
           student_id: s.student_id,
-          marks_obtained: s.marks_obtained,
-          is_absent: Boolean(s.is_absent),
+          marks_obtained: isAbsent ? 0 : s.marks_obtained,
+          is_absent: isAbsent,
+          register_absent: isRegAbsent,
           remarks: rem,
-          question_scores,
+          question_scores: isAbsent ? (question_scores ? question_scores.map(() => 0) : null) : question_scores,
           questions,
-          status: s.status
+          status: isAbsent ? 'ABSENT' : s.status
         };
       });
-      res.status(200).json({ success: true, data: cleaned });
+
+      // Include enrolled group members who don't have an assessment submission row yet
+      const members = await TeachingGroupModel.getGroupMembers(groupId);
+      const existingIds = new Set(cleaned.map(c => c.student_id));
+      for (const m of members) {
+        if (!existingIds.has(m.student_id)) {
+          const isRegAbsent = absentStudentIds.has(m.student_id);
+          cleaned.push({
+            student_id: m.student_id,
+            marks_obtained: isRegAbsent ? 0 : null,
+            is_absent: isRegAbsent,
+            register_absent: isRegAbsent,
+            remarks: null,
+            question_scores: null,
+            questions: null,
+            status: isRegAbsent ? 'ABSENT' : null
+          });
+        }
+      }
+
+      res.status(200).json({ 
+        success: true, 
+        data: cleaned,
+        meta: {
+          attendance_session_found: sessionFound,
+          test_date: registerDateChecked,
+          absent_from_register_count: absentStudentIds.size
+        }
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
