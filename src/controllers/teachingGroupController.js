@@ -150,6 +150,20 @@ class TeachingGroupController {
       group.linked_register_id = group.register_id;
       group.members = await TeachingGroupModel.getGroupMembers(groupId);
 
+      if (group.syllabus_units) {
+        if (typeof group.syllabus_units === 'string') {
+          try { group.syllabus_units = JSON.parse(group.syllabus_units); } catch (_) { group.syllabus_units = []; }
+        }
+      } else {
+        const totalUnits = parseInt(group.total_units) || 5;
+        group.syllabus_units = Array.from({ length: totalUnits }, (_, i) => ({
+          num: i + 1,
+          name: `Unit ${i + 1}`,
+          title: '',
+          description: ''
+        }));
+      }
+
       res.status(200).json({ success: true, data: group });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -480,15 +494,83 @@ class TeachingGroupController {
         return res.status(403).json({ success: false, error: { message: 'Forbidden' } });
       }
 
-      const { name = g.name, subject_name = g.subject_name, subject_code = g.subject_code, component = g.component, total_units = g.total_units } = req.body;
+      const { name = g.name, subject_name = g.subject_name, subject_code = g.subject_code, component = g.component, total_units = g.total_units, syllabus_units } = req.body;
       const finalName = (name && name.trim()) ? name.trim() : (subject_name ? subject_name.trim() : g.name);
       const finalUnits = total_units != null ? Math.min(20, Math.max(1, parseInt(total_units) || 5)) : (g.total_units || 5);
-      await TeachingGroupModel.updateGroup(groupId, { name: finalName, subject_name, subject_code, component, total_units: finalUnits });
+      await TeachingGroupModel.updateGroup(groupId, { name: finalName, subject_name, subject_code, component, total_units: finalUnits, syllabus_units });
 
       res.status(200).json({
         success: true,
         message: 'Class updated successfully',
         data: { id: groupId, name: finalName, subject_name, subject_code, component, total_units: finalUnits }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  /**
+   * Adds or updates a syllabus unit for a teaching group.
+   * @route POST /api/v1/teaching-groups/:id/units (routes/teachingGroups.js)
+   * @access TEACHER, SYSTEM_ADMIN
+   */
+  static async saveUnit(req, res) {
+    try {
+      const groupId = Number(req.params.id);
+      const g = await TeachingGroupModel.getGroupById(groupId);
+      if (!g) return res.status(404).json({ success: false, error: { message: 'Teaching group not found' } });
+
+      const isOwner = req.user.teacher_id && req.user.teacher_id === g.teacher_id;
+      const isAdmin = req.user.roles && req.user.roles.includes('SYSTEM_ADMIN');
+      if (!isOwner && !isAdmin && !req.user.is_hod) {
+        return res.status(403).json({ success: false, error: { message: 'Forbidden' } });
+      }
+
+      let units = [];
+      if (g.syllabus_units) {
+        try { units = typeof g.syllabus_units === 'string' ? JSON.parse(g.syllabus_units) : g.syllabus_units; } catch (_) { units = []; }
+      }
+      if (!Array.isArray(units)) units = [];
+
+      const totalUnits = parseInt(g.total_units) || 5;
+      if (units.length === 0) {
+        for (let i = 1; i <= totalUnits; i++) {
+          units.push({ num: i, name: `Unit ${i}`, title: '', description: '' });
+        }
+      }
+
+      const { num, name, title = '', description = '', action = 'save' } = req.body;
+
+      if (action === 'delete') {
+        units = units.filter(u => u.num !== Number(num) && u.name !== name);
+      } else {
+        // Find existing or add new
+        let targetIdx = units.findIndex(u => (num && u.num === Number(num)) || (name && u.name.toLowerCase() === name.toLowerCase()));
+        if (targetIdx >= 0) {
+          units[targetIdx].title = title ? title.trim() : '';
+          if (description !== undefined) units[targetIdx].description = description.trim();
+          if (name) units[targetIdx].name = name.trim();
+        } else {
+          // Add new unit
+          const newNum = Number(num) || (units.length ? Math.max(...units.map(u => u.num || 0)) + 1 : 1);
+          const newName = name ? name.trim() : `Unit ${newNum}`;
+          units.push({
+            num: newNum,
+            name: newName,
+            title: title ? title.trim() : '',
+            description: description ? description.trim() : ''
+          });
+        }
+      }
+
+      units.sort((a, b) => (a.num || 0) - (b.num || 0));
+      const newTotalUnits = Math.max(totalUnits, units.length);
+      await TeachingGroupModel.updateGroupSyllabusUnits(groupId, units, newTotalUnits);
+
+      res.status(200).json({
+        success: true,
+        message: 'Unit saved successfully',
+        data: { syllabus_units: units, total_units: newTotalUnits }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { message: err.message } });

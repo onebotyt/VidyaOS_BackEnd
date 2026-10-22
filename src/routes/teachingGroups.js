@@ -116,6 +116,16 @@ router.put(
   TeachingGroupController.editGroup
 );
 
+// @route   POST /api/v1/teaching-groups/:id/units
+// @desc    Add or update a syllabus unit for a teaching group
+// @access  Protected (TEACHER, SYSTEM_ADMIN)
+router.post(
+  '/:id/units',
+  auth,
+  requireRole('TEACHER', 'SYSTEM_ADMIN'),
+  TeachingGroupController.saveUnit
+);
+
 // @route   GET /api/v1/teaching-groups/:id/members
 // @desc    Retrieve enrolled students list for a teaching group
 // @access  Protected (Authenticated)

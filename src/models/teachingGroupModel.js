@@ -135,7 +135,7 @@ class TeachingGroupModel {
    */
   static async listGroups({ user, statusFilter }) {
     let sql = `
-      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.teacher_id,
+      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label,
              tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at, tg.deleted_at,
              t.full_name as teacher_name, t.department_id as teacher_department_id,
@@ -281,7 +281,7 @@ class TeachingGroupModel {
    */
   static async getGroupById(groupId) {
     const rows = await query(
-      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.teacher_id,
+      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
               tg.academic_year_id, ay.label as academic_year_label,
               tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
               t.full_name as teacher_name, t.department_id as teacher_department_id,
@@ -580,11 +580,22 @@ class TeachingGroupModel {
    * @param {Object} fields - Updated attributes
    * @returns {Promise<void>}
    */
-  static async updateGroup(groupId, { name, subject_name, subject_code, component, total_units }) {
-    if (total_units !== undefined) {
+  static async updateGroup(groupId, { name, subject_name, subject_code, component, total_units, syllabus_units }) {
+    const unitsJson = syllabus_units !== undefined ? (typeof syllabus_units === 'string' ? syllabus_units : JSON.stringify(syllabus_units)) : undefined;
+    if (total_units !== undefined && unitsJson !== undefined) {
+      await query(
+        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, total_units = ?, syllabus_units = ? WHERE id = ?`,
+        [name, subject_name, subject_code, component, total_units, unitsJson, groupId]
+      );
+    } else if (total_units !== undefined) {
       await query(
         `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, total_units = ? WHERE id = ?`,
         [name, subject_name, subject_code, component, total_units, groupId]
+      );
+    } else if (unitsJson !== undefined) {
+      await query(
+        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, syllabus_units = ? WHERE id = ?`,
+        [name, subject_name, subject_code, component, unitsJson, groupId]
       );
     } else {
       await query(
@@ -596,6 +607,21 @@ class TeachingGroupModel {
       `UPDATE attendance_registers SET name = ?, session_type_scope = ? WHERE group_id = ?`,
       [name, component, groupId]
     );
+  }
+
+  static async updateGroupSyllabusUnits(groupId, syllabusUnits, totalUnits) {
+    const unitsJson = typeof syllabusUnits === 'string' ? syllabusUnits : JSON.stringify(syllabusUnits);
+    if (totalUnits !== undefined) {
+      await query(
+        `UPDATE teaching_groups SET syllabus_units = ?, total_units = ? WHERE id = ?`,
+        [unitsJson, totalUnits, groupId]
+      );
+    } else {
+      await query(
+        `UPDATE teaching_groups SET syllabus_units = ? WHERE id = ?`,
+        [unitsJson, groupId]
+      );
+    }
   }
 
   /**
