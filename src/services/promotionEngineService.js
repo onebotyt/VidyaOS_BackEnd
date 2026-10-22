@@ -14,7 +14,6 @@
  */
 
 const { query, withTransaction } = require('../config/db');
-const AcademicStructure = require('../entities/AcademicStructure');
 const { resolveSession } = require('./sessionService');
 const logger = require('../utils/logger');
 

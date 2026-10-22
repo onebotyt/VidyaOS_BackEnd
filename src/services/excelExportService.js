@@ -1257,21 +1257,30 @@ function buildClassTestMarksheetHtml(data) {
 }
 
 async function generateClassTestPdf(data) {
-  const { chromium } = require('playwright');
-  const html = buildClassTestMarksheetHtml(data);
-  const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'domcontentloaded' });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      landscape: true,
-      printBackground: true,
-      margin: { top: '8mm', bottom: '8mm', left: '8mm', right: '8mm' }
-    });
-    return pdfBuffer;
-  } finally {
-    await browser.close();
+    const { chromium } = require('playwright');
+    const html = buildClassTestMarksheetHtml(data);
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        landscape: true,
+        printBackground: true,
+        margin: { top: '8mm', bottom: '8mm', left: '8mm', right: '8mm' }
+      });
+      return pdfBuffer;
+    } finally {
+      await browser.close();
+    }
+  } catch (err) {
+    // Zero-dependency fallback: print-ready standalone HTML document with browser auto-print
+    const html = buildClassTestMarksheetHtml(data).replace(
+      '</body>',
+      '<script>window.addEventListener("DOMContentLoaded", function() { window.print(); });</script></body>'
+    );
+    return Buffer.from(html, 'utf8');
   }
 }
 

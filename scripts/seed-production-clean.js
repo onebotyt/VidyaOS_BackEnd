@@ -84,8 +84,6 @@ function seedProductionClean(targetDb = null, options = {}) {
     'academic_years',
     'notifications',
     'audit_logs',
-    'parent_communication_logs',
-    'parent_escalation_logs',
     'user_sessions',
     'user_roles',
     'users',

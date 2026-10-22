@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const outputFile = path.resolve(__dirname, '../../database/cpanel_production_mysql.sql');
+const outputFile = path.resolve(__dirname, '../database/cpanel_production_mysql.sql');
 
 const sql = `-- =============================================================================
 -- SMART COLLEGE ATTENDANCE & INSTITUTIONAL MANAGEMENT SYSTEM
@@ -25,8 +25,6 @@ SET time_zone = '+00:00';
 -- -----------------------------------------------------------------------------
 -- Clean Drop Existing Tables
 -- -----------------------------------------------------------------------------
-DROP TABLE IF EXISTS parent_communication_logs;
-DROP TABLE IF EXISTS parent_escalation_logs;
 DROP TABLE IF EXISTS attendance_corrections;
 DROP TABLE IF EXISTS register_attendance;
 DROP TABLE IF EXISTS student_self_attendance;
@@ -653,63 +651,6 @@ CREATE TABLE notifications (
   INDEX idx_notifications_user (user_id),
   INDEX idx_notifications_unread (user_id, is_read),
   CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- =============================================================================
--- 12. PARENT ESCALATION & COMMUNICATION GATEWAYS
--- =============================================================================
-CREATE TABLE parent_escalation_logs (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  student_id INT NOT NULL,
-  recipient_phone VARCHAR(20) NOT NULL,
-  recipient_name VARCHAR(150) NULL,
-  channel VARCHAR(20) NOT NULL DEFAULT 'WHATSAPP',
-  template_type VARCHAR(50) NOT NULL DEFAULT 'ATTENDANCE_CRITICAL',
-  message_payload TEXT NULL,
-  message_body TEXT NOT NULL,
-  attendance_pct DECIMAL(5,2) NULL,
-  total_classes INT NULL,
-  attended_classes INT NULL,
-  shortfall_classes INT NULL,
-  faculty_id INT NULL,
-  dispatched_by INT NULL,
-  delivery_status VARCHAR(50) NOT NULL DEFAULT 'DELIVERED',
-  status VARCHAR(50) NOT NULL DEFAULT 'DELIVERED',
-  gateway_response TEXT NULL,
-  sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_pel_student (student_id),
-  INDEX idx_pel_status (delivery_status),
-  INDEX idx_pel_channel (channel),
-  CONSTRAINT fk_pel_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-  CONSTRAINT fk_pel_faculty FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_pel_dispatcher FOREIGN KEY (dispatched_by) REFERENCES users(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE parent_communication_logs (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  student_id INT NOT NULL,
-  recipient_phone VARCHAR(20) NOT NULL,
-  recipient_name VARCHAR(150) NULL,
-  channel VARCHAR(20) NOT NULL DEFAULT 'WHATSAPP',
-  template_type VARCHAR(50) NOT NULL DEFAULT 'ATTENDANCE_CRITICAL',
-  message_body TEXT NOT NULL,
-  message_payload TEXT NULL,
-  attendance_pct DECIMAL(5,2) NULL,
-  total_classes INT NULL,
-  attended_classes INT NULL,
-  shortfall_classes INT NULL,
-  faculty_id INT NULL,
-  dispatched_by INT NULL,
-  delivery_status VARCHAR(50) NOT NULL DEFAULT 'DELIVERED',
-  status VARCHAR(50) NOT NULL DEFAULT 'DELIVERED',
-  gateway_response TEXT NULL,
-  sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_pcl_student (student_id),
-  CONSTRAINT fk_pcl_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-  CONSTRAINT fk_pcl_faculty FOREIGN KEY (faculty_id) REFERENCES users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_pcl_dispatcher FOREIGN KEY (dispatched_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================

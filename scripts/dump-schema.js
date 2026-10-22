@@ -44,8 +44,8 @@ async function dumpSchema() {
     }
   }
 
-  const outPath1 = path.join(__dirname, '../../database/schema.sql');
-  const outPath2 = path.join(__dirname, '../../database/sqlite/schema.sql');
+  const outPath1 = path.join(__dirname, '../database/schema.sql');
+  const outPath2 = path.join(__dirname, '../database/sqlite/schema.sql');
   fs.writeFileSync(outPath1, output, 'utf8');
   fs.writeFileSync(outPath2, output, 'utf8');
   console.log(`Schema saved to:\n  - ${outPath1}\n  - ${outPath2}`);

@@ -172,50 +172,6 @@ function getSqliteDb() {
           is_read INTEGER NOT NULL DEFAULT 0,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
-
-        CREATE TABLE IF NOT EXISTS parent_communication_logs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-          recipient_phone TEXT NOT NULL,
-          recipient_name TEXT,
-          channel TEXT NOT NULL DEFAULT 'WHATSAPP',
-          template_type TEXT NOT NULL DEFAULT 'ATTENDANCE_CRITICAL',
-          message_body TEXT NOT NULL,
-          message_payload TEXT,
-          attendance_pct REAL,
-          total_classes INTEGER,
-          attended_classes INTEGER,
-          shortfall_classes INTEGER,
-          dispatched_by INTEGER REFERENCES users(id),
-          faculty_id INTEGER REFERENCES users(id),
-          status TEXT NOT NULL DEFAULT 'DELIVERED',
-          delivery_status TEXT NOT NULL DEFAULT 'DELIVERED',
-          gateway_response TEXT,
-          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS parent_escalation_logs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-          recipient_phone TEXT NOT NULL,
-          recipient_name TEXT,
-          channel TEXT NOT NULL DEFAULT 'WHATSAPP',
-          template_type TEXT NOT NULL DEFAULT 'ATTENDANCE_CRITICAL',
-          message_payload TEXT,
-          message_body TEXT,
-          attendance_pct REAL,
-          total_classes INTEGER,
-          attended_classes INTEGER,
-          shortfall_classes INTEGER,
-          faculty_id INTEGER REFERENCES users(id),
-          dispatched_by INTEGER REFERENCES users(id),
-          delivery_status TEXT NOT NULL DEFAULT 'DELIVERED',
-          status TEXT NOT NULL DEFAULT 'DELIVERED',
-          gateway_response TEXT,
-          sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
       `);
 
       // Safe column migration for pre-existing SQLite tables
@@ -229,18 +185,6 @@ function getSqliteDb() {
       try { sqliteDb.exec('ALTER TABLE audit_logs ADD COLUMN entity_type TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE audit_logs ADD COLUMN entity_id TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE notifications ADD COLUMN type TEXT DEFAULT \'GENERAL\';'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_communication_logs ADD COLUMN message_payload TEXT;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_communication_logs ADD COLUMN delivery_status TEXT DEFAULT \'DELIVERED\';'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_communication_logs ADD COLUMN faculty_id INTEGER;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_communication_logs ADD COLUMN sent_at DATETIME DEFAULT CURRENT_TIMESTAMP;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN message_payload TEXT;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN message_body TEXT;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN delivery_status TEXT DEFAULT \'DELIVERED\';'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN status TEXT DEFAULT \'DELIVERED\';'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN faculty_id INTEGER;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN dispatched_by INTEGER;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN sent_at DATETIME DEFAULT CURRENT_TIMESTAMP;'); } catch (_) {}
-      try { sqliteDb.exec('ALTER TABLE parent_escalation_logs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE user_sessions ADD COLUMN device_id TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE user_sessions ADD COLUMN last_active_at DATETIME;'); } catch (_) {}
       try { sqliteDb.exec("UPDATE user_sessions SET last_active_at = COALESCE(updated_at, created_at, datetime('now')) WHERE last_active_at IS NULL;"); } catch (_) {}

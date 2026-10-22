@@ -113,6 +113,8 @@ function requireDepartmentFaculty() {
       }
 
       req.classTeacherCohorts = [{ department_id: teacherDeptId }];
+      req.is_department_faculty = true;
+      req.is_class_teacher = true;
       next();
     } catch (err) {
       return res.status(500).json({
@@ -321,11 +323,25 @@ function requireHODOrClassTeacher() {
   };
 }
 
+function requireCommonFacultyManager() {
+  return (req, res, next) => {
+    if (req.user?.roles?.includes('COMMON_FACULTY_MANAGER') || req.user?.roles?.includes('SYSTEM_ADMIN')) {
+      return next();
+    }
+    return res.status(403).json({
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'You must be appointed as Common Faculty Manager to access this resource.' }
+    });
+  };
+}
+
 module.exports = {
   requireSubjectTeacher,
   requireDepartmentFaculty,
   requireClassTeacher,
   requireTeachingGroupOwner,
   requireHOD,
-  requireHODOrClassTeacher
+  requireHODOrClassTeacher,
+  requireCommonFacultyManager
 };
+

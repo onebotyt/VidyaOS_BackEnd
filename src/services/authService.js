@@ -24,14 +24,7 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function normalizePhone(raw) {
-  if (!raw || typeof raw !== 'string') return '';
-  let cleaned = raw.trim().replace(/[^\d+]/g, '');
-  if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
-  else if (cleaned.startsWith('91') && cleaned.length === 12) cleaned = cleaned.slice(2);
-  else if (cleaned.startsWith('0') && cleaned.length === 11) cleaned = cleaned.slice(1);
-  return cleaned;
-}
+const { normalizePhone } = require('../utils/formatters');
 
 /**
  * Validates and normalizes login credentials.
@@ -235,12 +228,9 @@ async function buildUserPayload(user) {
         extra.hod_department_name = hodAssignments[0].department_name;
       }
 
-      // Check active CLASS_TEACHER assignment
-      const ctAssignments = await query(
-        `SELECT id FROM teacher_assignments WHERE teacher_id = ? AND assignment_type = 'CLASS_TEACHER' AND is_active = 1`,
-        [teachers[0].teacher_id]
-      );
-      extra.is_class_teacher = ctAssignments.length > 0;
+      // Department Faculty: All teachers in the department can manage and assist students
+      extra.is_department_faculty = Boolean(extra.department_id);
+      extra.is_class_teacher = Boolean(extra.department_id); // Fully empowered branch faculty
 
       // Check active SUBJECT_TEACHER assignment
       const subjectAssignments = await query(

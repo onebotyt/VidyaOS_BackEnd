@@ -24,7 +24,8 @@ const dbSyncService = require('./src/services/dbSyncService');
 const promotionEngineService = require('./src/services/promotionEngineService');
 const { generalLimiter } = require('./src/middleware/rateLimiter');
 
-// Import Route Handlers
+// Import Route Handlers & Controllers
+const authController = require('./src/controllers/authController');
 const authRoutes = require('./src/routes/auth');
 const studentRoutes = require('./src/routes/students');
 const facultyRoutes = require('./src/routes/faculty');
@@ -87,132 +88,27 @@ app.use((req, res, next) => {
   next();
 });
 
-// Admin URL Aliases / Normalization — Consolidated Academic Structure
+// Clean Entry Point & Canonical Tab Redirection (Core Architectural Invariants)
+app.get(['/login', '/login.html'], (req, res) => res.redirect(301, '/login/index.html'));
+app.get(['/register', '/register.html'], (req, res) => res.redirect(301, '/login/register.html'));
+app.get(['/login/student-register.html', '/login/student-register', '/register/student', '/register/student.html'], (req, res) => {
+  const query = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
+  res.redirect(301, `/login/register.html?role=student${query}`);
+});
+app.get(['/login/faculty-register.html', '/login/faculty-register', '/register/faculty', '/register/faculty.html'], (req, res) => {
+  const query = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
+  res.redirect(301, `/login/register.html?role=faculty${query}`);
+});
+app.get('/admin/academic_structure.html', (req, res) => res.redirect(301, '/admin/academic-structure.html'));
 app.get('/admin/departments.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
-app.get('/admin/branches.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
-app.get(['/admin/subjects.html', '/admin/subjects', '/faculty/hod-subjects.html', '/faculty/hod-subjects'], (req, res) => res.redirect(301, '/faculty/groups.html'));
-app.get(['/admin/academic-years.html', '/admin/academic_years.html', '/admin/academic_year.html', '/admin/academic-year.html'], (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=academic-years'));
-app.get(['/admin/academic_structure.html', '/admin/academic_structure', '/admin/academic-structure'], (req, res) => res.redirect(301, '/admin/academic-structure.html'));
-app.get(['/admin/audit.html', '/admin/audit'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
-app.get(['/admin/students.html', '/admin/students', '/admin/students/'], (req, res) => res.redirect(301, '/admin/reports.html'));
-app.get(['/admin/whatsapp', '/admin/whatsapp.html', '/admin/whatsapp-gateway', '/admin/whatsapp_gateway', '/admin/whatsapp_gateway.html'], (req, res) => res.redirect(301, '/admin/whatsapp-gateway.html'));
-app.get(['/api-explorer.html', '/api-explorer', '/api_explorer.html', '/api_explorer', '/admin/api-explorer.html', '/admin/api-explorer', '/admin/api_explorer.html', '/admin/api_explorer'], (req, res) => res.redirect(301, '/admin/dashboard.html'));
-
-// Faculty URL Aliases / Normalization — Consolidated Pages
-app.get(['/faculty/analytics.html', '/faculty/analytics'], (req, res) => res.redirect(301, '/faculty/reports.html?tab=analytics'));
+app.get('/faculty/analytics.html', (req, res) => res.redirect(301, '/faculty/reports.html?tab=analytics'));
 app.get(['/faculty/marks.html', '/faculty/marks'], (req, res) => {
   const regId = req.query.id || req.query.register_id;
-  const idQuery = regId ? `?id=${regId}` : '';
-  res.redirect(301, `/faculty/tests.html${idQuery}`);
+  res.redirect(301, `/faculty/tests.html${regId ? `?id=${regId}` : ''}`);
 });
-app.get('/faculty/tests', (req, res) => {
-  const regId = req.query.id || req.query.register_id;
-  const idQuery = regId ? `?id=${regId}` : '';
-  res.redirect(301, `/faculty/tests.html${idQuery}`);
-});
-app.get('/faculty/assignments.html', (req, res) => {
-  const modularPath = path.join(__dirname, '../frontend/faculty/assignments/index.html');
-  res.sendFile(modularPath);
-});
-app.get('/faculty/assignments', (req, res, next) => {
-  if (req.path === '/faculty/assignments') {
-    const regId = req.query.id || req.query.register_id;
-    const idQuery = regId ? `?id=${regId}` : '';
-    return res.redirect(301, `/faculty/assignments/${idQuery}`);
-  }
-  next();
-});
-app.get(['/faculty/evaluation', '/faculty/internal-evaluation', '/faculty/internal-evaluation.html'], (req, res) => {
-  const regId = req.query.id || req.query.register_id;
-  const idQuery = regId ? `?id=${regId}` : '';
-  res.redirect(301, `/faculty/evaluation.html${idQuery}`);
-});
-app.get(['/faculty/sheets', '/faculty/sheets-studio', '/faculty/sheet-studio'], (req, res, next) => {
-  if (req.path === '/faculty/sheets/') return next();
-  const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-  res.redirect(301, `/faculty/sheets/${q}`);
-});
-app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick', '/faculty/attendance/quick/'], (req, res) => res.redirect(301, '/faculty/registers/'));
-app.get(['/faculty/register-view.html', '/faculty/register-view'], (req, res) => {
-  const regId = req.query.id || req.query.register_id;
-  if (regId) return res.redirect(301, `/faculty/registers/?id=${regId}`);
-  res.redirect(301, '/faculty/registers/');
-});
-app.get(['/faculty/groups', '/faculty/teaching-groups'], (req, res) => res.redirect(301, '/faculty/groups/'));
-app.get(['/faculty/media.html', '/faculty/media', '/faculty/media/', '/faculty/drive', '/faculty/drive.html'], (req, res) => {
-  const modularPath = path.join(__dirname, '../frontend/faculty/media/index.html');
-  res.sendFile(modularPath);
-});
+app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick'], (req, res) => res.redirect(301, '/faculty/registers.html'));
+app.get('/student/attendance/subjects.html', (req, res) => res.redirect(301, '/student/attendance.html'));
 
-// Student Teaching Groups consolidated into Home Dashboard
-app.get([
-  '/student/groups.html', '/student/groups', '/student/groups/',
-  '/student/teaching-groups', '/student/teaching-groups/',
-  '/student/teaching_groups', '/student/teaching_groups.html'
-], (req, res) => res.redirect(301, '/student/dashboard.html'));
-
-// HOD Page Consolidation (Only 3 exclusive pages: dashboard, hod-teachers, hod-settings; others use shared faculty pages)
-app.get(['/faculty/hod-students.html', '/faculty/hod-students', '/faculty/hod-students/'], (req, res) => res.redirect(301, '/faculty/students.html'));
-app.get(['/faculty/hod-reports.html', '/faculty/hod-reports', '/faculty/hod-reports/'], (req, res) => res.redirect(301, '/faculty/reports.html'));
-app.get(['/faculty/hod-archive.html', '/faculty/hod-archive', '/faculty/hod-archive/'], (req, res) => res.redirect(301, '/faculty/students.html'));
-app.get(['/faculty/hod-devices.html', '/faculty/hod-devices', '/faculty/hod-devices/'], (req, res) => res.redirect(301, '/faculty/hod-settings.html'));
-
-// Student URL Aliases / Normalization — Consolidated Attendance & Calendar
-app.get([
-  '/student/attendance/subjects.html',
-  '/student/attendance/subjects',
-  '/student/attendance/history.html',
-  '/student/attendance/history',
-  '/student/attendance/active.html',
-  '/student/attendance/active'
-], (req, res) => res.redirect(301, '/student/attendance/'));
-
-app.get('/student/attendance', (req, res, next) => {
-  if (req.path === '/student/attendance') {
-    return res.redirect(301, '/student/attendance/');
-  }
-  next();
-});
-
-// Login URL Normalization & Redirects (Unified Single Login Page for all roles)
-app.get([
-  '/login',
-  '/login.html',
-  '/faculty/login',
-  '/faculty/login.html',
-  '/student/login',
-  '/student/login.html'
-], (req, res) => res.redirect(301, '/login/index.html'));
-
-app.get(['/login/student', '/login/student.html'], (req, res) => {
-  const queryStr = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
-  res.redirect(301, `/login/index.html?role=student${queryStr}`);
-});
-
-app.get(['/login/faculty', '/login/faculty.html'], (req, res) => {
-  const queryStr = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
-  res.redirect(301, `/login/index.html?role=faculty${queryStr}`);
-});
-
-// Self-Registration Redirects
-app.get(['/register/student.html', '/register/student', '/register', '/register/'], (req, res) => res.redirect(301, '/login/student-register.html'));
-app.get(['/faculty/registrations.html', '/faculty/registrations'], (req, res) => res.redirect(301, '/faculty/students.html'));
-
-// HOD Consolidation Redirects
-app.get(['/faculty/hod-assignments.html', '/faculty/hod-assignments'], (req, res) => res.redirect(301, '/faculty/hod-teachers.html'));
-app.get(['/faculty/hod_archive.html', '/faculty/hod_archive', '/faculty/archive.html', '/faculty/archive'], (req, res) => res.redirect(301, '/faculty/hod-archive.html'));
-
-// Hardware Terminals Redirect to Department HOD
-app.get(['/admin/devices.html', '/admin/devices', '/faculty/devices.html', '/faculty/devices'], (req, res) => res.redirect(301, '/faculty/hod-devices.html'));
-
-// HOD Settings Redirects
-app.get(['/faculty/settings.html', '/faculty/settings', '/faculty/hod_settings.html', '/faculty/hod_settings'], (req, res) => res.redirect(301, '/faculty/hod-settings.html'));
-
-// Admin Audit Logs Redirects
-app.get(['/admin/audit-logs', '/admin/audit', '/admin/audit.html'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
-
-// Deprecated WhatsApp Gateway Redirect
-app.get(['/admin/whatsapp-gateway', '/admin/whatsapp-gateway.html', '/admin/whatsapp'], (req, res) => res.redirect(301, '/admin/dashboard.html'));
 
 // Static file serving options with production caching
 const staticOptions = {
@@ -228,6 +124,21 @@ if (fs.existsSync(sharedDir)) {
   app.use('/js', express.static(path.join(sharedDir, 'js'), staticOptions));
   app.use('/css', express.static(path.join(sharedDir, 'css'), staticOptions));
 }
+
+// Serve ExcelJS standalone browser bundle for client-side genuine .xlsx generation
+app.get(['/js/exceljs.min.js', '/shared/js/exceljs.min.js'], (req, res, next) => {
+  const p1 = path.join(__dirname, '../frontend/shared/js/exceljs.min.js');
+  const p2 = path.join(__dirname, 'node_modules/exceljs/dist/exceljs.min.js');
+  if (fs.existsSync(p1)) {
+    res.setHeader('Content-Type', 'application/javascript');
+    return res.sendFile(p1);
+  }
+  if (fs.existsSync(p2)) {
+    res.setHeader('Content-Type', 'application/javascript');
+    return res.sendFile(p2);
+  }
+  next();
+});
 
 
 // Universal rewrite for legacy .html requests to modular folder index.html
@@ -297,20 +208,7 @@ app.use((req, res, next) => {
 });
 
 // Public Departments Route for Student & Faculty Registration
-app.get(['/api/v1/departments', '/api/v1/auth/departments'], async (req, res) => {
-  try {
-    const { query } = require('./src/config/db');
-    const rows = await query(
-      `SELECT id, name, code, degree_duration_years, active_term
-       FROM departments
-       WHERE is_active = 1
-       ORDER BY id ASC`
-    );
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-  }
-});
+app.get(['/api/v1/departments', '/api/v1/auth/departments'], (req, res) => authController.getDepartments(req, res));
 
 // Mount /api/v1 REST API Routes
 app.use('/api/v1/auth', authRoutes);
@@ -427,11 +325,6 @@ async function startServer() {
   } catch (err) {
     logger.warn(`Failed to migrate IoT and correction tables: ${err.message}`);
   }
-
-  // Periodic Session Rollover Check (Runs hourly to detect calendar year rollovers)
-  setInterval(() => {
-    sessionService.syncAcademicSession().catch(() => {});
-  }, 3600 * 1000);
 
   const serverInstance = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`College Attendance System Backend running:`);
