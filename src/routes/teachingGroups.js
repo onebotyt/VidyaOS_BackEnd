@@ -49,10 +49,11 @@ router.post(
   auth,
   requireRole('TEACHER', 'SYSTEM_ADMIN'),
   [
-    body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Group name required (2-100 chars)'),
+    body('name').optional().trim().isLength({ min: 2, max: 100 }),
     body('subject_name').trim().isLength({ min: 2, max: 100 }).withMessage('Subject name required (2-100 chars)'),
     body('subject_code').optional().trim(),
-    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL']).withMessage('Component must be THEORY, PRACTICAL, or THEORY_PRACTICAL'),
+    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL', 'THEORY + PRACTICAL']).withMessage('Component must be THEORY, PRACTICAL, or THEORY + PRACTICAL'),
+    body('total_units').optional().isInt({ min: 1, max: 20 }),
     body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester must be between 1 and 6'),
     body('enrollment_mode').optional().isIn(['INVITE_CODE', 'COHORT']).withMessage('Enrollment mode must be INVITE_CODE or COHORT'),
     body('department_id').optional({ nullable: true }).isInt(),
@@ -106,9 +107,10 @@ router.put(
   auth,
   requireRole('TEACHER', 'SYSTEM_ADMIN'),
   [
-    body('name').optional().trim().isLength({ min: 2, max: 100 }),
+    body('name').optional().trim(),
     body('subject_name').optional().trim().isLength({ min: 2, max: 100 }),
-    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL']),
+    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL', 'THEORY + PRACTICAL']),
+    body('total_units').optional().isInt({ min: 1, max: 20 }),
     validate
   ],
   TeachingGroupController.editGroup

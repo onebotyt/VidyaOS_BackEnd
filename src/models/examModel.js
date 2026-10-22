@@ -13,11 +13,11 @@ class ExamModel {
    * @param {Object} params Test configuration
    * @returns {Promise<number>} Inserted assessment ID
    */
-  async create({ teacherId, subjectId, departmentId, groupId, year, semester, academicYearId, name, examDate, maxMarks }) {
+  async create({ teacherId, subjectId, departmentId, groupId, year, semester, academicYearId, name, examDate, maxMarks, unitName }) {
     const res = await query(
-      `INSERT INTO assessments (teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id, type, title, due_date, max_marks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'EXAM', ?, ?, ?)`,
-      [teacherId, subjectId || null, departmentId || null, groupId || null, year || null, semester || null, academicYearId || null, name, examDate || null, maxMarks || 100]
+      `INSERT INTO assessments (teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id, type, title, due_date, max_marks, unit_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'EXAM', ?, ?, ?, ?)`,
+      [teacherId, subjectId || null, departmentId || null, groupId || null, year || null, semester || null, academicYearId || null, name, examDate || null, maxMarks || 100, unitName || null]
     );
     return res.insertId || res.lastInsertRowid;
   }

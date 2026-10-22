@@ -13,12 +13,12 @@ class AssignmentModel {
    * @param {Object} params Assignment details
    * @returns {Promise<number>} Inserted assignment ID
    */
-  async create({ teacherId, subjectId, departmentId, groupId, year, semester, academicYearId, title, description, attachmentPath, attachmentName, dueDate, maxMarks }) {
+  async create({ teacherId, subjectId, departmentId, groupId, year, semester, academicYearId, title, description, attachmentPath, attachmentName, dueDate, maxMarks, unitName }) {
     const res = await query(
       `INSERT INTO assessments
-       (teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id, type, title, description, attachment_path, attachment_name, due_date, max_marks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNMENT', ?, ?, ?, ?, ?, ?)`,
-      [teacherId, subjectId || null, departmentId, groupId || null, year, semester, academicYearId, title, description || null, attachmentPath, attachmentName, dueDate || null, maxMarks || 100]
+       (teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id, type, title, description, attachment_path, attachment_name, due_date, max_marks, unit_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'ASSIGNMENT', ?, ?, ?, ?, ?, ?, ?)`,
+      [teacherId, subjectId || null, departmentId, groupId || null, year, semester, academicYearId, title, description || null, attachmentPath, attachmentName, dueDate || null, maxMarks || 100, unitName || null]
     );
     return res.insertId || res.lastInsertRowid;
   }

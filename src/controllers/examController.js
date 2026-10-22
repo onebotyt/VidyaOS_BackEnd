@@ -24,7 +24,7 @@ class ExamController {
    */
   async createExam(req, res) {
     try {
-      const { name, subject_id, department_id, year, semester, academic_year_id, exam_date, max_marks, group_id } = req.body;
+      const { name, subject_id, department_id, year, semester, academic_year_id, exam_date, max_marks, group_id, unit_name, unit } = req.body;
       const examId = await examModel.create({
         teacherId: req.user.teacher_id,
         subjectId: subject_id,
@@ -35,7 +35,8 @@ class ExamController {
         academicYearId: academic_year_id,
         name,
         examDate: exam_date,
-        maxMarks: max_marks
+        maxMarks: max_marks,
+        unitName: (unit_name || unit || '').trim() || null
       });
 
       await auditService.logAudit({

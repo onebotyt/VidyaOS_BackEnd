@@ -68,7 +68,7 @@ class TeachingGroupModel {
     const teacherParams = [teacherId || -1];
 
     const groups = await query(`
-      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.semester,
+      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.semester,
              ar.id as register_id,
              (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as member_count,
              (SELECT COUNT(DISTINCT s.id) FROM attendance_sessions s WHERE s.register_id = ar.id AND s.state != 'DRAFT') as session_count,
@@ -135,7 +135,7 @@ class TeachingGroupModel {
    */
   static async listGroups({ user, statusFilter }) {
     let sql = `
-      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.teacher_id,
+      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label,
              tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at, tg.deleted_at,
              t.full_name as teacher_name, t.department_id as teacher_department_id,
@@ -215,15 +215,16 @@ class TeachingGroupModel {
     inviteCode,
     targetDeptId,
     enrollmentMode,
-    userId
+    userId,
+    totalUnits
   }) {
     return await withTransaction(async (conn) => {
       const finalCode = (subjectCode || '').trim() || (subjectName || '').split(/[\s-]+/).map(w => w[0]).join('').toUpperCase().slice(0, 8);
       const groupInsert = await conn.query(
         `INSERT INTO teaching_groups 
-          (name, subject_name, subject_code, component, teacher_id, academic_year_id, semester, invite_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
-        [name, subjectName, finalCode, component, effTeacherId, ayId, semester, inviteCode]
+          (name, subject_name, subject_code, component, total_units, teacher_id, academic_year_id, semester, invite_code, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
+        [name, subjectName, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, inviteCode]
       );
       const groupId = groupInsert.insertId || groupInsert.lastInsertRowid;
 
@@ -280,7 +281,7 @@ class TeachingGroupModel {
    */
   static async getGroupById(groupId) {
     const rows = await query(
-      `SELECT tg.id, tg.name, tg.subject_name, tg.component, tg.teacher_id,
+      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.teacher_id,
               tg.academic_year_id, ay.label as academic_year_label,
               tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
               t.full_name as teacher_name, t.department_id as teacher_department_id,
@@ -579,11 +580,18 @@ class TeachingGroupModel {
    * @param {Object} fields - Updated attributes
    * @returns {Promise<void>}
    */
-  static async updateGroup(groupId, { name, subject_name, subject_code, component }) {
-    await query(
-      `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ? WHERE id = ?`,
-      [name, subject_name, subject_code, component, groupId]
-    );
+  static async updateGroup(groupId, { name, subject_name, subject_code, component, total_units }) {
+    if (total_units !== undefined) {
+      await query(
+        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, total_units = ? WHERE id = ?`,
+        [name, subject_name, subject_code, component, total_units, groupId]
+      );
+    } else {
+      await query(
+        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ? WHERE id = ?`,
+        [name, subject_name, subject_code, component, groupId]
+      );
+    }
     await query(
       `UPDATE attendance_registers SET name = ?, session_type_scope = ? WHERE group_id = ?`,
       [name, component, groupId]
@@ -780,7 +788,7 @@ class TeachingGroupModel {
    */
   static async getGroupAssignments(groupId) {
     return await query(
-      `SELECT a.id, a.type, a.title, a.description, a.due_date, a.max_marks, a.created_at, a.questions,
+      `SELECT a.id, a.type, a.title, a.description, a.due_date, a.max_marks, a.created_at, a.questions, a.unit_name,
               (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as submission_count,
               (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.marks_obtained IS NOT NULL AND sub.status != 'ABSENT') as graded_count,
               (SELECT AVG(sub.marks_obtained) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.marks_obtained IS NOT NULL AND sub.status != 'ABSENT') as avg_score
@@ -809,11 +817,12 @@ class TeachingGroupModel {
     dueDate,
     effectiveMaxMarks,
     questionsJson,
-    departmentId
+    departmentId,
+    unitName
   }) {
     const res = await query(
-      `INSERT INTO assessments (teacher_id, group_id, semester, academic_year_id, type, title, description, due_date, max_marks, questions, department_id, year)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assessments (teacher_id, group_id, semester, academic_year_id, type, title, description, due_date, max_marks, questions, department_id, year, unit_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         teacherId,
         groupId,
@@ -826,7 +835,8 @@ class TeachingGroupModel {
         effectiveMaxMarks,
         questionsJson,
         departmentId || null,
-        Math.ceil(semester / 2)
+        Math.ceil(semester / 2),
+        unitName || null
       ]
     );
     return res.insertId || res.lastInsertRowid;
@@ -841,13 +851,22 @@ class TeachingGroupModel {
    * @param {Object} fields - Updated fields
    * @returns {Promise<void>}
    */
-  static async updateGroupAssessment(assessmentId, groupId, { title, description, dueDate, maxMarks, questionsJson }) {
-    await query(
-      `UPDATE assessments
-       SET title = ?, description = ?, due_date = ?, max_marks = ?, questions = ?
-       WHERE id = ? AND group_id = ?`,
-      [title, description, dueDate, maxMarks, questionsJson, assessmentId, groupId]
-    );
+  static async updateGroupAssessment(assessmentId, groupId, { title, description, dueDate, maxMarks, questionsJson, unitName }) {
+    if (unitName !== undefined) {
+      await query(
+        `UPDATE assessments
+         SET title = ?, description = ?, due_date = ?, max_marks = ?, questions = ?, unit_name = ?
+         WHERE id = ? AND group_id = ?`,
+        [title, description, dueDate, maxMarks, questionsJson, unitName || null, assessmentId, groupId]
+      );
+    } else {
+      await query(
+        `UPDATE assessments
+         SET title = ?, description = ?, due_date = ?, max_marks = ?, questions = ?
+         WHERE id = ? AND group_id = ?`,
+        [title, description, dueDate, maxMarks, questionsJson, assessmentId, groupId]
+      );
+    }
   }
 
   /**
@@ -905,7 +924,7 @@ class TeachingGroupModel {
    */
   static async getGroupTests(groupId) {
     return await query(
-      `SELECT a.id, a.title as name, a.title, a.description, a.due_date as test_date, a.due_date, a.max_marks, a.created_at, a.questions, a.instructions,
+      `SELECT a.id, a.title as name, a.title, a.description, a.due_date as test_date, a.due_date, a.max_marks, a.created_at, a.questions, a.instructions, a.unit_name,
               (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as graded_count,
               (SELECT AVG(sub.marks_obtained) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as avg_score,
               (SELECT (COUNT(CASE WHEN sub.marks_obtained >= (a.max_marks * 0.4) THEN 1 END) * 100.0 / NULLIF(COUNT(sub.id), 0))
@@ -926,7 +945,7 @@ class TeachingGroupModel {
    * @param {Object} fields - Updated fields
    * @returns {Promise<void>}
    */
-  static async updateGroupTest(testId, groupId, { name, description, testDate, maxMarks, questionsJson, instructionsJson }) {
+  static async updateGroupTest(testId, groupId, { name, description, testDate, maxMarks, questionsJson, instructionsJson, unitName }) {
     await query(
       `UPDATE assessments
        SET title = COALESCE(?, title),
@@ -934,9 +953,10 @@ class TeachingGroupModel {
            due_date = COALESCE(?, due_date),
            max_marks = COALESCE(?, max_marks),
            questions = COALESCE(?, questions),
-           instructions = COALESCE(?, instructions)
+           instructions = COALESCE(?, instructions),
+           unit_name = COALESCE(?, unit_name)
        WHERE id = ? AND group_id = ? AND type = 'EXAM'`,
-      [name || null, description !== undefined ? description : null, testDate || null, maxMarks !== undefined ? maxMarks : null, questionsJson || null, instructionsJson || null, testId, groupId]
+      [name || null, description !== undefined ? description : null, testDate || null, maxMarks !== undefined ? maxMarks : null, questionsJson || null, instructionsJson || null, unitName !== undefined ? unitName : null, testId, groupId]
     );
   }
 

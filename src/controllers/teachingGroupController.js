@@ -71,7 +71,7 @@ class TeachingGroupController {
    * @usesModel TeachingGroupModel.createGroupTransaction() (models/teachingGroupModel.js)
    */
   static async createGroup(req, res) {
-    const { name, subject_name, subject_code, component = 'THEORY', semester, enrollment_mode = 'INVITE_CODE', department_id } = req.body;
+    const { name, subject_name, subject_code, component = 'THEORY', semester, enrollment_mode = 'INVITE_CODE', department_id, total_units } = req.body;
     try {
       let ayId = req.body.academic_year_id;
       if (!ayId) {
@@ -91,9 +91,11 @@ class TeachingGroupController {
       }
 
       const targetDeptId = department_id ? Number(department_id) : (teacher.department_id || null);
+      const finalName = (name && name.trim()) ? name.trim() : subject_name.trim();
+      const finalUnits = Math.min(20, Math.max(1, parseInt(total_units) || 5));
 
       const result = await TeachingGroupModel.createGroupTransaction({
-        name,
+        name: finalName,
         subjectName: subject_name,
         subjectCode: subject_code,
         component,
@@ -103,7 +105,8 @@ class TeachingGroupController {
         inviteCode,
         targetDeptId,
         enrollmentMode: enrollment_mode,
-        userId: req.user.id
+        userId: req.user.id,
+        totalUnits: finalUnits
       });
 
       res.status(201).json({
@@ -111,10 +114,11 @@ class TeachingGroupController {
         message: 'Teaching group created successfully with linked official register',
         data: {
           id: result.groupId,
-          name,
+          name: finalName,
           subject_name,
           subject_code: result.subjectCode,
           component,
+          total_units: finalUnits,
           semester,
           academic_year_id: ayId,
           invite_code: result.inviteCode,
@@ -476,13 +480,15 @@ class TeachingGroupController {
         return res.status(403).json({ success: false, error: { message: 'Forbidden' } });
       }
 
-      const { name = g.name, subject_name = g.subject_name, subject_code = g.subject_code, component = g.component } = req.body;
-      await TeachingGroupModel.updateGroup(groupId, { name, subject_name, subject_code, component });
+      const { name = g.name, subject_name = g.subject_name, subject_code = g.subject_code, component = g.component, total_units = g.total_units } = req.body;
+      const finalName = (name && name.trim()) ? name.trim() : (subject_name ? subject_name.trim() : g.name);
+      const finalUnits = total_units != null ? Math.min(20, Math.max(1, parseInt(total_units) || 5)) : (g.total_units || 5);
+      await TeachingGroupModel.updateGroup(groupId, { name: finalName, subject_name, subject_code, component, total_units: finalUnits });
 
       res.status(200).json({
         success: true,
         message: 'Class updated successfully',
-        data: { id: groupId, name, subject_name, subject_code, component }
+        data: { id: groupId, name: finalName, subject_name, subject_code, component, total_units: finalUnits }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { message: err.message } });
@@ -818,7 +824,7 @@ class TeachingGroupController {
   static async createAssignment(req, res) {
     try {
       const groupId = Number(req.params.id);
-      const { title, description, due_date, max_marks, type = 'ASSIGNMENT', questions } = req.body;
+      const { title, description, due_date, max_marks, type = 'ASSIGNMENT', questions, unit_name, unit } = req.body;
 
       const g = await TeachingGroupModel.getGroupById(groupId);
       if (!g) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teaching group not found' } });
@@ -832,6 +838,8 @@ class TeachingGroupController {
         ? Number(max_marks)
         : (type === 'FINAL_DOCS' ? 100 : (type === 'PRACTICAL' ? 25 : 100));
 
+      const effectiveUnit = (unit_name || unit || '').trim() || null;
+
       const insertId = await TeachingGroupModel.createGroupAssessment({
         teacherId: g.teacher_id,
         groupId,
@@ -843,13 +851,14 @@ class TeachingGroupController {
         dueDate: due_date,
         effectiveMaxMarks,
         questionsJson: qJson,
-        departmentId: g.teacher_department_id
+        departmentId: g.teacher_department_id,
+        unitName: effectiveUnit
       });
 
       res.status(201).json({
         success: true,
         message: `${type === 'PRACTICAL' ? 'Practical announcement' : type === 'FINAL_DOCS' ? 'Final documents request' : 'Assignment'} published successfully`,
-        data: { id: insertId, questions: questions || null }
+        data: { id: insertId, questions: questions || null, unit_name: effectiveUnit }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -866,16 +875,18 @@ class TeachingGroupController {
     try {
       const groupId = Number(req.params.id);
       const assignmentId = Number(req.params.assignmentId);
-      const { title, description, due_date, max_marks, questions } = req.body;
+      const { title, description, due_date, max_marks, questions, unit_name, unit } = req.body;
 
       let qJson = questions !== undefined ? (questions ? (typeof questions === 'string' ? questions : JSON.stringify(questions)) : null) : null;
+      const effectiveUnit = unit_name !== undefined ? (unit_name ? unit_name.trim() : null) : (unit !== undefined ? (unit ? unit.trim() : null) : undefined);
 
       await TeachingGroupModel.updateGroupAssessment(assignmentId, groupId, {
         title: title ? title.trim() : 'Assignment',
         description: description ? description.trim() : null,
         dueDate: due_date || null,
         maxMarks: max_marks !== undefined ? Number(max_marks) : 100,
-        questionsJson: qJson
+        questionsJson: qJson,
+        unitName: effectiveUnit
       });
 
       res.status(200).json({ success: true, message: 'Classwork item updated successfully' });
@@ -1052,7 +1063,7 @@ class TeachingGroupController {
   static async scheduleTest(req, res) {
     try {
       const groupId = Number(req.params.id);
-      const { name, test_date, max_marks = 20, description, num_questions, questions } = req.body;
+      const { name, test_date, max_marks = 20, description, num_questions, questions, unit_name, unit } = req.body;
 
       const g = await TeachingGroupModel.getGroupById(groupId);
       if (!g) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teaching group not found' } });
@@ -1075,6 +1086,8 @@ class TeachingGroupController {
         }));
       }
 
+      const effectiveUnit = (unit_name || unit || '').trim() || null;
+
       const questionsJson = questionsPayload ? JSON.stringify(questionsPayload) : null;
       const insertId = await TeachingGroupModel.createGroupAssessment({
         teacherId: g.teacher_id,
@@ -1087,7 +1100,8 @@ class TeachingGroupController {
         dueDate: test_date,
         effectiveMaxMarks: max_marks,
         questionsJson,
-        departmentId: g.teacher_department_id
+        departmentId: g.teacher_department_id,
+        unitName: effectiveUnit
       });
 
       res.status(201).json({
@@ -1096,7 +1110,8 @@ class TeachingGroupController {
         data: {
           id: insertId,
           questions: questionsPayload,
-          num_questions: questionsPayload ? questionsPayload.length : null
+          num_questions: questionsPayload ? questionsPayload.length : null,
+          unit_name: effectiveUnit
         }
       });
     } catch (err) {
@@ -1114,10 +1129,11 @@ class TeachingGroupController {
     try {
       const groupId = Number(req.params.id);
       const testId = Number(req.params.testId);
-      const { name, test_date, max_marks, description, questions, instructions } = req.body;
+      const { name, test_date, max_marks, description, questions, instructions, unit_name, unit } = req.body;
 
       let qJson = questions !== undefined ? (questions ? (typeof questions === 'string' ? questions : JSON.stringify(questions)) : null) : null;
       let instJson = instructions !== undefined ? (instructions ? (typeof instructions === 'string' ? instructions : JSON.stringify(instructions)) : null) : null;
+      const effectiveUnit = unit_name !== undefined ? (unit_name ? unit_name.trim() : null) : (unit !== undefined ? (unit ? unit.trim() : null) : undefined);
 
       await TeachingGroupModel.updateGroupTest(testId, groupId, {
         name: name || null,
@@ -1125,7 +1141,8 @@ class TeachingGroupController {
         testDate: test_date || null,
         maxMarks: (max_marks !== undefined && max_marks !== null) ? Number(max_marks) : null,
         questionsJson: qJson,
-        instructionsJson: instJson
+        instructionsJson: instJson,
+        unitName: effectiveUnit
       });
 
       res.status(200).json({ success: true, message: 'Class test updated successfully' });

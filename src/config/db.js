@@ -190,7 +190,9 @@ function getSqliteDb() {
       try { sqliteDb.exec("UPDATE user_sessions SET last_active_at = COALESCE(updated_at, created_at, datetime('now')) WHERE last_active_at IS NULL;"); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE assessments ADD COLUMN instructions TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE assessments ADD COLUMN questions TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE assessments ADD COLUMN unit_name TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE teaching_groups ADD COLUMN subject_code TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE teaching_groups ADD COLUMN total_units INTEGER DEFAULT 5;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE attendance_sessions ADD COLUMN period_number INTEGER DEFAULT 1;'); } catch (_) {}
 
       // Synchronize action <-> event_type, user_id <-> actor_id, entity_type <-> target_type
@@ -254,6 +256,7 @@ function getSqliteDb() {
           name TEXT NOT NULL,
           subject_name TEXT NOT NULL,
           component TEXT NOT NULL DEFAULT 'THEORY',
+          total_units INTEGER DEFAULT 5,
           teacher_id INTEGER NOT NULL REFERENCES teachers(id),
           academic_year_id INTEGER NOT NULL REFERENCES academic_years(id),
           semester INTEGER NOT NULL,

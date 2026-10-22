@@ -22,7 +22,7 @@ class AssignmentController {
    */
   async createAssignment(req, res) {
     try {
-      const { title, description, subject_id, department_id, year, semester, academic_year_id, due_date, max_marks, group_id } = req.body;
+      const { title, description, subject_id, department_id, year, semester, academic_year_id, due_date, max_marks, group_id, unit_name, unit } = req.body;
       const attachmentPath = req.file ? `/uploads/assignments/${req.file.filename}` : null;
       const attachmentName = req.file ? req.file.originalname : null;
 
@@ -39,7 +39,8 @@ class AssignmentController {
         attachmentPath,
         attachmentName,
         dueDate: due_date,
-        maxMarks: max_marks
+        maxMarks: max_marks,
+        unitName: (unit_name || unit || '').trim() || null
       });
 
       await auditService.logAudit({
