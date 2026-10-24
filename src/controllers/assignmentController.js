@@ -234,6 +234,25 @@ class AssignmentController {
   }
 
   /**
+   * Unsubmits an assignment file allowing student to resubmit.
+   * 
+   * @route POST /api/v1/assignments/:id/unsubmit (routes/assignments.js)
+   * @access Protected (STUDENT)
+   * @usesModel AssignmentModel.deleteSubmission() (models/assignmentModel.js)
+   * @param {Request} req Express request
+   * @param {Response} res Express response
+   */
+  async unsubmitAssignment(req, res) {
+    try {
+      await assignmentModel.deleteSubmission(req.params.id, req.user.student_id);
+      return res.json({ success: true, message: 'Submission removed successfully.' });
+    } catch (err) {
+      logger.error('[AssignmentController] unsubmitAssignment error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
    * Grades a student submission with score marks and comments.
    * 
    * @route PUT /api/v1/assignments/submissions/:submissionId/grade (routes/assignments.js)

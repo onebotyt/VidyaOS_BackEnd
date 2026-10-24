@@ -233,6 +233,23 @@ class AssignmentModel {
   }
 
   /**
+   * Deletes a student's submission for an assignment (Unsubmit).
+   * 
+   * @calledBy AssignmentController.unsubmitAssignment() (controllers/assignmentController.js)
+   * @route POST /api/v1/assignments/:id/unsubmit (routes/assignments.js)
+   * @param {number} assessmentId Assignment ID
+   * @param {number} studentId Student ID
+   * @returns {Promise<boolean>} True if removed
+   */
+  async deleteSubmission(assessmentId, studentId) {
+    const res = await query(
+      'DELETE FROM assessment_submissions WHERE assessment_id = ? AND student_id = ?',
+      [assessmentId, studentId]
+    );
+    return (res.affectedRows > 0 || res.changes > 0);
+  }
+
+  /**
    * Updates grade marks and feedback on a student submission.
    * 
    * @calledBy AssignmentController.gradeSubmission() (controllers/assignmentController.js)

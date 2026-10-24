@@ -108,6 +108,7 @@ app.get(['/faculty/marks.html', '/faculty/marks'], (req, res) => {
 });
 app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick'], (req, res) => res.redirect(301, '/faculty/registers.html'));
 app.get('/student/attendance/subjects.html', (req, res) => res.redirect(301, '/student/attendance.html'));
+app.get(['/student/todo.html', '/student/todo'], (req, res) => res.redirect(301, '/student/assignments.html'));
 
 
 // Static file serving options with production caching
@@ -117,8 +118,13 @@ const staticOptions = {
   lastModified: true
 };
 
+// Resolve Frontend directory (Default: ../frontend, Configurable for Collab Preview: process.env.FRONTEND_DIR)
+const frontendBase = process.env.FRONTEND_DIR
+  ? (path.isAbsolute(process.env.FRONTEND_DIR) ? process.env.FRONTEND_DIR : path.resolve(__dirname, process.env.FRONTEND_DIR))
+  : path.join(__dirname, '../frontend');
+
 // Serve Shared Assets (Single Source of Truth with backward compatibility)
-const sharedDir = path.join(__dirname, '../frontend/shared');
+const sharedDir = path.join(frontendBase, 'shared');
 if (fs.existsSync(sharedDir)) {
   app.use('/shared', express.static(sharedDir, staticOptions));
   app.use('/js', express.static(path.join(sharedDir, 'js'), staticOptions));
@@ -127,7 +133,7 @@ if (fs.existsSync(sharedDir)) {
 
 // Serve ExcelJS standalone browser bundle for client-side genuine .xlsx generation
 app.get(['/js/exceljs.min.js', '/shared/js/exceljs.min.js'], (req, res, next) => {
-  const p1 = path.join(__dirname, '../frontend/shared/js/exceljs.min.js');
+  const p1 = path.join(frontendBase, 'shared/js/exceljs.min.js');
   const p2 = path.join(__dirname, 'node_modules/exceljs/dist/exceljs.min.js');
   if (fs.existsSync(p1)) {
     res.setHeader('Content-Type', 'application/javascript');
@@ -141,10 +147,17 @@ app.get(['/js/exceljs.min.js', '/shared/js/exceljs.min.js'], (req, res, next) =>
 });
 
 
+// Universal Single-Engine Google Classroom Workspace:
+// Route student classroom to the unified Google Classroom workspace engine
+app.get(['/student/group-detail.html', '/student/group-detail', '/student/group-detail/'], (req, res) => {
+  res.sendFile(path.join(frontendBase, 'faculty/group-detail/index.html'));
+});
+app.use('/student/group-detail', express.static(path.join(frontendBase, 'faculty/group-detail')));
+
 // Universal rewrite for legacy .html requests to modular folder index.html
 app.get('/:section/:page.html', (req, res, next) => {
   const { section, page } = req.params;
-  const modularPath = path.join(__dirname, `../frontend/${section}/${page}/index.html`);
+  const modularPath = path.join(frontendBase, `${section}/${page}/index.html`);
   if (fs.existsSync(modularPath)) {
     return res.sendFile(modularPath);
   }
@@ -154,26 +167,37 @@ app.get('/:section/:page.html', (req, res, next) => {
 // Fallback handlers for direct asset requests: /:section/:page.css & /:section/:page.js
 app.get('/:section/:page.css', (req, res, next) => {
   const { section, page } = req.params;
-  const cssPath = path.join(__dirname, `../frontend/${section}/${page}/${page}.css`);
-  if (fs.existsSync(cssPath)) {
-    res.setHeader('Content-Type', 'text/css');
-    return res.sendFile(cssPath);
+  const candidates = [
+    path.join(frontendBase, `${section}/${page}/${page}.css`),
+    path.join(frontendBase, `${section}/${page}/student-group.css`),
+    path.join(frontendBase, `${section}/${page}/core.css`)
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      res.setHeader('Content-Type', 'text/css');
+      return res.sendFile(c);
+    }
   }
   next();
 });
 
 app.get('/:section/:page.js', (req, res, next) => {
   const { section, page } = req.params;
-  const jsPath = path.join(__dirname, `../frontend/${section}/${page}/${page}.js`);
-  if (fs.existsSync(jsPath)) {
-    res.setHeader('Content-Type', 'application/javascript');
-    return res.sendFile(jsPath);
+  const candidates = [
+    path.join(frontendBase, `${section}/${page}/${page}.js`),
+    path.join(frontendBase, `${section}/${page}/student-group.js`)
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      res.setHeader('Content-Type', 'application/javascript');
+      return res.sendFile(c);
+    }
   }
   next();
 });
 
 // Serve Frontend Static Web Client (when co-located or in Docker)
-const frontendDir = path.join(__dirname, '../frontend');
+const frontendDir = frontendBase;
 if (fs.existsSync(frontendDir)) {
   app.use(express.static(frontendDir, staticOptions));
 }

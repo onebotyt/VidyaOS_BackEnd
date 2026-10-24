@@ -66,6 +66,12 @@ router.post('/:id/submit', requireRole('STUDENT'), uploadSubmission.single('file
 // @handler AssignmentController.submitFinalDocs() -> AssignmentModel.upsertSubmission()
 router.post('/:id/submit-final-docs', requireRole('STUDENT'), (req, res) => assignmentController.submitFinalDocs(req, res));
 
+// @route   POST /api/v1/assignments/:id/unsubmit
+// @desc    Student: Unsubmit assignment to withdraw submission
+// @access  Protected (STUDENT)
+// @handler AssignmentController.unsubmitAssignment() -> AssignmentModel.deleteSubmission()
+router.post('/:id/unsubmit', requireRole('STUDENT'), (req, res) => assignmentController.unsubmitAssignment(req, res));
+
 // @route   PUT /api/v1/assignments/submissions/:submissionId/grade
 // @desc    Teacher/Admin: Grade submission and record feedback
 // @access  Protected (TEACHER, SYSTEM_ADMIN)

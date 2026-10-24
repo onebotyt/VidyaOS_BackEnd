@@ -810,9 +810,30 @@ class TeachingGroupModel {
    * @calledBy TeachingGroupController.getAssignments() (controllers/teachingGroupController.js)
    * @route GET /api/v1/teaching-groups/:id/assignments (routes/teachingGroups.js)
    * @param {number} groupId - Group ID
+   * @param {number|null} studentId - Optional Student ID for personalized submission status
    * @returns {Promise<Array>} Coursework assignments
    */
-  static async getGroupAssignments(groupId) {
+  static async getGroupAssignments(groupId, studentId = null) {
+    if (studentId) {
+      return await query(
+        `SELECT a.id, a.type, a.title, a.description, a.due_date, a.max_marks, a.created_at, a.questions, a.unit_name,
+                (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as submission_count,
+                (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.marks_obtained IS NOT NULL AND sub.status != 'ABSENT') as graded_count,
+                (SELECT AVG(sub.marks_obtained) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.marks_obtained IS NOT NULL AND sub.status != 'ABSENT') as avg_score,
+                mysub.id as my_submission_id,
+                mysub.status as my_status,
+                mysub.marks_obtained as my_marks_obtained,
+                mysub.file_path as my_file_path,
+                mysub.original_filename as my_original_filename,
+                mysub.submitted_at as my_submitted_at,
+                mysub.feedback as my_feedback
+         FROM assessments a
+         LEFT JOIN assessment_submissions mysub ON mysub.assessment_id = a.id AND mysub.student_id = ?
+         WHERE a.group_id = ? AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')
+         ORDER BY a.created_at DESC`,
+        [studentId, groupId]
+      );
+    }
     return await query(
       `SELECT a.id, a.type, a.title, a.description, a.due_date, a.max_marks, a.created_at, a.questions, a.unit_name,
               (SELECT COUNT(*) FROM assessment_submissions sub WHERE sub.assessment_id = a.id AND sub.status != 'ABSENT') as submission_count,

@@ -874,7 +874,11 @@ class TeachingGroupController {
   static async getAssignments(req, res) {
     try {
       const groupId = Number(req.params.id);
-      const rows = await TeachingGroupModel.getGroupAssignments(groupId);
+      const user = req.user || {};
+      const isStudent = user.role === 'STUDENT' || (Array.isArray(user.roles) && user.roles.includes('STUDENT'));
+      const studentId = isStudent ? user.student_id : null;
+
+      const rows = await TeachingGroupModel.getGroupAssignments(groupId, studentId);
       const formatted = rows.map(r => {
         let qList = null;
         if (r.questions) {
@@ -886,7 +890,17 @@ class TeachingGroupController {
         }
         return {
           ...r,
-          questions: qList
+          questions: qList,
+          my_submission: studentId ? {
+            id: r.my_submission_id || null,
+            status: r.my_status || 'NOT_SUBMITTED',
+            is_submitted: Boolean(r.my_submission_id && r.my_status !== 'ABSENT'),
+            submitted_at: r.my_submitted_at || null,
+            marks_obtained: r.my_marks_obtained !== undefined ? r.my_marks_obtained : null,
+            file_path: r.my_file_path || null,
+            original_filename: r.my_original_filename || null,
+            feedback: r.my_feedback || null
+          } : null
         };
       });
       res.status(200).json({ success: true, data: formatted });

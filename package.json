@@ -8,7 +8,13 @@
     "dev": "node --watch server.js",
     "test": "node scripts/test-api-flows.js && node scripts/test-rbac-and-structure.js && node scripts/test-student-self-registration.js && node scripts/test-register-consolidation.js",
     "test:api": "node scripts/test-api-flows.js",
-    "simulate-esp32": "node scripts/simulate-esp32.js"
+    "simulate-esp32": "node scripts/simulate-esp32.js",
+    "collab:pull": "node ../scripts/collab/pull-dev2.js",
+    "collab:diff": "node ../scripts/collab/diff-dev2.js",
+    "collab:apply": "node ../scripts/collab/apply-dev2.js",
+    "collab:preview": "node ../scripts/collab/preview-server.js",
+    "push:safe": "node ../scripts/collab/safe-push.js",
+    "push:backend": "node ../scripts/collab/safe-push.js"
   },
   "engines": {
     "node": ">=22.0.0"

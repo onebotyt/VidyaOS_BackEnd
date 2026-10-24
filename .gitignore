@@ -15,6 +15,10 @@ package-lock.json
 *.sqlite.bak*
 *.db
 
+# Allow tracked pre-seeded SQLite database for 2nd developer local testing
+!college_attendance.sqlite
+
+
 # File uploads
 uploads/
 
