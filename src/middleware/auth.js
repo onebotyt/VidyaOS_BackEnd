@@ -40,16 +40,25 @@ async function auth(req, res, next) {
     // Verify session state if bound to user_sessions
     if (decoded.session_id) {
       const sessionRows = await query(
-        `SELECT id, is_revoked FROM user_sessions WHERE id = ?`,
+        `SELECT id, is_revoked, last_active_at FROM user_sessions WHERE id = ?`,
         [decoded.session_id]
       );
       if (sessionRows && sessionRows.length > 0) {
-        if (sessionRows[0].is_revoked === 1) {
+        const sess = sessionRows[0];
+        const lastActiveTime = sess.last_active_at ? new Date(sess.last_active_at.includes('Z') ? sess.last_active_at : sess.last_active_at.replace(' ', 'T') + 'Z').getTime() : Date.now();
+        const isIdleExpired = (Date.now() - lastActiveTime) > (30 * 60 * 1000);
+
+        if (sess.is_revoked === 1 || isIdleExpired) {
+          if (isIdleExpired && sess.is_revoked === 0) {
+            query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
+          }
           return res.status(401).json({
             success: false,
             error: {
               code: 'SESSION_REVOKED',
-              message: 'Your session has ended because this account was logged in from another device or signed out.'
+              message: isIdleExpired
+                ? 'Your session has expired due to 30 minutes of inactivity. Please sign in again.'
+                : 'Your session has ended because this account was logged in from another device or signed out.'
             }
           });
         }

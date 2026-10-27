@@ -133,48 +133,28 @@ async function verifyGoogleToken(idToken) {
 // ─── Session helpers ──────────────────────────────────────
 async function enforceSingleActiveSession(userId, clientInfo = {}) {
   const deviceId = clientInfo.deviceId || clientInfo.device_id || null;
-  const forceLogout = clientInfo.forceLogout === true || clientInfo.force_logout === true;
 
-  // Active session threshold: is_revoked = 0, not expired, and active within the last 15 minutes
+  // Active session threshold: is_revoked = 0, not expired, and active within the last 30 minutes
   const activeSessions = await query(
     `SELECT id, device_id, ip_address, user_agent, last_active_at, created_at
      FROM user_sessions
      WHERE user_id = ? 
        AND is_revoked = 0 
        AND expires_at > CURRENT_TIMESTAMP
-       AND datetime(last_active_at, '+15 minutes') > datetime('now')
+       AND datetime(last_active_at, '+30 minutes') > datetime('now')
      ORDER BY id DESC`,
     [userId]
   );
 
   if (activeSessions && activeSessions.length > 0) {
-    const currentSession = activeSessions[0];
-
-    // Check if re-authenticating from the SAME device or same test client environment
-    const isSameDevice = (deviceId && currentSession.device_id && deviceId === currentSession.device_id) ||
-                         (!deviceId && !currentSession.device_id && currentSession.ip_address === clientInfo.ip && currentSession.user_agent === clientInfo.userAgent);
-
-    if (forceLogout || isSameDevice) {
-      // Cleanly revoke previous session(s)
-      await query(
-        `UPDATE user_sessions 
-         SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
-         WHERE user_id = ? AND is_revoked = 0`,
-        [userId]
-      );
-    } else {
-      // Reject login because this account is actively being used on another device/PC
-      throw {
-        status: 409,
-        code: 'ACCOUNT_ALREADY_ACTIVE',
-        message: 'This account is currently active on another device. Simultaneous logins into the same account are not permitted.',
-        active_session: {
-          device_id: currentSession.device_id || 'Other PC',
-          ip_address: currentSession.ip_address || 'Remote IP',
-          last_active_at: currentSession.last_active_at
-        }
-      };
-    }
+    // Option A: Automated Session Takeover (Zero-friction modern enterprise login)
+    // Cleanly revoke previous session(s) so older device is logged out automatically
+    await query(
+      `UPDATE user_sessions 
+       SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
+       WHERE user_id = ? AND is_revoked = 0`,
+      [userId]
+    );
   }
 }
 
