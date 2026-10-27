@@ -13,11 +13,13 @@ class ExamModel {
    * @param {Object} params Test configuration
    * @returns {Promise<number>} Inserted assessment ID
    */
-  async create({ teacherId, subjectId, departmentId, groupId, year, semester, academicYearId, name, examDate, maxMarks, unitName }) {
+  async create({ teacherId, subjectId, departmentId, groupId, year, semester, academicYearId, name, examDate, maxMarks, unitName, instructions, questions }) {
+    const questionsJson = questions ? (typeof questions === 'string' ? questions : JSON.stringify(questions)) : null;
+    const instructionsText = instructions ? (Array.isArray(instructions) ? instructions.join('\n') : String(instructions)) : null;
     const res = await query(
-      `INSERT INTO assessments (teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id, type, title, due_date, max_marks, unit_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'EXAM', ?, ?, ?, ?)`,
-      [teacherId, subjectId || null, departmentId || null, groupId || null, year || null, semester || null, academicYearId || null, name, examDate || null, maxMarks || 100, unitName || null]
+      `INSERT INTO assessments (teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id, type, title, due_date, max_marks, unit_name, instructions, questions)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'EXAM', ?, ?, ?, ?, ?, ?)`,
+      [teacherId, subjectId || null, departmentId || null, groupId || null, year || null, semester || null, academicYearId || null, name, examDate || null, maxMarks || 100, unitName || null, instructionsText, questionsJson]
     );
     return res.insertId || res.lastInsertRowid;
   }
@@ -166,13 +168,25 @@ class ExamModel {
    * @returns {Promise<Object>} Meta object
    */
   async getMeta(id) {
-    const rows = await query(`SELECT description FROM assessments WHERE id = ?`, [id]);
+    const rows = await query(`SELECT description, questions, instructions FROM assessments WHERE id = ?`, [id]);
     let meta = {};
     try {
       if (rows[0]?.description && rows[0].description.startsWith('{')) {
         meta = JSON.parse(rows[0].description);
       }
     } catch { /* ignore */ }
+    if (rows[0]?.questions) {
+      try {
+        meta.questions = typeof rows[0].questions === 'string' ? JSON.parse(rows[0].questions) : rows[0].questions;
+      } catch {
+        meta.questions = rows[0].questions;
+      }
+    }
+    if (rows[0]?.instructions) {
+      meta.instructions = Array.isArray(rows[0].instructions)
+        ? rows[0].instructions
+        : String(rows[0].instructions).split('\n').map(s => s.trim()).filter(Boolean);
+    }
     return meta;
   }
 

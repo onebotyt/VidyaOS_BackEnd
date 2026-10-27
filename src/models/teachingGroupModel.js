@@ -157,7 +157,12 @@ class TeachingGroupModel {
       JOIN teachers t ON tg.teacher_id = t.id
       LEFT JOIN departments d ON t.department_id = d.id
       JOIN academic_years ay ON tg.academic_year_id = ay.id
-      LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
+      LEFT JOIN attendance_registers ar ON ar.id = (
+        SELECT id FROM attendance_registers
+        WHERE group_id = tg.id
+        ORDER BY CASE WHEN session_type_scope = 'THEORY' THEN 0 ELSE 1 END, id ASC
+        LIMIT 1
+      )
     `;
     const params = [];
     const conditions = [];
@@ -229,13 +234,50 @@ class TeachingGroupModel {
       const groupId = groupInsert.insertId || groupInsert.lastInsertRowid;
 
       const year = Math.ceil(semester / 2);
-      const regInsert = await conn.query(
-        `INSERT INTO attendance_registers 
-          (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
-         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [effTeacherId, name, targetDeptId, year, semester, ayId, component, groupId]
-      );
-      const registerId = regInsert.insertId || regInsert.lastInsertRowid;
+      const isDual = (component === 'THEORY_PRACTICAL' || component === 'THEORY + PRACTICAL' || component === 'BOTH');
+      let registerId;
+
+      let targetSubjectId = null;
+      if (subjectName || finalCode) {
+        const subRows = await conn.query(
+          `SELECT id FROM subjects WHERE (name = ? OR code = ?) LIMIT 1`,
+          [subjectName, finalCode]
+        );
+        if (subRows && subRows[0]) {
+          targetSubjectId = subRows[0].id;
+        } else {
+          const newSub = await conn.query(
+            `INSERT INTO subjects (name, code, department_id, year, semester, credits, is_active, created_at)
+             VALUES (?, ?, ?, ?, ?, 3, 1, CURRENT_TIMESTAMP)`,
+            [subjectName || name, finalCode || 'SUB101', targetDeptId, year, semester]
+          );
+          targetSubjectId = newSub.insertId || newSub.lastInsertRowid;
+        }
+      }
+
+      if (isDual) {
+        const reg1 = await conn.query(
+          `INSERT INTO attendance_registers 
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'THEORY', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [effTeacherId, `${subjectName || name} (Theory)`, targetSubjectId, targetDeptId, year, semester, ayId, groupId]
+        );
+        registerId = reg1.insertId || reg1.lastInsertRowid;
+        await conn.query(
+          `INSERT INTO attendance_registers 
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'PRACTICAL', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [effTeacherId, `${subjectName || name} (Practical)`, targetSubjectId, targetDeptId, year, semester, ayId, groupId]
+        );
+      } else {
+        const regInsert = await conn.query(
+          `INSERT INTO attendance_registers 
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [effTeacherId, name, targetSubjectId, targetDeptId, year, semester, ayId, component, groupId]
+        );
+        registerId = regInsert.insertId || regInsert.lastInsertRowid;
+      }
 
       let autoEnrolledCount = 0;
       if (enrollmentMode === 'COHORT' && targetDeptId) {
@@ -286,7 +328,6 @@ class TeachingGroupModel {
               tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
               t.full_name as teacher_name, t.department_id as teacher_department_id,
               d.name as department_name, d.code as department_code,
-              ar.id as register_id,
               (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as member_count,
               (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'ASSIGNMENT') as assignment_count,
               (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'EXAM') as exam_count
@@ -294,11 +335,18 @@ class TeachingGroupModel {
        JOIN teachers t ON tg.teacher_id = t.id
        LEFT JOIN departments d ON t.department_id = d.id
        JOIN academic_years ay ON tg.academic_year_id = ay.id
-       LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
        WHERE tg.id = ?`,
       [groupId]
     );
-    return rows[0] || null;
+    if (!rows[0]) return null;
+    const group = rows[0];
+    const linkedRegisters = await query(
+      `SELECT id, name, session_type_scope, is_official FROM attendance_registers WHERE group_id = ? ORDER BY id ASC`,
+      [groupId]
+    );
+    group.registers = linkedRegisters;
+    group.register_id = linkedRegisters[0]?.id || null;
+    return group;
   }
 
   /**
@@ -603,10 +651,32 @@ class TeachingGroupModel {
         [name, subject_name, subject_code, component, groupId]
       );
     }
-    await query(
-      `UPDATE attendance_registers SET name = ?, session_type_scope = ? WHERE group_id = ?`,
-      [name, component, groupId]
-    );
+    const isDual = (component === 'THEORY_PRACTICAL' || component === 'THEORY + PRACTICAL' || component === 'BOTH');
+    if (isDual) {
+      const existing = await query(`SELECT id, session_type_scope FROM attendance_registers WHERE group_id = ?`, [groupId]);
+      const hasTheory = existing.some(r => r.session_type_scope === 'THEORY');
+      const hasPractical = existing.some(r => r.session_type_scope === 'PRACTICAL');
+      if (hasTheory && hasPractical) {
+        await query(`UPDATE attendance_registers SET name = ? WHERE group_id = ? AND session_type_scope = 'THEORY'`, [`${subject_name || name} (Theory)`, groupId]);
+        await query(`UPDATE attendance_registers SET name = ? WHERE group_id = ? AND session_type_scope = 'PRACTICAL'`, [`${subject_name || name} (Practical)`, groupId]);
+      } else if (existing.length === 1) {
+        await query(`UPDATE attendance_registers SET name = ?, session_type_scope = 'THEORY' WHERE id = ?`, [`${subject_name || name} (Theory)`, existing[0].id]);
+        const grp = (await query(`SELECT * FROM teaching_groups WHERE id = ?`, [groupId]))[0];
+        const teacher = (await query(`SELECT department_id FROM teachers WHERE id = ?`, [grp.teacher_id]))[0];
+        const year = Math.ceil((grp.semester || 1) / 2);
+        await query(
+          `INSERT INTO attendance_registers 
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, NULL, ?, ?, ?, ?, 'PRACTICAL', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [grp.teacher_id, `${subject_name || name} (Practical)`, teacher?.department_id, year, grp.semester, grp.academic_year_id, groupId]
+        );
+      }
+    } else {
+      await query(
+        `UPDATE attendance_registers SET name = ?, session_type_scope = ? WHERE group_id = ?`,
+        [name, component, groupId]
+      );
+    }
   }
 
   static async updateGroupSyllabusUnits(groupId, syllabusUnits, totalUnits) {

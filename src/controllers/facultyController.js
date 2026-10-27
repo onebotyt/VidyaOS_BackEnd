@@ -182,7 +182,7 @@ class FacultyController {
       }
 
       const allFinalizedSessions = sessions.filter(s => s.state === 'FINALIZED');
-      const monthFinalizedSessions = allFinalizedSessions.filter(s => s.session_date.startsWith(targetMonth));
+      const monthFinalizedSessions = sessions.filter(s => s.session_date.startsWith(targetMonth));
       const prevFinalizedSessions = allFinalizedSessions.filter(s => s.session_date < `${targetMonth}-01`);
 
       let gridData = [];
@@ -442,6 +442,35 @@ class FacultyController {
       });
 
       res.status(201).json({ success: true, data: { session_id: newSessionId, session_date, state: 'DRAFT' } });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Deletes an attendance session under a register.
+   * @route DELETE /api/v1/faculty/registers/:id/sessions/:sessionId (routes/faculty.js)
+   * @access TEACHER, SYSTEM_ADMIN
+   * @usesModel FacultyModel.getRegisterById() (models/facultyModel.js)
+   * @usesModel FacultyModel.deleteSession() (models/facultyModel.js)
+   */
+  static async deleteSession(req, res) {
+    const registerId = req.params.id;
+    const sessionId = req.params.sessionId;
+    const teacherId = req.user.teacher_id;
+
+    try {
+      const reg = await FacultyModel.getRegisterById(registerId);
+      if (!reg) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Register not found' } });
+
+      const isAdmin = req.user.roles?.includes('SYSTEM_ADMIN');
+      const isDeptHod = req.user.is_hod && req.user.hod_department_id === reg.department_id;
+      if (teacherId && reg.teacher_id !== teacherId && !isAdmin && !isDeptHod) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+      }
+
+      await FacultyModel.deleteSession({ registerId, sessionId });
+      res.json({ success: true, data: { message: 'Period session deleted successfully' } });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
@@ -853,6 +882,58 @@ class FacultyController {
       return res.send(buffer);
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Generates and downloads attendance register in Excel, PDF, or Word Doc format.
+   * Supports: overview_only, all_months, month, week, day scopes.
+   * @route POST /api/v1/faculty/registers/:id/export/attendance (routes/faculty.js)
+   * @access TEACHER, SYSTEM_ADMIN
+   * @usesModel FacultyModel.getRegisterAttendanceExportData() (models/facultyModel.js)
+   * @usesService excelExportService.generateAttendanceRegisterExcel(), Pdf, Doc (services/excelExportService.js)
+   */
+  static async exportAttendanceRegister(req, res) {
+    const registerId = Number(req.params.id);
+    const options = req.body || {};
+    const format = (options.format || 'xlsx').toLowerCase();
+
+    try {
+      const register = await FacultyModel.getRegisterById(registerId);
+      if (!register) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Register not found' } });
+      }
+
+      const exportData = await FacultyModel.getRegisterAttendanceExportData(registerId, options);
+      const safeSubj = (exportData.subject_name || 'Subject').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeRange = (options.range || 'Semester').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      let buffer;
+      let contentType;
+      let filename;
+
+      if (format === 'pdf') {
+        buffer = await excelExportService.generateAttendanceRegisterPdf(exportData);
+        contentType = 'application/pdf';
+        filename = `Attendance_Register_${safeSubj}_${safeRange}.pdf`;
+      } else if (format === 'doc') {
+        buffer = await excelExportService.generateAttendanceRegisterDoc(exportData);
+        contentType = 'application/msword';
+        filename = `Attendance_Register_${safeSubj}_${safeRange}.doc`;
+      } else {
+        // Default Excel
+        buffer = await excelExportService.generateAttendanceRegisterExcel(exportData);
+        contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        filename = `Attendance_Register_${safeSubj}_${safeRange}.xlsx`;
+      }
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', buffer.length);
+      return res.send(buffer);
+    } catch (err) {
+      console.error('[FacultyController.exportAttendanceRegister] Error:', err);
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
   }
 

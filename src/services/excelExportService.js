@@ -86,7 +86,7 @@ async function generateClassTestExcel(data) {
       ];
 
   const qCount = questions.length;
-  // Columns: Col 1: SR NO, Col 2: ROLL NO, Col 3: ENROLLMENT NO, Col 4: REG. NO., Col 5: STUDENT NAME, Cols 6..(5+qCount): Questions, Col (6+qCount): Total, Col (7+qCount): Details Side Panel
+  // Columns: Col 1: SR NO, Col 2: ROLL NO, Col 3: REG. NO., Col 4: ENROLLMENT NO., Col 5: STUDENT NAME, Cols 6..(5+qCount): Questions, Col (6+qCount): Total, Col (7+qCount): Details Side Panel
   const nameColIdx = 5;                    // STUDENT NAME
   const firstQColIdx = 6;                  // First question column
   const totalColIdx = firstQColIdx + qCount;  // Total
@@ -96,8 +96,8 @@ async function generateClassTestExcel(data) {
   // Set column widths matching institutional standard
   ws.getColumn(1).width = 8;   // SR. NO.
   ws.getColumn(2).width = 12;  // ROLL NO.
-  ws.getColumn(3).width = 18;  // ENROLLMENT NO.
-  ws.getColumn(4).width = 18;  // REG. NO.
+  ws.getColumn(3).width = 18;  // REG. NO.
+  ws.getColumn(4).width = 18;  // ENROLLMENT NO.
   ws.getColumn(5).width = 24;  // STUDENT NAME
   for (let i = 0; i < qCount; i++) {
     ws.getColumn(firstQColIdx + i).width = 8; // Q1..QN
@@ -149,8 +149,8 @@ async function generateClassTestExcel(data) {
 
   ws.getCell(4, 1).value = 'SR. NO.';
   ws.getCell(4, 2).value = 'ROLL NO.';
-  ws.getCell(4, 3).value = 'ENROLLMENT NO.';
-  ws.getCell(4, 4).value = 'REG. NO.';
+  ws.getCell(4, 3).value = 'REG. NO.';
+  ws.getCell(4, 4).value = 'ENROLLMENT NO.';
   ws.getCell(4, 5).value = 'STUDENT NAME';
 
   // Merge over questions and Total for Exam Title
@@ -173,7 +173,7 @@ async function generateClassTestExcel(data) {
   const r5 = ws.getRow(5);
   r5.height = 22;
 
-  // Vertically merge columns 1 to nameColIdx (SR. NO., ROLL NO., ENROLLMENT NO., REG. NO., STUDENT NAME) across Rows 4 & 5
+  // Vertically merge columns 1 to nameColIdx (SR. NO., ROLL NO., REG. NO., ENROLLMENT NO., STUDENT NAME) across Rows 4 & 5
   for (let c = 1; c <= nameColIdx; c++) {
     ws.mergeCells(4, c, 5, c);
   }
@@ -211,7 +211,9 @@ async function generateClassTestExcel(data) {
 
   const rawInstructions = Array.isArray(data.instructions) && data.instructions.length > 0
     ? data.instructions
-    : defaultInstructions;
+    : (typeof data.instructions === 'string' && data.instructions.trim().length > 0
+        ? data.instructions.split('\n').map(s => s.trim()).filter(Boolean)
+        : defaultInstructions);
 
   const cleanInstructions = rawInstructions
     .filter(i => !i.startsWith('Instructions'))
@@ -249,15 +251,15 @@ async function generateClassTestExcel(data) {
     cRoll.value = String(st.class_roll_no || (idx + 1)).replace(/^#/, '');
     cRoll.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 3. ENROLLMENT NO. (dedicated column)
-    const cEnrl = ws.getCell(currentRow, 3);
-    cEnrl.value = String(st.official_enrollment_no || '-');
-    cEnrl.alignment = { horizontal: 'center', vertical: 'middle' };
-
-    // 4. REG. NO. (dedicated column)
-    const cReg = ws.getCell(currentRow, 4);
+    // 3. REG. NO. (dedicated column)
+    const cReg = ws.getCell(currentRow, 3);
     cReg.value = String(st.registration_no || '-');
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // 4. ENROLLMENT NO. (dedicated column)
+    const cEnrl = ws.getCell(currentRow, 4);
+    cEnrl.value = String(st.official_enrollment_no || '-');
+    cEnrl.alignment = { horizontal: 'center', vertical: 'middle' };
 
     // 5. STUDENT NAME
     const cName = ws.getCell(currentRow, nameColIdx);
@@ -265,7 +267,7 @@ async function generateClassTestExcel(data) {
     cName.value = studentName;
     cName.alignment = { horizontal: 'left', vertical: 'middle' };
 
-    [cSr, cRoll, cEnrl, cReg, cName].forEach(cell => {
+    [cSr, cRoll, cReg, cEnrl, cName].forEach(cell => {
       cell.font = { name: 'Calibri', size: 9.5 };
       cell.border = THIN_BORDER;
     });
@@ -450,8 +452,8 @@ async function generateInternalEvaluationExcel(data) {
 
   // Column widths
   ws.getColumn(1).width = 9;   // ROLL NO
-  ws.getColumn(2).width = 16;  // ENROLLMENT NO
-  ws.getColumn(3).width = 16;  // REG NO
+  ws.getColumn(2).width = 16;  // REG NO
+  ws.getColumn(3).width = 16;  // ENROLLMENT NO
   ws.getColumn(4).width = 28;  // STUDENT NAME
   for (let c = assignStartCol; c <= assignEndCol; c++) ws.getColumn(c).width = 6;
   ws.getColumn(assignAvgCol).width = 13; // Assignment Avg
@@ -515,8 +517,8 @@ async function generateInternalEvaluationExcel(data) {
   // Merged Vertically (Rows 4-5) for Identifiers
   const vertHeaders = [
     { col: 1, text: 'ROLL NO' },
-    { col: 2, text: 'ENROLLMENT NO' },
-    { col: 3, text: 'REG NO' },
+    { col: 2, text: 'REG NO' },
+    { col: 3, text: 'ENROLLMENT NO' },
     { col: 4, text: 'STUDENT NAME' }
   ];
 
@@ -676,22 +678,22 @@ async function generateInternalEvaluationExcel(data) {
     cRoll.value = String(st.class_roll_no || idx + 1);
     cRoll.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 2. ENROLLMENT NO (added)
-    const cEnr = ws.getCell(currentRow, 2);
-    cEnr.value = String(st.official_enrollment_no || '—');
-    cEnr.alignment = { horizontal: 'center', vertical: 'middle' };
-
-    // 3. REG NO (UBTER Official Registration No)
-    const cReg = ws.getCell(currentRow, 3);
+    // 2. REG NO (UBTER Official Registration No)
+    const cReg = ws.getCell(currentRow, 2);
     cReg.value = String(st.registration_no || '—');
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // 3. ENROLLMENT NO (added)
+    const cEnr = ws.getCell(currentRow, 3);
+    cEnr.value = String(st.official_enrollment_no || '—');
+    cEnr.alignment = { horizontal: 'center', vertical: 'middle' };
 
     // 4. STUDENT NAME (renamed from CNAME)
     const cName = ws.getCell(currentRow, 4);
     cName.value = (st.full_name || st.name || '').toUpperCase();
     cName.alignment = { horizontal: 'left', vertical: 'middle' };
 
-    [cRoll, cEnr, cReg, cName].forEach(cell => {
+    [cRoll, cReg, cEnr, cName].forEach(cell => {
       cell.font = { name: 'Calibri', size: 9 };
       cell.border = THIN_BORDER;
     });
@@ -1113,7 +1115,7 @@ function buildClassTestMarksheetHtml(data) {
       ];
 
   const qCount = questions.length;
-  // Cols: SR, ROLL, ENROLLMENT, REG, NAME, Q1..QN, Total, Side Panel
+  // Cols: SR, ROLL, REG, ENROLLMENT, NAME, Q1..QN, Total, Side Panel
   const totalCols = 7 + qCount;
 
   const defaultInstructions = [
@@ -1170,8 +1172,8 @@ function buildClassTestMarksheetHtml(data) {
       <tr style="${isAb ? 'background:#fef2f2;' : (idx % 2 === 1 ? 'background:#fbfbfb;' : '')}">
         <td style="text-align:center;padding:5px 3px;border:1px solid #777;font-weight:bold;">${idx + 1}</td>
         <td style="text-align:center;padding:5px 3px;border:1px solid #777;font-weight:bold;">${roll}</td>
-        <td style="text-align:center;padding:4px 5px;border:1px solid #777;font-size:7.5pt;">${st.official_enrollment_no || '-'}</td>
         <td style="text-align:center;padding:4px 5px;border:1px solid #777;font-size:7.5pt;">${st.registration_no || '-'}</td>
+        <td style="text-align:center;padding:4px 5px;border:1px solid #777;font-size:7.5pt;">${st.official_enrollment_no || '-'}</td>
         <td style="padding:4px 8px;border:1px solid #777;font-weight:bold;text-align:left;">${name}</td>
         ${qCells}
         <td style="text-align:center;padding:5px 3px;border:1px solid #777;font-weight:bold;${isAb ? 'color:#dc2626;' : 'color:#1e40af;'}">${isAb ? '0 (AB)' : (Math.round(rowTotal * 10) / 10)}</td>
@@ -1222,8 +1224,8 @@ function buildClassTestMarksheetHtml(data) {
       <tr class="hdr-tan">
         <th rowspan="2" style="padding:5px 3px;vertical-align:middle;">SR. NO.</th>
         <th rowspan="2" style="padding:5px 3px;vertical-align:middle;">ROLL NO.</th>
-        <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">ENROLLMENT NO.</th>
         <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">REG. NO.</th>
+        <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">ENROLLMENT NO.</th>
         <th rowspan="2" style="padding:5px 6px;vertical-align:middle;">STUDENT NAME</th>
         <th colspan="${qCount}" style="padding:5px 3px;">${examTitle} (Total Marks : ${maxMarks})</th>
         <th style="padding:5px 3px;">Total</th>
@@ -1860,11 +1862,773 @@ async function generateDepartmentReportsExcel(data) {
   return await wb.xlsx.writeBuffer();
 }
 
+/**
+ * Converts a 1-based column index to an Excel column letter (e.g., 1 -> A, 27 -> AA)
+ */
+function colToLetter(colIdx) {
+  let temp = colIdx;
+  let letter = '';
+  while (temp > 0) {
+    const mod = (temp - 1) % 26;
+    letter = String.fromCharCode(65 + mod) + letter;
+    temp = Math.floor((temp - mod) / 26);
+  }
+  return letter;
+}
+
+/**
+ * Generates official institutional Attendance Register Excel Workbook (.xlsx)
+ * Supports: Overview Summary sheet (totals only) and/or monthly Day 1..31 ledger matrices.
+ * Features:
+ * - 3-Row blue institutional header
+ * - Columns: Sr. No., Roll No., Registration No., Student Name, Day columns, Total Present, Total Absent, Total Classes, % Attended
+ * - Soft red absent marks, green present marks
+ * - Dynamic formulas for dynamic calculation
+ * - AutoFilter enabled across data headers
+ * @param {Object} data - Register export data from FacultyModel.getRegisterAttendanceExportData
+ * @returns {Promise<Buffer>} Excel workbook binary buffer
+ */
+async function generateAttendanceRegisterExcel(data) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'VidyaOS Attendance Portal';
+  wb.lastModifiedBy = 'Faculty Attendance System';
+  wb.created = new Date();
+
+  const instName = data.institution_name || 'Government Polytechnic Nainital';
+  const sessionLabel = data.session_label || '2026 Session';
+  const deptName = data.department_name || 'Department';
+  const deptCode = data.department_code || 'DEPT';
+  const subjectName = data.subject_name || 'Subject';
+  const year = data.year || 3;
+  const semester = data.semester || 5;
+  const scope = data.scope || 'THEORY';
+  const range = data.range || 'all_months';
+
+  // ─────────────────────────────────────────────────────────────
+  // 1. OVERVIEW SUMMARY SHEET (If overview_only or all_months)
+  // ─────────────────────────────────────────────────────────────
+  if (range === 'overview_only' || range === 'all_months') {
+    const wsOverview = wb.addWorksheet('Overview Summary', {
+      views: [{ showGridLines: true }],
+      pageSetup: { orientation: 'landscape', fitToPage: true }
+    });
+
+    const months = data.overview_months || [];
+    const students = data.overview_students || [];
+    const mCount = months.length;
+
+    // Columns: Sr No (1), Roll No (2), Enroll No (3), Reg No (4), Name (5), Month 1..M, Tot Present, Tot Absent, Tot Classes, % Attended
+    const baseColsCount = 5;
+    const totPresCol = baseColsCount + mCount + 1;
+    const totAbsCol = totPresCol + 1;
+    const totClassesCol = totAbsCol + 1;
+    const pctCol = totClassesCol + 1;
+    const totalColsCount = pctCol;
+
+    wsOverview.getColumn(1).width = 7;   // SR. NO.
+    wsOverview.getColumn(2).width = 10;  // ROLL NO.
+    wsOverview.getColumn(3).width = 18;  // REGISTRATION NO.
+    wsOverview.getColumn(4).width = 16;  // ENROLLMENT NO.
+    wsOverview.getColumn(5).width = 26;  // STUDENT NAME
+    for (let i = 0; i < mCount; i++) {
+      wsOverview.getColumn(baseColsCount + 1 + i).width = 14;
+    }
+    wsOverview.getColumn(totPresCol).width = 14;
+    wsOverview.getColumn(totAbsCol).width = 14;
+    wsOverview.getColumn(totClassesCol).width = 14;
+    wsOverview.getColumn(pctCol).width = 13;
+
+    // Row 1: Institution & Session
+    wsOverview.mergeCells(1, 1, 1, totalColsCount);
+    const r1 = wsOverview.getCell(1, 1);
+    r1.value = `${instName} | Attendance Register Ledger ${sessionLabel}`;
+    r1.font = { name: 'Calibri', size: 12, bold: true };
+    r1.alignment = { horizontal: 'center', vertical: 'middle' };
+    r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_BLUE_HEADER } };
+    wsOverview.getRow(1).height = 24;
+
+    // Row 2: Department & Subject
+    wsOverview.mergeCells(2, 1, 2, totalColsCount);
+    const r2 = wsOverview.getCell(2, 1);
+    r2.value = `Department (${deptCode}) | Subject : ${subjectName}`;
+    r2.font = { name: 'Calibri', size: 11, bold: true };
+    r2.alignment = { horizontal: 'center', vertical: 'middle' };
+    r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_BLUE_HEADER } };
+    wsOverview.getRow(2).height = 20;
+
+    // Row 3: Class, Semester & Scope
+    wsOverview.mergeCells(3, 1, 3, totalColsCount);
+    const r3 = wsOverview.getCell(3, 1);
+    r3.value = `${deptName} Year ${year} | Semester ${semester} | Scope: ${scope} | Overview Summary`;
+    r3.font = { name: 'Calibri', size: 11, bold: true };
+    r3.alignment = { horizontal: 'center', vertical: 'middle' };
+    r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_BLUE_HEADER } };
+    wsOverview.getRow(3).height = 20;
+
+    for (let r = 1; r <= 3; r++) {
+      for (let c = 1; c <= totalColsCount; c++) {
+        wsOverview.getCell(r, c).border = THIN_BORDER;
+      }
+    }
+
+    // Row 4: Table Headers
+    const r4 = wsOverview.getRow(4);
+    r4.height = 24;
+    const overviewHeaders = [
+      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'ENROLLMENT NO.', 'STUDENT NAME',
+      ...months.map(m => `${m.label}\n(P/Held)`),
+      'TOTAL PRESENT', 'TOTAL ABSENT', 'TOTAL CLASSES', '% ATTENDED'
+    ];
+
+    overviewHeaders.forEach((text, idx) => {
+      const cell = r4.getCell(idx + 1);
+      cell.value = text;
+      cell.font = { name: 'Calibri', size: 9.5, bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_TAN_HEADER } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = THIN_BORDER;
+    });
+
+    // Student Rows
+    let rowIdx = 5;
+    students.forEach((st, sIdx) => {
+      const row = wsOverview.getRow(rowIdx);
+      row.height = 20;
+
+      row.getCell(1).value = st.sr_no || (sIdx + 1);
+      row.getCell(2).value = st.roll_no || '--';
+      row.getCell(3).value = st.registration_no || '--';
+      row.getCell(4).value = st.enrollment_no || '--';
+      row.getCell(5).value = st.name || '--';
+
+      for (let c = 1; c <= 5; c++) {
+        row.getCell(c).font = { name: 'Calibri', size: 9.5 };
+        row.getCell(c).border = THIN_BORDER;
+        row.getCell(c).alignment = { horizontal: c === 5 ? 'left' : 'center', vertical: 'middle' };
+      }
+
+      // Monthly breakdown columns
+      months.forEach((m, mIdx) => {
+        const cell = row.getCell(baseColsCount + 1 + mIdx);
+        const mData = st.month_breakdown?.[m.key] || { present: 0, total: 0 };
+        cell.value = mData.total > 0 ? `${mData.present} / ${mData.total}` : '—';
+        cell.font = { name: 'Calibri', size: 9.5 };
+        cell.border = THIN_BORDER;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+
+      // Total Present
+      const presCell = row.getCell(totPresCol);
+      presCell.value = Number(st.overall_present || 0);
+      presCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF006600' } };
+      presCell.border = THIN_BORDER;
+      presCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Total Absent
+      const absCell = row.getCell(totAbsCol);
+      absCell.value = Number(st.overall_absent || 0);
+      absCell.font = { name: 'Calibri', size: 9.5, bold: Number(st.overall_absent) > 0, color: { argb: Number(st.overall_absent) > 0 ? COLOR_ABSENT_RED : 'FF000000' } };
+      absCell.border = THIN_BORDER;
+      absCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Total Classes
+      const presLetter = colToLetter(totPresCol);
+      const absLetter = colToLetter(totAbsCol);
+      const classesCell = row.getCell(totClassesCol);
+      classesCell.value = { formula: `${presLetter}${rowIdx}+${absLetter}${rowIdx}`, result: Number(st.overall_total || 0) };
+      classesCell.font = { name: 'Calibri', size: 9.5, bold: true };
+      classesCell.border = THIN_BORDER;
+      classesCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // % Attended
+      const classesLetter = colToLetter(totClassesCol);
+      const pctCell = row.getCell(pctCol);
+      pctCell.value = {
+        formula: `IF(${classesLetter}${rowIdx}>0, ${presLetter}${rowIdx}/${classesLetter}${rowIdx}, 0)`,
+        result: st.overall_total > 0 ? (st.overall_present / st.overall_total) : 0
+      };
+      pctCell.numFmt = '0.0%';
+      pctCell.font = { name: 'Calibri', size: 9.5, bold: true };
+      pctCell.border = THIN_BORDER;
+      pctCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      rowIdx++;
+    });
+
+    // AutoFilter ONLY on student info columns (not on dynamic month columns)
+    wsOverview.autoFilter = {
+      from: { row: 4, column: 1 },
+      to: { row: 4, column: baseColsCount }
+    };
+
+    // Institutional 4-Signature Block in Excel
+    const sigRow1 = rowIdx + 2;
+    const sigRow2 = rowIdx + 3;
+    wsOverview.getRow(sigRow1).height = 18;
+    wsOverview.getRow(sigRow2).height = 20;
+
+    // Col 2: Subject Faculty
+    wsOverview.getCell(sigRow1, 2).value = '_______________________';
+    wsOverview.getCell(sigRow2, 2).value = 'Subject Faculty';
+    wsOverview.getCell(sigRow2, 2).font = { name: 'Calibri', size: 9.5, bold: true };
+    wsOverview.getCell(sigRow1, 2).alignment = { horizontal: 'center' };
+    wsOverview.getCell(sigRow2, 2).alignment = { horizontal: 'center' };
+
+    // Col 4: Class Teacher
+    wsOverview.getCell(sigRow1, 4).value = '_______________________';
+    wsOverview.getCell(sigRow2, 4).value = 'Class Teacher';
+    wsOverview.getCell(sigRow2, 4).font = { name: 'Calibri', size: 9.5, bold: true };
+    wsOverview.getCell(sigRow1, 4).alignment = { horizontal: 'center' };
+    wsOverview.getCell(sigRow2, 4).alignment = { horizontal: 'center' };
+
+    // Middle: Head of Department
+    const hodCol = Math.max(5, Math.floor((totalColsCount + 5) / 2));
+    wsOverview.getCell(sigRow1, hodCol).value = '_______________________';
+    wsOverview.getCell(sigRow2, hodCol).value = 'Head of Department';
+    wsOverview.getCell(sigRow2, hodCol).font = { name: 'Calibri', size: 9.5, bold: true };
+    wsOverview.getCell(sigRow1, hodCol).alignment = { horizontal: 'center' };
+    wsOverview.getCell(sigRow2, hodCol).alignment = { horizontal: 'center' };
+
+    // End: Principal
+    wsOverview.getCell(sigRow1, totalColsCount).value = '_______________________';
+    wsOverview.getCell(sigRow2, totalColsCount).value = 'Principal';
+    wsOverview.getCell(sigRow2, totalColsCount).font = { name: 'Calibri', size: 9.5, bold: true };
+    wsOverview.getCell(sigRow1, totalColsCount).alignment = { horizontal: 'center' };
+    wsOverview.getCell(sigRow2, totalColsCount).alignment = { horizontal: 'center' };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. DETAILED MONTHLY / MATRIX SHEETS
+  // ─────────────────────────────────────────────────────────────
+  const monthlySheets = data.monthly_sheets || [];
+  monthlySheets.forEach((sheetData) => {
+    const rawTitle = sheetData.month_label || sheetData.month_key || 'Attendance Matrix';
+    const sheetTitle = rawTitle.slice(0, 30).replace(/[:\\\/\?\*\[\]]/g, '_');
+    const ws = wb.addWorksheet(sheetTitle, {
+      views: [{ showGridLines: true }],
+      pageSetup: { orientation: 'landscape', fitToPage: true }
+    });
+
+    const days = sheetData.days || [];
+    const students = sheetData.students || [];
+    const dCount = days.length;
+
+    const baseColsCount = 5;
+    const dayStartCol = 6;
+    const dayEndCol = baseColsCount + dCount;
+    const totPresCol = dayEndCol + 1;
+    const totAbsCol = totPresCol + 1;
+    const totClassesCol = totAbsCol + 1;
+    const pctCol = totClassesCol + 1;
+    const totalColsCount = pctCol;
+
+    ws.getColumn(1).width = 6;   // SR. NO.
+    ws.getColumn(2).width = 9;   // ROLL NO.
+    ws.getColumn(3).width = 16;  // REGISTRATION NO.
+    ws.getColumn(4).width = 15;  // ENROLLMENT NO.
+    ws.getColumn(5).width = 24;  // STUDENT NAME
+    for (let i = 0; i < dCount; i++) {
+      ws.getColumn(dayStartCol + i).width = dCount <= 7 ? 12 : 4.2;
+    }
+    ws.getColumn(totPresCol).width = 13;
+    ws.getColumn(totAbsCol).width = 13;
+    ws.getColumn(totClassesCol).width = 13;
+    ws.getColumn(pctCol).width = 12;
+
+    // Row 1: Institution & Session
+    ws.mergeCells(1, 1, 1, totalColsCount);
+    const r1 = ws.getCell(1, 1);
+    r1.value = `${instName} | Attendance Register Ledger ${sessionLabel}`;
+    r1.font = { name: 'Calibri', size: 12, bold: true };
+    r1.alignment = { horizontal: 'center', vertical: 'middle' };
+    r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_BLUE_HEADER } };
+    ws.getRow(1).height = 24;
+
+    // Row 2: Department & Subject
+    ws.mergeCells(2, 1, 2, totalColsCount);
+    const r2 = ws.getCell(2, 1);
+    r2.value = `Department (${deptCode}) | Subject : ${subjectName}`;
+    r2.font = { name: 'Calibri', size: 11, bold: true };
+    r2.alignment = { horizontal: 'center', vertical: 'middle' };
+    r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_BLUE_HEADER } };
+    ws.getRow(2).height = 20;
+
+    // Row 3: Class, Semester & Month
+    ws.mergeCells(3, 1, 3, totalColsCount);
+    const r3 = ws.getCell(3, 1);
+    r3.value = `${deptName} Year ${year} | Semester ${semester} | Scope: ${scope} | ${rawTitle}`;
+    r3.font = { name: 'Calibri', size: 11, bold: true };
+    r3.alignment = { horizontal: 'center', vertical: 'middle' };
+    r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_BLUE_HEADER } };
+    ws.getRow(3).height = 20;
+
+    for (let r = 1; r <= 3; r++) {
+      for (let c = 1; c <= totalColsCount; c++) {
+        ws.getCell(r, c).border = THIN_BORDER;
+      }
+    }
+
+    // Row 4: Data Headers
+    const r4 = ws.getRow(4);
+    r4.height = 24;
+    const detailHeaders = [
+      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'ENROLLMENT NO.', 'STUDENT NAME',
+      ...days.map(d => d.day_name && dCount <= 7 ? d.day_name : String(d.day)),
+      'TOTAL PRESENT', 'TOTAL ABSENT', 'TOTAL CLASSES', '% ATTENDED'
+    ];
+
+    detailHeaders.forEach((text, idx) => {
+      const cell = r4.getCell(idx + 1);
+      cell.value = text;
+      cell.font = { name: 'Calibri', size: 9, bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_TAN_HEADER } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = THIN_BORDER;
+    });
+
+    // Student Rows
+    let rowIdx = 5;
+    students.forEach((st, sIdx) => {
+      const row = ws.getRow(rowIdx);
+      row.height = 19;
+
+      row.getCell(1).value = st.sr_no || (sIdx + 1);
+      row.getCell(2).value = st.roll_no || '--';
+      row.getCell(3).value = st.registration_no || '--';
+      row.getCell(4).value = st.enrollment_no || '--';
+      row.getCell(5).value = st.name || '--';
+
+      for (let c = 1; c <= 5; c++) {
+        row.getCell(c).font = { name: 'Calibri', size: 9 };
+        row.getCell(c).border = THIN_BORDER;
+        row.getCell(c).alignment = { horizontal: c === 5 ? 'left' : 'center', vertical: 'middle' };
+      }
+
+      // Day columns
+      days.forEach((d, dIdx) => {
+        const cell = row.getCell(dayStartCol + dIdx);
+        const mark = st.marks?.[d.day] || '';
+        cell.value = mark;
+        cell.font = { name: 'Calibri', size: 8.5 };
+        cell.border = THIN_BORDER;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        if (mark === 'P') {
+          cell.font = { name: 'Calibri', size: 8.5, bold: true, color: { argb: 'FF006600' } };
+        } else if (mark === 'A') {
+          cell.font = { name: 'Calibri', size: 8.5, bold: true, color: { argb: COLOR_ABSENT_RED } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE6E6' } };
+        } else if (d.is_holiday || d.is_sunday) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_GRAY_BG } };
+          cell.font = { name: 'Calibri', size: 8, color: { argb: 'FF888888' } };
+        }
+      });
+
+      // Formulas for Present, Absent, Total, %
+      const startLetter = colToLetter(dayStartCol);
+      const endLetter = colToLetter(dayEndCol);
+      const presLetter = colToLetter(totPresCol);
+      const absLetter = colToLetter(totAbsCol);
+      const classesLetter = colToLetter(totClassesCol);
+
+      // Total Present
+      const presCell = row.getCell(totPresCol);
+      presCell.value = {
+        formula: `COUNTIF(${startLetter}${rowIdx}:${endLetter}${rowIdx}, "P")`,
+        result: Number(st.total_present || 0)
+      };
+      presCell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF006600' } };
+      presCell.border = THIN_BORDER;
+      presCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Total Absent
+      const absCell = row.getCell(totAbsCol);
+      absCell.value = {
+        formula: `COUNTIF(${startLetter}${rowIdx}:${endLetter}${rowIdx}, "A")`,
+        result: Number(st.total_absent || 0)
+      };
+      absCell.font = { name: 'Calibri', size: 9, bold: Number(st.total_absent) > 0, color: { argb: Number(st.total_absent) > 0 ? COLOR_ABSENT_RED : 'FF000000' } };
+      absCell.border = THIN_BORDER;
+      absCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Total Classes
+      const classesCell = row.getCell(totClassesCol);
+      classesCell.value = {
+        formula: `${presLetter}${rowIdx}+${absLetter}${rowIdx}`,
+        result: Number(st.total_classes || 0)
+      };
+      classesCell.font = { name: 'Calibri', size: 9, bold: true };
+      classesCell.border = THIN_BORDER;
+      classesCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // % Attended
+      const pctCell = row.getCell(pctCol);
+      pctCell.value = {
+        formula: `IF(${classesLetter}${rowIdx}>0, ${presLetter}${rowIdx}/${classesLetter}${rowIdx}, 0)`,
+        result: st.total_classes > 0 ? (st.total_present / st.total_classes) : 0
+      };
+      pctCell.numFmt = '0.0%';
+      pctCell.font = { name: 'Calibri', size: 9, bold: true };
+      pctCell.border = THIN_BORDER;
+      pctCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      rowIdx++;
+    });
+
+    // AutoFilter ONLY on student info headers (NOT on day columns so dates are never hidden!)
+    ws.autoFilter = {
+      from: { row: 4, column: 1 },
+      to: { row: 4, column: baseColsCount }
+    };
+
+    // Institutional 4-Signature Block in Excel
+    const sigRow1 = rowIdx + 2;
+    const sigRow2 = rowIdx + 3;
+    ws.getRow(sigRow1).height = 18;
+    ws.getRow(sigRow2).height = 20;
+
+    // Col 2: Subject Faculty
+    ws.getCell(sigRow1, 2).value = '_______________________';
+    ws.getCell(sigRow2, 2).value = 'Subject Faculty';
+    ws.getCell(sigRow2, 2).font = { name: 'Calibri', size: 9, bold: true };
+    ws.getCell(sigRow1, 2).alignment = { horizontal: 'center' };
+    ws.getCell(sigRow2, 2).alignment = { horizontal: 'center' };
+
+    // Col 4: Class Teacher
+    ws.getCell(sigRow1, 4).value = '_______________________';
+    ws.getCell(sigRow2, 4).value = 'Class Teacher';
+    ws.getCell(sigRow2, 4).font = { name: 'Calibri', size: 9, bold: true };
+    ws.getCell(sigRow1, 4).alignment = { horizontal: 'center' };
+    ws.getCell(sigRow2, 4).alignment = { horizontal: 'center' };
+
+    // Middle: Head of Department
+    const hodCol = Math.max(5, Math.floor((totalColsCount + 5) / 2));
+    ws.getCell(sigRow1, hodCol).value = '_______________________';
+    ws.getCell(sigRow2, hodCol).value = 'Head of Department';
+    ws.getCell(sigRow2, hodCol).font = { name: 'Calibri', size: 9, bold: true };
+    ws.getCell(sigRow1, hodCol).alignment = { horizontal: 'center' };
+    ws.getCell(sigRow2, hodCol).alignment = { horizontal: 'center' };
+
+    // End: Principal
+    ws.getCell(sigRow1, totalColsCount).value = '_______________________';
+    ws.getCell(sigRow2, totalColsCount).value = 'Principal';
+    ws.getCell(sigRow2, totalColsCount).font = { name: 'Calibri', size: 9, bold: true };
+    ws.getCell(sigRow1, totalColsCount).alignment = { horizontal: 'center' };
+    ws.getCell(sigRow2, totalColsCount).alignment = { horizontal: 'center' };
+  });
+
+  return await wb.xlsx.writeBuffer();
+}
+
+/**
+ * Builds HTML document for Attendance Register PDF and Doc export
+ */
+function buildAttendanceRegisterHtml(data) {
+  const instName = data.institution_name || 'Government Polytechnic Nainital';
+  const sessionLabel = data.session_label || '2026 Session';
+  const deptName = data.department_name || 'Information Technology';
+  const deptCode = data.department_code || 'IT';
+  const subjectName = data.subject_name || 'Subject';
+  const year = data.year || 3;
+  const semester = data.semester || 5;
+  const scope = data.scope || 'THEORY';
+  const range = data.range || 'all_months';
+
+  const overviewMonths = data.overview_months || [];
+  const overviewStudents = data.overview_students || [];
+  const monthlySheets = data.monthly_sheets || [];
+
+  let pagesHtml = '';
+
+  // 1. Overview Sheet / Page (if overview_only or all_months)
+  if (range === 'overview_only' || range === 'all_months') {
+    let theadMonths = overviewMonths.map(m => `<th style="padding:4px; font-size:7.5pt; text-align:center;">${m.label}<br>(P/Held)</th>`).join('');
+    let tbodyRows = overviewStudents.map(st => {
+      let monthCells = overviewMonths.map(m => {
+        const md = st.month_breakdown?.[m.key] || { present: 0, total: 0 };
+        return `<td style="padding:4px; text-align:center; font-size:8pt;">${md.total > 0 ? `${md.present}/${md.total}` : '—'}</td>`;
+      }).join('');
+
+      return `<tr>
+        <td style="padding:4px; text-align:center;">${st.sr_no}</td>
+        <td style="padding:4px; text-align:center; font-weight:bold;">${st.roll_no}</td>
+        <td style="padding:4px; text-align:center; font-size:7.5pt; font-family:monospace;">${st.registration_no || '--'}</td>
+        <td style="padding:4px; text-align:center; font-size:7.5pt; font-family:monospace;">${st.enrollment_no || '--'}</td>
+        <td style="padding:4px; text-align:left; font-weight:600;">${st.name}</td>
+        ${monthCells}
+        <td style="padding:4px; text-align:center; font-weight:bold; color:#006600;">${st.overall_present}</td>
+        <td style="padding:4px; text-align:center; font-weight:bold; ${Number(st.overall_absent) > 0 ? 'color:#CC0000;' : ''}">${st.overall_absent}</td>
+        <td style="padding:4px; text-align:center; font-weight:bold;">${st.overall_total}</td>
+        <td style="padding:4px; text-align:center; font-weight:bold;">${st.percentage}%</td>
+      </tr>`;
+    }).join('');
+
+    const totalCols = 9 + overviewMonths.length;
+
+    pagesHtml += `
+    <div class="print-page ${monthlySheets.length > 0 ? 'page-break' : ''}">
+      <table class="inst-table">
+        <thead>
+          <tr>
+            <th colspan="${totalCols}" class="hdr-blue" style="font-size:11pt; padding:6px;">
+              ${instName} | Attendance Register Ledger ${sessionLabel}
+            </th>
+          </tr>
+          <tr>
+            <th colspan="${totalCols}" class="hdr-blue" style="font-size:10pt; padding:4px;">
+              Department (${deptCode}) | Subject : ${subjectName}
+            </th>
+          </tr>
+          <tr>
+            <th colspan="${totalCols}" class="hdr-blue" style="font-size:9pt; padding:4px;">
+              ${deptName} Year ${year} | Semester ${semester} | Scope: ${scope} | Overview Summary
+            </th>
+          </tr>
+          <tr class="hdr-tan">
+            <th style="width:28px; text-align:center;">SR.</th>
+            <th style="width:48px; text-align:center;">ROLL NO.</th>
+            <th style="width:85px; text-align:center;">REGISTRATION NO.</th>
+            <th style="width:78px; text-align:center;">ENROLLMENT NO.</th>
+            <th style="text-align:left; min-width:120px;">STUDENT NAME</th>
+            ${theadMonths}
+            <th style="width:50px; text-align:center;">PRESENT</th>
+            <th style="width:50px; text-align:center;">ABSENT</th>
+            <th style="width:50px; text-align:center;">TOTAL</th>
+            <th style="width:50px; text-align:center;">% ATT.</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tbodyRows}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="${totalCols}" style="border:none !important; padding:0; background:transparent;">
+              <table class="sig-table" style="width:100%; border:none !important; border-collapse:collapse; margin-top:32px;">
+                <tr style="border:none !important;">
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Subject Faculty</div>
+                  </td>
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Class Teacher</div>
+                  </td>
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Head of Department</div>
+                  </td>
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Principal</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+  }
+
+  // 2. Monthly Sheets / Pages
+  monthlySheets.forEach((sheet, idx) => {
+    const isLast = idx === monthlySheets.length - 1;
+    const days = sheet.days || [];
+    const students = sheet.students || [];
+
+    let theadDays = days.map(d => `<th style="padding:2px; font-size:7pt; text-align:center; min-width:16px;">${days.length <= 7 && d.day_name ? d.day_name : d.day}</th>`).join('');
+
+    let tbodyRows = students.map(st => {
+      let dayCells = days.map(d => {
+        const m = st.marks?.[d.day] || '';
+        let cellStyle = 'padding:2px; text-align:center; font-size:7.5pt;';
+        if (m === 'P') cellStyle += ' color:#006600; font-weight:bold;';
+        else if (m === 'A') cellStyle += ' color:#CC0000; font-weight:bold; background-color:#FFE6E6;';
+        else if (d.is_holiday || d.is_sunday) cellStyle += ' background-color:#F2F2F2; color:#888;';
+        return `<td style="${cellStyle}">${m}</td>`;
+      }).join('');
+
+      return `<tr>
+        <td style="padding:3px; text-align:center;">${st.sr_no}</td>
+        <td style="padding:3px; text-align:center; font-weight:bold;">${st.roll_no}</td>
+        <td style="padding:3px; text-align:center; font-size:7pt; font-family:monospace;">${st.registration_no || '--'}</td>
+        <td style="padding:3px; text-align:center; font-size:7pt; font-family:monospace;">${st.enrollment_no || '--'}</td>
+        <td style="padding:3px; text-align:left; font-weight:600; font-size:8pt;">${st.name}</td>
+        ${dayCells}
+        <td style="padding:3px; text-align:center; font-weight:bold; color:#006600;">${st.total_present}</td>
+        <td style="padding:3px; text-align:center; font-weight:bold; ${Number(st.total_absent) > 0 ? 'color:#CC0000;' : ''}">${st.total_absent}</td>
+        <td style="padding:3px; text-align:center; font-weight:bold;">${st.total_classes}</td>
+        <td style="padding:3px; text-align:center; font-weight:bold;">${st.percentage}%</td>
+      </tr>`;
+    }).join('');
+
+    const totalCols = 9 + days.length;
+
+    pagesHtml += `
+    <div class="print-page ${!isLast ? 'page-break' : ''}">
+      <table class="inst-table">
+        <thead>
+          <tr>
+            <th colspan="${totalCols}" class="hdr-blue" style="font-size:11pt; padding:6px;">
+              ${instName} | Attendance Register Ledger ${sessionLabel}
+            </th>
+          </tr>
+          <tr>
+            <th colspan="${totalCols}" class="hdr-blue" style="font-size:10pt; padding:4px;">
+              Department (${deptCode}) | Subject : ${subjectName}
+            </th>
+          </tr>
+          <tr>
+            <th colspan="${totalCols}" class="hdr-blue" style="font-size:9pt; padding:4px;">
+              ${deptName} Year ${year} | Semester ${semester} | Scope: ${scope} | ${sheet.month_label}
+            </th>
+          </tr>
+          <tr class="hdr-tan">
+            <th style="width:24px; text-align:center;">SR.</th>
+            <th style="width:40px; text-align:center;">ROLL</th>
+            <th style="width:75px; text-align:center;">REG. NO.</th>
+            <th style="width:68px; text-align:center;">ENROLL. NO.</th>
+            <th style="text-align:left; min-width:105px;">STUDENT NAME</th>
+            ${theadDays}
+            <th style="width:38px; text-align:center;">PRES</th>
+            <th style="width:38px; text-align:center;">ABS</th>
+            <th style="width:38px; text-align:center;">TOT</th>
+            <th style="width:42px; text-align:center;">% ATT.</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tbodyRows}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="${totalCols}" style="border:none !important; padding:0; background:transparent;">
+              <table class="sig-table" style="width:100%; border:none !important; border-collapse:collapse; margin-top:32px;">
+                <tr style="border:none !important;">
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Subject Faculty</div>
+                  </td>
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Class Teacher</div>
+                  </td>
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Head of Department</div>
+                  </td>
+                  <td style="width:25%; text-align:center; border:none !important; vertical-align:bottom; padding:6px;">
+                    <div style="font-size:9pt; color:#333; font-family:Calibri,sans-serif;">_______________________</div>
+                    <div style="font-size:9.5pt; font-weight:bold; margin-top:4px; font-family:Calibri,sans-serif;">Principal</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+  });
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Attendance Register Ledger — ${subjectName}</title>
+<style>
+  @page { size: A4 landscape; margin: 8mm; }
+  body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 8.5pt; color: #111; margin: 0; padding: 0; }
+  .page-break { page-break-after: always; }
+  .print-page { padding: 4px; box-sizing: border-box; }
+  table.inst-table { width: 100%; border-collapse: collapse; table-layout: auto; margin-bottom: 12px; }
+  table.inst-table th, table.inst-table td { border: 1px solid #777; box-sizing: border-box; }
+  .hdr-blue { background-color: #B4C6E7 !important; color: #000; text-align: center; font-weight: bold; }
+  .hdr-tan { background-color: #FFF2CC !important; color: #000; font-weight: bold; }
+  table.sig-table { width: 100% !important; border: none !important; border-collapse: collapse !important; }
+  table.sig-table td { border: none !important; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page-break { page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+${pagesHtml}
+</body>
+</html>`;
+}
+
+/**
+ * Generates official institutional Attendance Register PDF document
+ */
+async function generateAttendanceRegisterPdf(data) {
+  try {
+    const { chromium } = require('playwright');
+    const html = buildAttendanceRegisterHtml(data);
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        landscape: true,
+        printBackground: true,
+        margin: { top: '8mm', bottom: '8mm', left: '8mm', right: '8mm' }
+      });
+      return pdfBuffer;
+    } finally {
+      await browser.close();
+    }
+  } catch (err) {
+    const html = buildAttendanceRegisterHtml(data).replace(
+      '</body>',
+      '<script>window.addEventListener("DOMContentLoaded", function() { window.print(); });</script></body>'
+    );
+    return Buffer.from(html, 'utf8');
+  }
+}
+
+/**
+ * Generates official institutional Attendance Register Microsoft Word Document (.doc)
+ */
+async function generateAttendanceRegisterDoc(data) {
+  const html = buildAttendanceRegisterHtml(data);
+  const docHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset='utf-8'>
+<title>Attendance_Register_${(data.subject_name || 'Subject').replace(/\s+/g, '_')}</title>
+<!--[if gte mso 9]>
+<xml><w:WordDocument><w:View>Print</w:View><w:Orientation>Landscape</w:Orientation></w:WordDocument></xml>
+<![endif]-->
+<style>
+@page Section1 { size: 11.0in 8.5in; mso-page-orientation: landscape; margin: 0.4in; }
+div.Section1 { page: Section1; }
+body { font-family: Calibri, Arial, sans-serif; font-size: 8.5pt; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #777777; padding: 3px; font-size: 8pt; }
+.hdr-blue { background-color: #B4C6E7; font-weight: bold; text-align: center; }
+.hdr-tan { background-color: #FFF2CC; font-weight: bold; text-align: center; }
+table.sig-table { width: 100% !important; border: none !important; border-collapse: collapse !important; margin-top: 24px; }
+table.sig-table td { border: none !important; text-align: center; vertical-align: bottom; }
+</style>
+</head>
+<body>
+<div class="Section1">
+${html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))}
+</div>
+</body>
+</html>`;
+  return Buffer.from(docHtml, 'utf8');
+}
+
 module.exports = {
   generateClassTestExcel,
   generateClassTestPdf,
   generateClassTestDoc,
   generateInternalEvaluationExcel,
   generateUnitTestsSummaryExcel,
-  generateDepartmentReportsExcel
+  generateDepartmentReportsExcel,
+  generateAttendanceRegisterExcel,
+  generateAttendanceRegisterPdf,
+  generateAttendanceRegisterDoc
 };
+

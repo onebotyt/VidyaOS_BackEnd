@@ -43,6 +43,7 @@ const teachingGroupRoutes = require('./src/routes/teachingGroups');
 const notificationRoutes = require('./src/routes/notifications');
 const courseFileRoutes = require('./src/routes/courseFile');
 const mediaRoutes = require('./src/routes/media');
+const ocrRoutes = require('./src/routes/ocr');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -253,15 +254,18 @@ app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/course-files', courseFileRoutes);
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/search', mediaRoutes);
+app.use('/api/v1/ocr', ocrRoutes);
+
+// Ensure all unhandled /api/* requests across all HTTP verbs return JSON, never HTML
+app.all('/api/*', (req, res) => {
+  return res.status(404).json({
+    success: false,
+    error: { code: 'NOT_FOUND', message: `API endpoint '${req.path}' does not exist` }
+  });
+});
 
 // Fallback Route for SPA/Frontend
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/')) {
-    return res.status(404).json({
-      success: false,
-      error: { code: 'NOT_FOUND', message: `API endpoint '${req.path}' does not exist` }
-    });
-  }
   const frontendIndex = path.join(__dirname, '../frontend/index.html');
   if (fs.existsSync(frontendIndex)) {
     return res.sendFile(frontendIndex);

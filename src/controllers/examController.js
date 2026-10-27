@@ -24,7 +24,22 @@ class ExamController {
    */
   async createExam(req, res) {
     try {
-      const { name, subject_id, department_id, year, semester, academic_year_id, exam_date, max_marks, group_id, unit_name, unit } = req.body;
+      const { name, subject_id, department_id, year, semester, academic_year_id, exam_date, max_marks, group_id, unit_name, unit, instructions, questions } = req.body;
+      
+      let parsedQuestions = questions;
+      if (typeof parsedQuestions === 'string') {
+        try { parsedQuestions = JSON.parse(parsedQuestions); } catch (_) {}
+      }
+      if (Array.isArray(parsedQuestions) && parsedQuestions.length > 0 && max_marks) {
+        const splitMark = Math.round((Number(max_marks) / parsedQuestions.length) * 10) / 10;
+        parsedQuestions = parsedQuestions.map((q, idx) => ({
+          num: q.num || idx + 1,
+          label: q.label || `Q${idx + 1}`,
+          text: q.text || '',
+          max: (q.max !== undefined && q.max !== null && q.max !== '') ? Number(q.max) : splitMark
+        }));
+      }
+
       const examId = await examModel.create({
         teacherId: req.user.teacher_id,
         subjectId: subject_id,
@@ -36,7 +51,9 @@ class ExamController {
         name,
         examDate: exam_date,
         maxMarks: max_marks,
-        unitName: (unit_name || unit || '').trim() || null
+        unitName: (unit_name || unit || '').trim() || null,
+        instructions,
+        questions: parsedQuestions
       });
 
       await auditService.logAudit({

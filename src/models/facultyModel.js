@@ -292,6 +292,107 @@ class FacultyModel {
   }
 
   /**
+   * Manually creates a new attendance session for a register with enrolled student roster.
+   * @calledBy FacultyController.createSession() (controllers/facultyController.js)
+   * @param {Object} opts
+   * @returns {Promise<number>} New session ID
+   */
+  static async createSessionManual({ registerId, reg, periodNumber, sessionType, label, sessionDate, startTime, endTime }) {
+    const sType = (sessionType === 'PRACTICAL' || reg.session_type_scope === 'PRACTICAL') ? 'PRACTICAL' : 'THEORY';
+    const pNum = periodNumber || 1;
+    const sLabel = label || `${sType === 'PRACTICAL' ? 'Practical Lab' : 'Theory Class'} (Period ${pNum})`;
+    const sDate = sessionDate || new Date().toISOString().slice(0, 10);
+
+    let effSubjectId = reg.subject_id;
+    if (!effSubjectId) {
+      if (reg.group_id) {
+        const grpRows = await query(`SELECT subject_name, subject_code FROM teaching_groups WHERE id = ?`, [reg.group_id]);
+        if (grpRows && grpRows[0]) {
+          const sRows = await query(
+            `SELECT id FROM subjects WHERE (name = ? OR code = ?) LIMIT 1`,
+            [grpRows[0].subject_name, grpRows[0].subject_code]
+          );
+          if (sRows && sRows[0]) effSubjectId = sRows[0].id;
+        }
+      }
+      if (!effSubjectId) {
+        const anySub = await query(`SELECT id FROM subjects WHERE department_id = ? LIMIT 1`, [reg.department_id || 1]);
+        effSubjectId = (anySub && anySub[0]) ? anySub[0].id : 1;
+      }
+      try {
+        await query(`UPDATE attendance_registers SET subject_id = ? WHERE id = ?`, [effSubjectId, registerId]);
+      } catch (_) {}
+    }
+
+    const insertRes = await query(
+      `INSERT INTO attendance_sessions 
+       (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, period_number, start_time, end_time, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
+      [
+        reg.id, reg.teacher_id, effSubjectId, reg.department_id,
+        reg.year, reg.semester, reg.academic_year_id,
+        sType, sLabel, sDate, pNum, startTime || null, endTime || null
+      ]
+    );
+
+    const newSessionId = insertRes.insertId || insertRes[0]?.insertId;
+
+    if (newSessionId && (reg.group_id || reg.department_id)) {
+      let enrolled;
+      if (reg.group_id) {
+        enrolled = await query(
+          `SELECT s.id as student_id, e.id as enrollment_id, COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no
+           FROM teaching_group_members tgm JOIN students s ON tgm.student_id = s.id
+           LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+           WHERE tgm.group_id = ? AND (tgm.status = 'ACTIVE' OR tgm.status = 'ENROLLED')
+           ORDER BY COALESCE(s.class_roll_no, e.class_roll_no) ASC`,
+          [reg.group_id]
+        );
+      } else {
+        enrolled = await query(
+          `SELECT s.id as student_id, e.id as enrollment_id, COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no
+           FROM enrollments e JOIN students s ON e.student_id = s.id
+           WHERE e.department_id = ? AND e.year = ? AND e.semester = ?
+             AND e.academic_year_id = ? AND e.status = 'ENROLLED'
+           ORDER BY COALESCE(s.class_roll_no, e.class_roll_no) ASC`,
+          [reg.department_id, reg.year, reg.semester, reg.academic_year_id]
+        );
+      }
+      for (const student of (enrolled || [])) {
+        try {
+          await query(
+            `INSERT OR IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no) VALUES (?, ?, ?, ?)`,
+            [newSessionId, student.student_id, student.enrollment_id, student.class_roll_no]
+          );
+        } catch { /* skip duplicates */ }
+      }
+    }
+
+    return newSessionId;
+  }
+
+  /**
+   * Deletes an attendance session and clears all associated records.
+   * @param {Object} params
+   * @param {number} params.registerId
+   * @param {number} params.sessionId
+   */
+  static async deleteSession({ registerId, sessionId }) {
+    const sess = await query(`SELECT id, session_date, period_number FROM attendance_sessions WHERE id = ? AND register_id = ?`, [sessionId, registerId]);
+    if (!sess || !sess[0]) {
+      throw new Error('Session not found under this register');
+    }
+
+    try { await query(`DELETE FROM student_self_attendance WHERE session_id = ?`, [sessionId]); } catch (_) {}
+    try { await query(`DELETE FROM attendance_corrections WHERE session_id = ?`, [sessionId]); } catch (_) {}
+    try { await query(`DELETE FROM attendance_session_students WHERE session_id = ?`, [sessionId]); } catch (_) {}
+    try { await query(`DELETE FROM register_attendance WHERE session_id = ?`, [sessionId]); } catch (_) {}
+    await query(`DELETE FROM attendance_sessions WHERE id = ?`, [sessionId]);
+
+    return true;
+  }
+
+  /**
    * Retrieves all sessions with roster headcounts for a register.
    * @calledBy FacultyController.getRegisterDetail() (controllers/facultyController.js)
    * @param {number} registerId - Register primary key
@@ -544,56 +645,6 @@ class FacultyModel {
     return res.insertId ?? res.lastInsertRowid;
   }
 
-  /**
-   * Manually schedules an attendance session in DRAFT state.
-   * @calledBy FacultyController.createSession() (controllers/facultyController.js)
-   * @param {Object} params - Session parameters
-   * @returns {Promise<number>} New session ID
-   */
-  static async createSessionManual({ registerId, reg, periodNumber, sessionType, label, sessionDate, startTime, endTime }) {
-    const defaultLabel = label || `Class ${periodNumber || 1}`;
-    const ins = await query(
-      `INSERT INTO attendance_sessions
-       (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id,
-        session_type, label, session_date, period_number, start_time, end_time, state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
-      [registerId, reg.teacher_id, reg.subject_id, reg.department_id, reg.year, reg.semester, reg.academic_year_id,
-       sessionType || reg.session_type_scope || 'THEORY',
-       defaultLabel, sessionDate, periodNumber || 1, startTime || null, endTime || null]
-    );
-    const newSessionId = ins.insertId ?? ins.lastInsertRowid;
-
-    if (reg.group_id || reg.department_id) {
-      let enrolled;
-      if (reg.group_id) {
-        enrolled = await query(
-          `SELECT s.id as student_id, e.id as enrollment_id, COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no
-           FROM teaching_group_members tgm JOIN students s ON tgm.student_id = s.id
-           LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
-           WHERE tgm.group_id = ? AND (tgm.status = 'ACTIVE' OR tgm.status = 'ENROLLED')
-           ORDER BY COALESCE(s.class_roll_no, e.class_roll_no) ASC`,
-          [reg.group_id]
-        );
-      } else {
-        enrolled = await query(
-          `SELECT s.id as student_id, e.id as enrollment_id, COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no
-           FROM enrollments e JOIN students s ON e.student_id = s.id
-           WHERE e.department_id = ? AND e.year = ? AND e.semester = ? AND e.academic_year_id = ? AND e.status = 'ENROLLED'
-           ORDER BY COALESCE(s.class_roll_no, e.class_roll_no) ASC`,
-          [reg.department_id, reg.year, reg.semester, reg.academic_year_id]
-        );
-      }
-      for (const st of enrolled) {
-        try {
-          await query(
-            `INSERT OR IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no) VALUES (?, ?, ?, ?)`,
-            [newSessionId, st.student_id, st.enrollment_id, st.class_roll_no]
-          );
-        } catch (_) {}
-      }
-    }
-    return newSessionId;
-  }
 
   /**
    * Retrieves active academic cohorts assigned to teacher.
@@ -826,6 +877,9 @@ class FacultyModel {
    * @returns {Promise<Object>} Formatted evaluation sheet payload
    */
   static async getInternalEvaluationData(registerId, register) {
+    if (!register) {
+      register = (await this.getRegisterById(registerId)) || {};
+    }
     const setRows = await query(`SELECT setting_value FROM system_settings WHERE setting_key = 'institution_name'`);
     const institutionName = setRows[0]?.setting_value || 'Government Polytechnic Nainital';
 
@@ -1122,6 +1176,354 @@ class FacultyModel {
        WHERE t.department_id IS NULL
        ORDER BY t.full_name ASC`
     );
+  }
+
+  /**
+   * Retrieves structured attendance register data formatted for institutional export (Excel, PDF, Word).
+   * Supports: overview_only, all_months, month, week, day scopes.
+   * @param {number} registerId
+   * @param {Object} options - { range, month, day, scope }
+   * @returns {Promise<Object>} Formatted export payload
+   */
+  static async getRegisterAttendanceExportData(registerId, options = {}) {
+    const register = (await this.getRegisterById(registerId)) || {};
+    const range = options.range || 'all_months';
+    const scope = options.scope || 'BOTH';
+
+    // Institution & Session
+    const instRow = (await query(`SELECT setting_value FROM system_settings WHERE setting_key = 'institution_name'`))[0];
+    const institutionName = instRow?.setting_value || 'Uttarakhand Government Institute of Polytechnic, Nainital';
+    
+    const ayRow = (await query(`SELECT label FROM academic_years WHERE is_current = 1 LIMIT 1`))[0];
+    const sessionLabel = ayRow?.label || register.academic_year_label || '2026 Session';
+
+    // Department details
+    const deptName = register.department_name || register.branch_name || 'Information Technology';
+    const deptCode = register.department_code || (deptName.includes(' ') ? deptName.split(' ').map(w => w[0]).join('').toUpperCase() : deptName);
+    const subjectName = register.subject_name || 'Subject';
+    const year = register.year || 3;
+    const semester = register.semester || 5;
+
+    // Students enrolled
+    const rawStudents = await this.getRegisterStudents(register);
+    const students = rawStudents.map((st, idx) => ({
+      sr_no: idx + 1,
+      student_id: st.student_id,
+      roll_no: st.class_roll_no || '--',
+      enrollment_no: st.official_enrollment_no || '--',
+      registration_no: st.registration_no || '--',
+      name: st.full_name || '--'
+    }));
+
+    // All finalized attendance records
+    let sessFilter = `WHERE s.register_id = ? AND s.state = 'FINALIZED'`;
+    const filterParams = [registerId];
+    if (scope === 'THEORY' || scope === 'PRACTICAL') {
+      sessFilter += ` AND (s.session_type = ? OR s.session_type IS NULL OR s.session_type = 'CUSTOM')`;
+      filterParams.push(scope);
+    }
+
+    const attendanceRows = await query(
+      `SELECT ra.student_id, ra.attendance_status, s.id as session_id, s.session_date, s.period_number, s.label, s.session_type
+       FROM register_attendance ra
+       JOIN attendance_sessions s ON s.id = ra.session_id
+       ${sessFilter}
+       ORDER BY s.session_date ASC, s.period_number ASC`,
+      filterParams
+    );
+
+    // Map: student_id -> session_date -> list of statuses (or latest)
+    // Also student_id -> month -> { present, absent, total }
+    const studentMonthMap = new Map();
+    const studentDayMap = new Map();
+
+    students.forEach(st => {
+      studentMonthMap.set(st.student_id, new Map());
+      studentDayMap.set(st.student_id, new Map());
+    });
+
+    const recordedMonthsSet = new Set();
+    const recordedDatesSet = new Set();
+
+    attendanceRows.forEach(row => {
+      const sId = row.student_id;
+      const sDate = row.session_date; // YYYY-MM-DD
+      const sMonth = sDate.slice(0, 7); // YYYY-MM
+
+      recordedMonthsSet.add(sMonth);
+      recordedDatesSet.add(sDate);
+
+      if (studentDayMap.has(sId)) {
+        const existing = studentDayMap.get(sId).get(sDate);
+        if (row.attendance_status === 'PRESENT') {
+          studentDayMap.get(sId).set(sDate, 'P');
+        } else if (row.attendance_status === 'ABSENT' && existing !== 'P') {
+          studentDayMap.get(sId).set(sDate, 'A');
+        }
+      }
+
+      if (studentMonthMap.has(sId)) {
+        const mObj = studentMonthMap.get(sId).get(sMonth) || { present: 0, absent: 0, total: 0 };
+        if (row.attendance_status === 'PRESENT') {
+          mObj.present++;
+          mObj.total++;
+        } else if (row.attendance_status === 'ABSENT') {
+          mObj.absent++;
+          mObj.total++;
+        }
+        studentMonthMap.get(sId).set(sMonth, mObj);
+      }
+    });
+
+    let monthsList = Array.from(recordedMonthsSet).sort();
+    if (monthsList.length === 0) {
+      monthsList = [new Date().toISOString().slice(0, 7)];
+    }
+
+    // Standard Holidays map
+    const STANDARD_HOLIDAYS_MAP = {
+      '01-26': 'REPUBLIC DAY',
+      '08-15': 'INDEPENDENCE DAY',
+      '08-19': 'RAKSHA BANDHAN',
+      '08-26': 'ID-E-MILAD',
+      '10-02': 'MAHATMA GANDHI JAYANTI',
+      '10-24': 'DUSSEHRA',
+      '11-01': 'DIWALI VACATION',
+      '11-02': 'GOVARDHAN PUJA',
+      '11-15': 'GURU NANAK JAYANTI',
+      '12-25': 'CHRISTMAS DAY'
+    };
+
+    // Build overview summary sheet data
+    const overviewMonths = monthsList.map(m => {
+      const [yr, mo] = m.split('-').map(Number);
+      const dt = new Date(yr, mo - 1, 1);
+      return {
+        key: m,
+        label: dt.toLocaleString('default', { month: 'short', year: 'numeric' })
+      };
+    });
+
+    const overviewStudents = students.map(st => {
+      const sId = st.student_id;
+      let overallPresent = 0;
+      let overallAbsent = 0;
+      let overallTotal = 0;
+
+      const monthBreakdown = {};
+      overviewMonths.forEach(om => {
+        const mData = studentMonthMap.get(sId)?.get(om.key) || { present: 0, absent: 0, total: 0 };
+        monthBreakdown[om.key] = mData;
+        overallPresent += mData.present;
+        overallAbsent += mData.absent;
+        overallTotal += mData.total;
+      });
+
+      const pct = overallTotal > 0 ? ((overallPresent / overallTotal) * 100).toFixed(1) : '0.0';
+
+      return {
+        sr_no: st.sr_no,
+        roll_no: st.roll_no,
+        enrollment_no: st.enrollment_no,
+        registration_no: st.registration_no,
+        name: st.name,
+        month_breakdown: monthBreakdown,
+        overall_present: overallPresent,
+        overall_absent: overallAbsent,
+        overall_total: overallTotal,
+        percentage: pct
+      };
+    });
+
+    // Helper to generate monthly matrix detail
+    const buildMonthlyMatrix = (mStr) => {
+      const [yr, mo] = mStr.split('-').map(Number);
+      const daysCount = new Date(yr, mo, 0).getDate();
+      const dtMonth = new Date(yr, mo - 1, 1);
+      const monthLabel = dtMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+      const days = [];
+      for (let d = 1; d <= daysCount; d++) {
+        const dStr = String(d).padStart(2, '0');
+        const dt = new Date(yr, mo - 1, d);
+        const dayOfWeek = dt.getDay();
+        const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek];
+        const isSun = dayOfWeek === 0;
+        const is2ndSat = dayOfWeek === 6 && d >= 8 && d <= 14;
+        const mmdd = `${String(mo).padStart(2, '0')}-${dStr}`;
+        const holiday = STANDARD_HOLIDAYS_MAP[mmdd] || (isSun ? 'SUNDAY' : (is2ndSat ? 'SECOND SATURDAY' : null));
+
+        days.push({
+          day: d,
+          date: `${mStr}-${dStr}`,
+          day_name: dayName,
+          is_sunday: isSun,
+          is_holiday: Boolean(holiday),
+          holiday_label: holiday
+        });
+      }
+
+      const roster = students.map(st => {
+        const sId = st.student_id;
+        const marks = {};
+        let mPres = 0;
+        let mAbs = 0;
+
+        days.forEach(d => {
+          const status = studentDayMap.get(sId)?.get(d.date) || (d.is_holiday ? '—' : '');
+          marks[d.day] = status;
+          if (status === 'P') mPres++;
+          else if (status === 'A') mAbs++;
+        });
+
+        const mTot = mPres + mAbs;
+        const mPct = mTot > 0 ? ((mPres / mTot) * 100).toFixed(1) : '0.0';
+
+        return {
+          sr_no: st.sr_no,
+          roll_no: st.roll_no,
+          enrollment_no: st.enrollment_no,
+          registration_no: st.registration_no,
+          name: st.name,
+          marks,
+          total_present: mPres,
+          total_absent: mAbs,
+          total_classes: mTot,
+          percentage: mPct
+        };
+      });
+
+      return {
+        month_key: mStr,
+        month_label: monthLabel,
+        days_in_month: daysCount,
+        days,
+        students: roster
+      };
+    };
+
+    // Build payload according to range
+    const exportPayload = {
+      institution_name: institutionName,
+      session_label: sessionLabel,
+      department_name: deptName,
+      department_code: deptCode,
+      subject_name: subjectName,
+      year,
+      semester,
+      scope,
+      range,
+      overview_months: overviewMonths,
+      overview_students: overviewStudents,
+      monthly_sheets: []
+    };
+
+    if (range === 'overview_only') {
+      // Only the overview sheet
+      exportPayload.monthly_sheets = [];
+    } else if (range === 'all_months') {
+      // Complete semester: Overview + all recorded months
+      exportPayload.monthly_sheets = monthsList.map(m => buildMonthlyMatrix(m));
+    } else if (range === 'month') {
+      // Selected month only
+      const targetM = options.month || monthsList[0];
+      exportPayload.monthly_sheets = [buildMonthlyMatrix(targetM)];
+    } else if (range === 'week') {
+      // Selected week: compute Monday-Saturday around target day
+      const targetDay = options.day || new Date().toISOString().slice(0, 10);
+      const tDate = new Date(targetDay);
+      const dayOfWeek = tDate.getDay(); // 0 is Sunday
+      const diffToMon = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const monDate = new Date(tDate);
+      monDate.setDate(tDate.getDate() + diffToMon);
+
+      const weekDays = [];
+      for (let i = 0; i < 6; i++) { // Mon to Sat
+        const d = new Date(monDate);
+        d.setDate(monDate.getDate() + i);
+        const yStr = d.getFullYear();
+        const mStr = String(d.getMonth() + 1).padStart(2, '0');
+        const dtStr = String(d.getDate()).padStart(2, '0');
+        const dateKey = `${yStr}-${mStr}-${dtStr}`;
+        const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+        weekDays.push({
+          day: i + 1,
+          date: dateKey,
+          day_name: `${dayName} (${dtStr}/${mStr})`,
+          is_holiday: false
+        });
+      }
+
+      const weekRoster = students.map(st => {
+        const sId = st.student_id;
+        const marks = {};
+        let wPres = 0;
+        let wAbs = 0;
+        weekDays.forEach((wd, idx) => {
+          const status = studentDayMap.get(sId)?.get(wd.date) || '';
+          marks[idx + 1] = status;
+          if (status === 'P') wPres++;
+          else if (status === 'A') wAbs++;
+        });
+        const wTot = wPres + wAbs;
+        return {
+          sr_no: st.sr_no,
+          roll_no: st.roll_no,
+          enrollment_no: st.enrollment_no,
+          registration_no: st.registration_no,
+          name: st.name,
+          marks,
+          total_present: wPres,
+          total_absent: wAbs,
+          total_classes: wTot,
+          percentage: wTot > 0 ? ((wPres / wTot) * 100).toFixed(1) : '0.0'
+        };
+      });
+
+      exportPayload.monthly_sheets = [{
+        month_key: 'Week',
+        month_label: `Week of ${weekDays[0].date} to ${weekDays[5].date}`,
+        days_in_month: 6,
+        days: weekDays,
+        students: weekRoster
+      }];
+    } else if (range === 'day') {
+      const targetDate = options.day || new Date().toISOString().slice(0, 10);
+      const dt = new Date(targetDate);
+      const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()];
+      const singleDay = [{
+        day: 1,
+        date: targetDate,
+        day_name: `${dayName} (${targetDate})`,
+        is_holiday: false
+      }];
+
+      const dayRoster = students.map(st => {
+        const status = studentDayMap.get(st.student_id)?.get(targetDate) || '—';
+        return {
+          sr_no: st.sr_no,
+          roll_no: st.roll_no,
+          enrollment_no: st.enrollment_no,
+          registration_no: st.registration_no,
+          name: st.name,
+          marks: { 1: status },
+          total_present: status === 'P' ? 1 : 0,
+          total_absent: status === 'A' ? 1 : 0,
+          total_classes: (status === 'P' || status === 'A') ? 1 : 0,
+          percentage: status === 'P' ? '100.0' : (status === 'A' ? '0.0' : '—')
+        };
+      });
+
+      exportPayload.monthly_sheets = [{
+        month_key: 'Day',
+        month_label: `Daily Attendance — ${targetDate}`,
+        days_in_month: 1,
+        days: singleDay,
+        students: dayRoster
+      }];
+    }
+
+    return exportPayload;
   }
 }
 
