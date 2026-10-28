@@ -132,6 +132,12 @@ if (fs.existsSync(sharedDir)) {
   app.use('/css', express.static(path.join(sharedDir, 'css'), staticOptions));
 }
 
+// Serve Components Library (/components)
+const componentsDir = path.join(frontendBase, 'components');
+if (fs.existsSync(componentsDir)) {
+  app.use('/components', express.static(componentsDir, staticOptions));
+}
+
 // Serve ExcelJS standalone browser bundle for client-side genuine .xlsx generation
 app.get(['/js/exceljs.min.js', '/shared/js/exceljs.min.js'], (req, res, next) => {
   const p1 = path.join(frontendBase, 'shared/js/exceljs.min.js');
@@ -367,6 +373,25 @@ async function startServer() {
     }
     logger.info(`REST API Base URL: http://localhost:${PORT}/api/v1`);
   });
+
+  // Cloud Keep-Alive Self-Ping (Prevents Render.com free-tier 15min idle shutdown during activity)
+  if (process.env.RENDER || process.env.NODE_ENV === 'production' || process.env.ENABLE_KEEPALIVE === 'true') {
+    const KEEPALIVE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    const httpsMod = require('https');
+    setInterval(() => {
+      try {
+        const pingUrl = process.env.RENDER_EXTERNAL_URL
+          ? `${process.env.RENDER_EXTERNAL_URL}/api/v1/health`
+          : 'https://vidyaos-backend.onrender.com/api/v1/health';
+        httpsMod.get(pingUrl, (res) => {
+          logger.info(`[KEEPALIVE] Autonomous health self-ping status: ${res.statusCode}`);
+        }).on('error', (e) => {
+          logger.debug(`[KEEPALIVE] Self-ping notice: ${e.message}`);
+        });
+      } catch (_) {}
+    }, KEEPALIVE_INTERVAL);
+    logger.info('[KEEPALIVE] Autonomous self-ping keep-alive initialized (10m interval)');
+  }
 
   // Graceful shutdown handling for Docker / Kubernetes / systemd / PM2 / Render
   const gracefulShutdown = (signal) => {

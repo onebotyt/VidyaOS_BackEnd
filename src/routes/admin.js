@@ -305,7 +305,7 @@ router.put('/profile', [
 // @desc    List pending HOD self-registration requests awaiting administrative adjudication
 // @access  Protected (SYSTEM_ADMIN)
 // @handler AdminController.getPendingHods() -> AdminModel.getPendingHODRegistrations()
-router.get('/registrations/pending-hods', AdminController.getPendingHods);
+router.get(['/registrations/pending-hods', '/hods/pending'], AdminController.getPendingHods);
 
 // @route   POST /api/v1/admin/registrations/hods/:id/approve
 // @desc    Approve a pending HOD registration, creating user account and departmental HOD assignment

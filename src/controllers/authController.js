@@ -447,7 +447,7 @@ class AuthController {
    * @usesService authService.refreshTokens() (services/authService.js)
    */
   static async refreshToken(req, res) {
-    const refreshToken = req.cookies?.refreshToken || req.body.refresh_token || req.headers['x-refresh-token'];
+    const refreshToken = req.cookies?.refreshToken || req.body?.refresh_token || req.body?.refreshToken || req.headers['x-refresh-token'];
     if (!refreshToken) {
       return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Refresh token missing' } });
     }

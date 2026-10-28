@@ -46,7 +46,7 @@ async function auth(req, res, next) {
       if (sessionRows && sessionRows.length > 0) {
         const sess = sessionRows[0];
         const lastActiveTime = sess.last_active_at ? new Date(sess.last_active_at.includes('Z') ? sess.last_active_at : sess.last_active_at.replace(' ', 'T') + 'Z').getTime() : Date.now();
-        const isIdleExpired = (Date.now() - lastActiveTime) > (30 * 60 * 1000);
+        const isIdleExpired = (Date.now() - lastActiveTime) > (24 * 60 * 60 * 1000);
 
         if (sess.is_revoked === 1 || isIdleExpired) {
           if (isIdleExpired && sess.is_revoked === 0) {
@@ -57,7 +57,7 @@ async function auth(req, res, next) {
             error: {
               code: 'SESSION_REVOKED',
               message: isIdleExpired
-                ? 'Your session has expired due to 30 minutes of inactivity. Please sign in again.'
+                ? 'Your session has expired due to 24 hours of inactivity. Please sign in again.'
                 : 'Your session has ended because this account was logged in from another device or signed out.'
             }
           });

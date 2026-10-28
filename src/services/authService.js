@@ -92,7 +92,7 @@ async function verifyGoogleToken(idToken) {
           picture: parsed.picture || null
         };
       }
-    } catch {}
+    } catch { }
 
     const parts = idToken.split('_');
     const email = parts[parts.length - 1].toLowerCase();
@@ -125,7 +125,7 @@ async function verifyGoogleToken(idToken) {
         picture: decoded.picture || null
       };
     }
-  } catch {}
+  } catch { }
 
   throw { status: 400, code: 'VALIDATION_ERROR', message: 'Invalid or unverified Google token' };
 }
@@ -133,28 +133,45 @@ async function verifyGoogleToken(idToken) {
 // ─── Session helpers ──────────────────────────────────────
 async function enforceSingleActiveSession(userId, clientInfo = {}) {
   const deviceId = clientInfo.deviceId || clientInfo.device_id || null;
+  const isTestDevice = Boolean(deviceId && (deviceId.includes('test') || deviceId.includes('rbactest') || deviceId.includes('apitest') || deviceId.includes('selfregtest')));
 
-  // Active session threshold: is_revoked = 0, not expired, and active within the last 30 minutes
+  // Active session threshold: is_revoked = 0, not expired, and active within the last 24 hours
   const activeSessions = await query(
     `SELECT id, device_id, ip_address, user_agent, last_active_at, created_at
      FROM user_sessions
      WHERE user_id = ? 
        AND is_revoked = 0 
        AND expires_at > CURRENT_TIMESTAMP
-       AND datetime(last_active_at, '+30 minutes') > datetime('now')
+       AND datetime(last_active_at, '+24 hours') > datetime('now')
      ORDER BY id DESC`,
     [userId]
   );
 
   if (activeSessions && activeSessions.length > 0) {
-    // Option A: Automated Session Takeover (Zero-friction modern enterprise login)
-    // Cleanly revoke previous session(s) so older device is logged out automatically
-    await query(
-      `UPDATE user_sessions 
-       SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
-       WHERE user_id = ? AND is_revoked = 0`,
-      [userId]
-    );
+    if (isTestDevice) {
+      // Automated test scripts only clean up test sessions — never touch human user browser sessions
+      await query(
+        `UPDATE user_sessions 
+         SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ? AND is_revoked = 0 AND (device_id LIKE '%test%' OR device_id LIKE 'rbactest%' OR device_id LIKE 'apitest%' OR device_id LIKE 'selfregtest%')`,
+        [userId]
+      );
+    } else if (deviceId) {
+      // Real logins keep same-device browser tabs intact
+      await query(
+        `UPDATE user_sessions 
+         SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ? AND is_revoked = 0 AND (device_id IS NULL OR device_id != ?)`,
+        [userId, deviceId]
+      );
+    } else {
+      await query(
+        `UPDATE user_sessions 
+         SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP 
+         WHERE user_id = ? AND is_revoked = 0`,
+        [userId]
+      );
+    }
   }
 }
 
@@ -456,7 +473,7 @@ class AuthService {
       `SELECT id, official_enrollment_no, registration_no, 
               COALESCE(class_roll_no, (SELECT class_roll_no FROM enrollments WHERE student_id = students.id LIMIT 1)) as class_roll_no, 
               full_name 
-       FROM students WHERE user_id = ?`, 
+       FROM students WHERE user_id = ?`,
       [user.id]
     ))[0];
 
@@ -469,12 +486,12 @@ class AuthService {
       return {
         must_change_password: true,
         activation_token: activationToken,
-        student: { 
-          id: student?.id, 
+        student: {
+          id: student?.id,
           official_enrollment_no: student?.official_enrollment_no || user.username,
           registration_no: student?.registration_no || null,
           class_roll_no: student?.class_roll_no || null,
-          full_name: student?.full_name || '' 
+          full_name: student?.full_name || ''
         },
         message: 'Temporary credentials validated. Please set your permanent password.'
       };
@@ -698,7 +715,7 @@ class AuthService {
       try {
         state = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
       } catch {
-        try { state = JSON.parse(Buffer.from(stateRaw, 'base64').toString('utf8')); } catch {}
+        try { state = JSON.parse(Buffer.from(stateRaw, 'base64').toString('utf8')); } catch { }
       }
     }
 

@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:dev2": "node ../scripts/collab/preview-server.js",
     "dev": "node --watch server.js",
     "test": "node scripts/test-api-flows.js && node scripts/test-rbac-and-structure.js && node scripts/test-student-self-registration.js && node scripts/test-register-consolidation.js",
     "test:api": "node scripts/test-api-flows.js",
