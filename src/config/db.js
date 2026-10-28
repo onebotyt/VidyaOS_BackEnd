@@ -195,6 +195,14 @@ function getSqliteDb() {
       try { sqliteDb.exec('ALTER TABLE teaching_groups ADD COLUMN total_units INTEGER DEFAULT 5;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE teaching_groups ADD COLUMN syllabus_units TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE attendance_sessions ADD COLUMN period_number INTEGER DEFAULT 1;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN address TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN aadhar_number TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN father_name TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN mother_name TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN dob TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN gender TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN category TEXT;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE students ADD COLUMN profile_completed INTEGER DEFAULT 0;'); } catch (_) {}
 
       // Synchronize action <-> event_type, user_id <-> actor_id, entity_type <-> target_type
       sqliteDb.exec(`

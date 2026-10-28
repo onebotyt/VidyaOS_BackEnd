@@ -39,6 +39,14 @@ router.put(
     body('email').optional().isEmail().withMessage('Valid email required'),
     body('current_password').optional().trim(),
     body('new_password').optional().isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('address').optional().trim(),
+    body('aadhar_number').optional().trim(),
+    body('father_name').optional().trim(),
+    body('mother_name').optional().trim(),
+    body('dob').optional().trim(),
+    body('gender').optional().trim(),
+    body('category').optional().trim(),
+    body('phone').optional().trim(),
     validate
   ],
   StudentController.updateProfile

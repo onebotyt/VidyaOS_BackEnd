@@ -58,7 +58,20 @@ class StudentController {
    * @usesModel StudentModel.updateUserPassword() (models/studentModel.js)
    */
   static async updateProfile(req, res) {
-    const { email, current_password, new_password } = req.body;
+    const {
+      email,
+      current_password,
+      new_password,
+      address,
+      aadhar_number,
+      father_name,
+      mother_name,
+      dob,
+      gender,
+      category,
+      phone
+    } = req.body;
+
     try {
       if (email !== undefined) {
         await StudentModel.updateUserEmail(req.user.id, email);
@@ -75,6 +88,36 @@ class StudentController {
         }
         const newHash = await bcrypt.hash(new_password, 12);
         await StudentModel.updateUserPassword(req.user.id, newHash);
+      }
+
+      // Demographic & KYC updates
+      const studentId = req.user.student_id || (await StudentModel.getStudentIdByUserId(req.user.id));
+      if (studentId) {
+        const details = {};
+        if (address !== undefined) details.address = (address || '').trim();
+        if (aadhar_number !== undefined) details.aadhar_number = (aadhar_number || '').trim();
+        if (father_name !== undefined) details.father_name = (father_name || '').trim();
+        if (mother_name !== undefined) details.mother_name = (mother_name || '').trim();
+        if (dob !== undefined) details.dob = (dob || '').trim();
+        if (gender !== undefined) details.gender = (gender || '').trim();
+        if (category !== undefined) details.category = (category || '').trim();
+        if (phone !== undefined) details.phone = (phone || '').trim();
+
+        if (Object.keys(details).length > 0) {
+          const existing = await StudentModel.getProfile(studentId);
+          const merged = { ...existing, ...details };
+          const isComplete = Boolean(
+            merged.address &&
+            merged.aadhar_number &&
+            merged.father_name &&
+            merged.mother_name &&
+            merged.dob &&
+            merged.gender &&
+            merged.category
+          );
+          details.profile_completed = isComplete ? 1 : 0;
+          await StudentModel.updateStudentDetails(studentId, details);
+        }
       }
 
       res.json({ success: true, message: 'Profile updated successfully' });

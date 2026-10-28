@@ -244,7 +244,12 @@ async function buildUserPayload(user) {
   }
 
   if (user.roles.includes('STUDENT')) {
-    const students = await query(`SELECT id as student_id, official_enrollment_no, full_name FROM students WHERE user_id = ?`, [user.id]);
+    const students = await query(`
+      SELECT id as student_id, official_enrollment_no, full_name,
+             address, aadhar_number, father_name, mother_name, dob, gender, category,
+             COALESCE(profile_completed, 0) as profile_completed
+      FROM students WHERE user_id = ?
+    `, [user.id]);
     if (students.length) {
       extra.student = students[0];
       extra.full_name = students[0].full_name;
@@ -472,7 +477,9 @@ class AuthService {
     const student = (await query(
       `SELECT id, official_enrollment_no, registration_no, 
               COALESCE(class_roll_no, (SELECT class_roll_no FROM enrollments WHERE student_id = students.id LIMIT 1)) as class_roll_no, 
-              full_name 
+              full_name,
+              address, aadhar_number, father_name, mother_name, dob, gender, category,
+              COALESCE(profile_completed, 0) as profile_completed
        FROM students WHERE user_id = ?`,
       [user.id]
     ))[0];
@@ -526,7 +533,15 @@ class AuthService {
         full_name: student?.full_name || '',
         status: user.status,
         roles: user.roles,
-        student_id: student?.id
+        student_id: student?.id,
+        profile_completed: student?.profile_completed || 0,
+        address: student?.address || null,
+        aadhar_number: student?.aadhar_number || null,
+        father_name: student?.father_name || null,
+        mother_name: student?.mother_name || null,
+        dob: student?.dob || null,
+        gender: student?.gender || null,
+        category: student?.category || null
       }
     };
   }
