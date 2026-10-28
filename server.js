@@ -218,12 +218,13 @@ if (!fs.existsSync(uploadsDir)) {
 }
 app.use('/uploads', express.static(uploadsDir, staticOptions));
 
-// Health Check
-app.get('/api/v1/health', (req, res) => {
+// Health Check & Cloud Wake-Up Ping
+app.get(['/health', '/ping', '/api/v1/health', '/api/v1/ping'], (req, res) => {
   res.status(200).json({
     success: true,
     data: {
       status: 'ONLINE',
+      uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       service: 'VidyaOS Institutional REST API'
     }
