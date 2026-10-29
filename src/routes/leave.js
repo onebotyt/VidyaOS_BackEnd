@@ -37,17 +37,17 @@ router.get('/my', requireRole('STUDENT'), (req, res) => leaveController.getMyLea
 
 // @route   GET /api/v1/leave
 // @desc    List leave applications for review by teacher / HOD
-// @access  Protected (TEACHER, SYSTEM_ADMIN)
+// @access  Protected (TEACHER, HOD, SYSTEM_ADMIN)
 // @handler LeaveController.getLeaveRequests -> LeaveModel.getForTeacher()
-router.get('/', requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => leaveController.getLeaveRequests(req, res));
+router.get('/', requireRole('TEACHER', 'HOD', 'SYSTEM_ADMIN'), (req, res) => leaveController.getLeaveRequests(req, res));
 
 // @route   PUT /api/v1/leave/:id/decision
 // @desc    Adjudicate (approve/reject) student leave application
-// @access  Protected (TEACHER, SYSTEM_ADMIN)
+// @access  Protected (TEACHER, HOD, SYSTEM_ADMIN)
 // @handler LeaveController.decideLeave -> LeaveModel.updateDecision()
 router.put(
   '/:id/decision',
-  requireRole('TEACHER', 'SYSTEM_ADMIN'),
+  requireRole('TEACHER', 'HOD', 'SYSTEM_ADMIN'),
   [body('decision').isIn(['APPROVED', 'REJECTED']).withMessage("decision must be 'APPROVED' or 'REJECTED'"), validate],
   (req, res) => leaveController.decideLeave(req, res)
 );

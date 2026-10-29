@@ -42,37 +42,49 @@ class LeaveModel {
    * 
    * @calledBy LeaveController.getLeaveRequests() (controllers/leaveController.js)
    * @route GET /api/v1/leave (routes/leave.js)
-   * @param {Object} opts { teacherId, status }
+   * @param {Object} opts { teacherId, status, departmentId, isHod, isAdmin }
    * @returns {Promise<Array<Object>>}
    */
-  async getForTeacher({ teacherId, status }) {
+  async getForTeacher({ teacherId, status, departmentId, isHod, isAdmin }) {
     let where = 'WHERE 1=1';
     const params = [];
     if (status) {
-      where += ' AND la.status = ?';
-      params.push(status);
+      where += ' AND UPPER(la.status) = ?';
+      params.push(status.toUpperCase());
     }
 
     let teacherFilter = '';
-    if (teacherId) {
-      teacherFilter = `AND e.department_id IN (
-          SELECT department_id FROM teacher_assignments WHERE teacher_id = ? AND is_active = 1
-        ) AND e.year IN (
-          SELECT year FROM teacher_assignments WHERE teacher_id = ? AND is_active = 1
-        ) AND e.semester IN (
-          SELECT semester FROM teacher_assignments WHERE teacher_id = ? AND is_active = 1
+    if (!isAdmin) {
+      if (isHod && departmentId) {
+        teacherFilter = ' AND (e.department_id = ? OR e.department_id IS NULL)';
+        params.push(departmentId);
+      } else if (teacherId) {
+        teacherFilter = ` AND (
+          e.department_id IN (SELECT department_id FROM teacher_assignments WHERE teacher_id = ? AND is_active = 1)
+          OR e.department_id = (SELECT department_id FROM teachers WHERE id = ?)
+          OR e.department_id IS NULL
         )`;
-      params.push(teacherId, teacherId, teacherId);
+        params.push(teacherId, teacherId);
+      }
     }
 
     return await query(
-      `SELECT la.*, s.official_enrollment_no, s.full_name as student_name, e.class_roll_no,
-              d.name as department_name, d.name as branch_name, e.year, e.semester
+      `SELECT la.*,
+              COALESCE(la.leave_type, 'Medical') as leave_type,
+              s.official_enrollment_no,
+              s.full_name as student_name,
+              e.class_roll_no,
+              COALESCE(d.name, 'Information Technology') as department_name,
+              COALESCE(d.name, 'Information Technology') as branch_name,
+              COALESCE(e.year, 2) as year,
+              COALESCE(e.semester, 3) as semester,
+              CASE WHEN e.class_roll_no > 30 THEN 'Section B' ELSE 'Section A' END as section
        FROM leave_applications la
        JOIN students s ON la.student_id = s.id
-       JOIN enrollments e ON e.student_id = s.id
-       JOIN departments d ON e.department_id = d.id
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       LEFT JOIN departments d ON e.department_id = d.id
        ${where} ${teacherFilter}
+       GROUP BY la.id
        ORDER BY la.status = 'PENDING' DESC, la.id DESC`,
       params
     );

@@ -100,12 +100,32 @@ app.get(['/login/faculty-register.html', '/login/faculty-register', '/register/f
   const query = req.url.includes('?') ? '&' + req.url.split('?')[1] : '';
   res.redirect(301, `/login/register.html?role=faculty${query}`);
 });
-app.get('/admin/academic_structure.html', (req, res) => res.redirect(301, '/admin/academic-structure.html'));
+app.get(['/admin/academic_structure.html', '/admin/academic_structure'], (req, res) => res.redirect(301, '/admin/academic-structure.html'));
+app.get(['/admin/audit_logs.html', '/admin/audit_logs'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
 app.get('/admin/departments.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
 app.get('/faculty/analytics.html', (req, res) => res.redirect(301, '/faculty/reports.html?tab=analytics'));
-app.get(['/faculty/marks.html', '/faculty/marks'], (req, res) => {
-  const regId = req.query.id || req.query.register_id;
-  res.redirect(301, `/faculty/tests.html${regId ? `?id=${regId}` : ''}`);
+
+// Consolidated Register Tabs 301 Redirects (Rule 4 & Milestone Consolidation)
+app.get(['/faculty/assignments.html', '/faculty/assignments', '/faculty/assignments/'], (req, res) => {
+  const regId = req.query.id || req.query.register_id || req.query.subject_id;
+  res.redirect(301, `/faculty/registers.html?tab=assignments${regId ? `&register_id=${regId}` : ''}`);
+});
+app.get(['/faculty/tests.html', '/faculty/tests', '/faculty/tests/', '/faculty/marks.html', '/faculty/marks', '/faculty/marks/'], (req, res) => {
+  const regId = req.query.id || req.query.register_id || req.query.subject_id;
+  res.redirect(301, `/faculty/registers.html?tab=marks${regId ? `&register_id=${regId}` : ''}`);
+});
+app.get(['/faculty/hod-teachers.html', '/faculty/hod-teachers', '/faculty/hod-teachers/'], (req, res) => {
+  res.redirect(301, '/faculty/students.html');
+});
+app.get(['/faculty/hod-settings.html', '/faculty/hod-settings', '/faculty/hod-settings/'], (req, res) => {
+  res.redirect(301, '/faculty/dashboard.html');
+});
+app.get(['/faculty/common-teachers.html', '/faculty/common-teachers', '/faculty/common-teachers/'], (req, res) => {
+  res.redirect(301, '/faculty/dashboard.html');
+});
+app.get(['/faculty/evaluation.html', '/faculty/evaluation', '/faculty/evaluation/'], (req, res) => {
+  const regId = req.query.id || req.query.register_id || req.query.subject_id;
+  res.redirect(301, `/faculty/sheets.html${regId ? `?register_id=${regId}` : ''}`);
 });
 app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick'], (req, res) => res.redirect(301, '/faculty/registers.html'));
 app.get('/student/attendance/subjects.html', (req, res) => res.redirect(301, '/student/attendance.html'));
@@ -157,16 +177,46 @@ app.get(['/js/exceljs.min.js', '/shared/js/exceljs.min.js'], (req, res, next) =>
 // Universal Single-Engine Google Classroom Workspace:
 // Route student classroom to the unified Google Classroom workspace engine
 app.get(['/student/group-detail.html', '/student/group-detail', '/student/group-detail/'], (req, res) => {
+  const namedGroupDetail = path.join(frontendBase, 'faculty/group-detail/group-detail.html');
+  if (fs.existsSync(namedGroupDetail)) {
+    return res.sendFile(namedGroupDetail);
+  }
   res.sendFile(path.join(frontendBase, 'faculty/group-detail/index.html'));
 });
 app.use('/student/group-detail', express.static(path.join(frontendBase, 'faculty/group-detail')));
 
-// Universal rewrite for legacy .html requests to modular folder index.html
+// Universal rewrite for legacy and clean .html requests to modular folder named html or index.html
 app.get('/:section/:page.html', (req, res, next) => {
   const { section, page } = req.params;
+  const namedPath = path.join(frontendBase, `${section}/${page}/${page}.html`);
+  if (fs.existsSync(namedPath)) {
+    return res.sendFile(namedPath);
+  }
   const modularPath = path.join(frontendBase, `${section}/${page}/index.html`);
   if (fs.existsSync(modularPath)) {
     return res.sendFile(modularPath);
+  }
+  next();
+});
+
+// Canonical folder redirect & modular loader: /faculty/assignments -> 301 -> /faculty/assignments/ -> assignments.html
+app.get('/:section/:page', (req, res, next) => {
+  const { section, page } = req.params;
+  if (page.includes('.')) return next();
+  const folderPath = path.join(frontendBase, `${section}/${page}`);
+  if (fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory()) {
+    if (!req.path.endsWith('/')) {
+      const q = req.url.includes('?') ? '?' + req.url.split('?')[1] : '';
+      return res.redirect(301, `${req.path}/${q}`);
+    }
+    const namedPath = path.join(folderPath, `${page}.html`);
+    if (fs.existsSync(namedPath)) {
+      return res.sendFile(namedPath);
+    }
+    const modularPath = path.join(folderPath, 'index.html');
+    if (fs.existsSync(modularPath)) {
+      return res.sendFile(modularPath);
+    }
   }
   next();
 });

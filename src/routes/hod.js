@@ -278,39 +278,9 @@ router.post('/students/reindex-roll', requireHOD(), [
   validate
 ], HodController.reindexRoll);
 
-// @route   GET /api/v1/hod/settings
-// @desc    Retrieve department academic configuration and attendance threshold settings
-// @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.getSettings() -> HodModel.getSettings()
-router.get('/settings', requireHOD(), HodController.getSettings);
-
-// @route   PUT /api/v1/hod/settings
-// @desc    Update departmental settings (duration, active term, attendance threshold)
-// @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.updateSettings() -> HodModel.updateSettings()
-router.put('/settings', requireHOD(), [
-  body('degree_duration_years').optional().isInt({ min: 1, max: 3 }),
-  body('active_term').optional().isIn(['ODD', 'EVEN']),
-  body('attendance_threshold').optional().isFloat({ min: 0, max: 100 }),
-  body('defaulter_threshold_percent').optional().isFloat({ min: 0, max: 100 }),
-  validate
-], HodController.updateSettings);
-
-// @route   GET /api/v1/hod/settings/duration
-// @desc    Retrieve department degree duration and active term configuration
-// @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.getDurationSettings() -> HodModel.getDurationSettings()
-router.get('/settings/duration', requireHOD(), HodController.getDurationSettings);
-
-// @route   POST /api/v1/hod/settings/duration
-// @desc    Update department degree duration years with typed code confirmation
-// @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.updateDurationSettings() -> HodModel.updateDurationSettings()
-router.post('/settings/duration', requireHOD(), [
-  body('duration_years').isInt({ min: 1, max: 3 }).withMessage('Duration years must be between 1 and 3'),
-  body('confirm_code').trim().notEmpty().withMessage('Confirmation code required'),
-  validate
-], HodController.updateDurationSettings);
+// ==========================================
+// Student Semester Promotion & Governance
+// ==========================================
 
 // @route   GET /api/v1/hod/promotion/preview
 // @desc    Calculate preview of students eligible for semester promotion or demotion reversal

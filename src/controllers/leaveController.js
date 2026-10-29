@@ -57,8 +57,22 @@ class LeaveController {
     try {
       const teacherId = req.user.teacher_id;
       const status = req.query.status;
-      const rows = await leaveModel.getForTeacher({ teacherId, status });
-      return res.json({ success: true, data: rows });
+      const departmentId = req.user.department_id || req.user.teacher?.department_id;
+      const isHod = Boolean(req.user.is_hod || (Array.isArray(req.user.roles) && req.user.roles.includes('HOD')));
+      const isAdmin = Boolean(req.user.roles && req.user.roles.includes('SYSTEM_ADMIN'));
+
+      const rows = await leaveModel.getForTeacher({ teacherId, status, departmentId, isHod, isAdmin });
+
+      // Calculate totals for UI tab counts
+      const allRows = status ? await leaveModel.getForTeacher({ teacherId, departmentId, isHod, isAdmin }) : rows;
+      const counts = {
+        all: allRows.length,
+        pending: allRows.filter(r => (r.status || '').toUpperCase() === 'PENDING').length,
+        approved: allRows.filter(r => (r.status || '').toUpperCase() === 'APPROVED').length,
+        rejected: allRows.filter(r => (r.status || '').toUpperCase() === 'REJECTED').length
+      };
+
+      return res.json({ success: true, data: rows, counts });
     } catch (err) {
       logger.error('[LeaveController] getLeaveRequests error:', { error: err.message });
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
