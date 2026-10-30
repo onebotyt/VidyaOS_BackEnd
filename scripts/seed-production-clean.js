@@ -21,6 +21,14 @@ function seedProductionClean(targetDb = null, options = {}) {
   db.exec('PRAGMA foreign_keys = OFF;');
   db.exec('PRAGMA journal_mode = WAL;');
 
+  const envEmail = (process.env.ADMIN_EMAIL || process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
+  const envPass = (process.env.ADMIN_PASSWORD || process.env.INITIAL_ADMIN_PASSWORD || '').trim();
+  const envName = (process.env.ADMIN_NAME || 'System Administrator').trim();
+
+  const adminEmail = envEmail || 'admin@gmail.com';
+  const adminPass = envPass || ADMIN_PASS;
+  const adminHash = bcrypt.hashSync(adminPass, 10);
+
   const force = options.force || process.env.FORCE_PURGE_PRODUCTION === 'true' || process.env.FORCE_RESEED === 'true';
 
   // ─── Safety Shield: Check if existing active users exist ─────────────────
@@ -33,13 +41,17 @@ function seedProductionClean(targetDb = null, options = {}) {
       console.log('    teachers, attendance records, and registered data.');
       console.log('=================================================================\n');
 
-      const adminHash = bcrypt.hashSync(ADMIN_PASS, 10);
-      // Ensure master admin exists without overwriting existing data
-      db.prepare(`
-        INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
-        VALUES (1, 'admin@gmail.com', 'admin@gmail.com', ?, 0, 'ACTIVE')
-      `).run(adminHash);
-      db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
+      if (envEmail && envPass) {
+        db.prepare(`
+          INSERT INTO users (username, email, password_hash, must_change_password, status)
+          VALUES (?, ?, ?, 0, 'ACTIVE')
+          ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, status = 'ACTIVE'
+        `).run(adminEmail, adminEmail, adminHash);
+        const adminUser = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(adminEmail);
+        if (adminUser) {
+          db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, 'SYSTEM_ADMIN')`).run(adminUser.id);
+        }
+      }
 
       const userCount = db.prepare('SELECT count(*) as c FROM users').get().c;
       const studentCount = db.prepare('SELECT count(*) as c FROM students').get().c;
@@ -128,24 +140,27 @@ function seedProductionClean(targetDb = null, options = {}) {
     console.log(`    ✓ Department: ${sd.name} (${sd.code}, id=${sd.id}) — HOD: Unassigned`);
   }
 
-  // ─── Step 3: Exactly 1 Master Admin Account ──────────────────────────────
-  console.log('\n[3] Creating Single System Administrator Account...');
+  // ─── Step 3: Master Admin Account ──────────────────────────────────────────
+  console.log('\n[3] Provisioning System Administrator Account...');
 
-  // User 1: admin / admin@gmail.com
   db.prepare(`
-    INSERT OR IGNORE INTO users (id, username, email, password_hash, must_change_password, status)
-    VALUES (1, 'admin@gmail.com', 'admin@gmail.com', ?, 0, 'ACTIVE')
-  `).run(adminHash);
+    INSERT INTO users (username, email, password_hash, must_change_password, status)
+    VALUES (?, ?, ?, 0, 'ACTIVE')
+    ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, status = 'ACTIVE'
+  `).run(adminEmail, adminEmail, adminHash);
 
-  db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
+  const adminRow = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(adminEmail);
+  const adminId = adminRow ? adminRow.id : 1;
+
+  db.prepare(`INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, 'SYSTEM_ADMIN')`).run(adminId);
 
   // Institutional Administrator teacher profile for foreign key stability
   db.prepare(`
     INSERT OR IGNORE INTO teachers (id, user_id, department_id, full_name, employee_id, phone)
-    VALUES (1, 1, 4, 'System Administrator', 'ADMIN-01', '0000000000')
-  `).run();
+    VALUES (?, ?, 4, ?, 'ADMIN-01', '0000000000')
+  `).run(adminId, adminId, envName);
 
-  console.log('    ✓ Master Admin provisioned: admin@gmail.com (Password: Admin@123)\n');
+  console.log(`    ✓ Master Admin provisioned: ${adminEmail}\n`);
 
   // ─── Step 4: Verification ────────────────────────────────────────────────
   const userCount = db.prepare('SELECT count(*) as c FROM users').get().c;

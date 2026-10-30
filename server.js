@@ -22,6 +22,7 @@ const studentMigrationService = require('./src/services/studentMigrationService'
 const iotMigrationService = require('./src/services/iotMigrationService');
 const dbSyncService = require('./src/services/dbSyncService');
 const promotionEngineService = require('./src/services/promotionEngineService');
+const adminBootstrapService = require('./src/services/adminBootstrapService');
 const { generalLimiter } = require('./src/middleware/rateLimiter');
 
 // Import Route Handlers & Controllers
@@ -409,6 +410,13 @@ async function startServer() {
     await iotMigrationService.ensureIotAndCorrectionTables();
   } catch (err) {
     logger.warn(`Failed to migrate IoT and correction tables: ${err.message}`);
+  }
+
+  // Bootstrap or synchronize administrator from environment (Render/Cloud initial setup)
+  try {
+    await adminBootstrapService.bootstrap();
+  } catch (err) {
+    logger.warn(`Failed to bootstrap administrator from environment: ${err.message}`);
   }
 
   const serverInstance = app.listen(PORT, '0.0.0.0', () => {

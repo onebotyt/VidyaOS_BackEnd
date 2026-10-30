@@ -7,6 +7,7 @@
  */
 
 const { query, withTransaction } = require('../config/db');
+const bcrypt = require('bcrypt');
 
 class AdminModel {
   /**
@@ -1380,6 +1381,102 @@ class AdminModel {
        VALUES (?, 'REGISTRATION_GATE_TOGGLED', 'system_settings', ?, ?, CURRENT_TIMESTAMP)`,
       [userId, settingKey, JSON.stringify({ target, is_open: isOpen })]
     );
+  }
+
+  /**
+   * Retrieve list of all administrators
+   */
+  static async getAdministrators() {
+    const rows = await query(`
+      SELECT 
+        u.id, 
+        u.username, 
+        u.email, 
+        u.status, 
+        u.created_at,
+        t.full_name,
+        t.employee_id,
+        t.phone
+      FROM users u
+      JOIN user_roles ur ON u.id = ur.user_id AND ur.role = 'SYSTEM_ADMIN'
+      LEFT JOIN teachers t ON t.user_id = u.id
+      ORDER BY u.id ASC
+    `);
+
+    const envEmail = (process.env.ADMIN_EMAIL || process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
+
+    return rows.map(r => ({
+      ...r,
+      is_env_admin: Boolean(envEmail && r.email && r.email.toLowerCase() === envEmail)
+    }));
+  }
+
+  /**
+   * Create a new administrator account
+   */
+  static async createAdministrator({ email, password, full_name, phone, employee_id }) {
+    const cleanEmail = email.trim().toLowerCase();
+    const existing = await query(`SELECT id FROM users WHERE LOWER(email) = ?`, [cleanEmail]);
+
+    if (existing && existing.length > 0) {
+      const existingId = existing[0].id;
+      const existingRoles = await query(`SELECT role FROM user_roles WHERE user_id = ? AND role = 'SYSTEM_ADMIN'`, [existingId]);
+      if (existingRoles && existingRoles.length > 0) {
+        throw new Error('An administrator account with this email already exists');
+      }
+      // Upgrade existing user to SYSTEM_ADMIN
+      await query(`INSERT INTO user_roles (user_id, role) VALUES (?, 'SYSTEM_ADMIN')`, [existingId]);
+      return { id: existingId, email: cleanEmail, full_name };
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const insertUser = await query(
+      `INSERT INTO users (username, email, password_hash, must_change_password, status) VALUES (?, ?, ?, 0, 'ACTIVE')`,
+      [cleanEmail, cleanEmail, passwordHash]
+    );
+
+    const newUserId = insertUser.insertId || insertUser.lastID || (
+      await query(`SELECT id FROM users WHERE LOWER(email) = ?`, [cleanEmail])
+    )[0]?.id;
+
+    await query(`INSERT INTO user_roles (user_id, role) VALUES (?, 'SYSTEM_ADMIN')`, [newUserId]);
+
+    const depts = await query(`SELECT id FROM departments ORDER BY id ASC LIMIT 1`);
+    const deptId = (depts && depts.length > 0) ? depts[0].id : 1;
+    const empId = employee_id || `ADMIN-${Math.floor(100 + Math.random() * 900)}`;
+
+    await query(
+      `INSERT INTO teachers (user_id, department_id, full_name, employee_id, phone) VALUES (?, ?, ?, ?, ?)`,
+      [newUserId, deptId, full_name || 'Administrator', empId, phone || '']
+    );
+
+    return { id: newUserId, email: cleanEmail, full_name, employee_id: empId };
+  }
+
+  /**
+   * Delete an administrator account
+   */
+  static async deleteAdministrator(adminId, currentUserId) {
+    if (parseInt(adminId, 10) === parseInt(currentUserId, 10)) {
+      throw new Error('You cannot delete your own active administrator account');
+    }
+
+    const adminCount = await query(`SELECT COUNT(*) as c FROM user_roles WHERE role = 'SYSTEM_ADMIN'`);
+    if (adminCount[0]?.c <= 1) {
+      throw new Error('Cannot delete the sole remaining administrator account');
+    }
+
+    // Remove SYSTEM_ADMIN role
+    await query(`DELETE FROM user_roles WHERE user_id = ? AND role = 'SYSTEM_ADMIN'`, [adminId]);
+
+    // If user has no other roles, delete teachers & user record
+    const remainingRoles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [adminId]);
+    if (!remainingRoles || remainingRoles.length === 0) {
+      await query(`DELETE FROM teachers WHERE user_id = ?`, [adminId]);
+      await query(`DELETE FROM users WHERE id = ?`, [adminId]);
+    }
+
+    return true;
   }
 }
 

@@ -39,6 +39,15 @@ services:
       - key: DB_CONNECTION_LIMIT
         value: 10
 
+      # ─── INITIAL ADMINISTRATOR BOOTSTRAP ──────────────────────────────────
+      # Set these on first deployment to initialize your master administrator login.
+      # Once you log in and create your permanent administrator in the web UI,
+      # you can delete these two environment variables from the Render dashboard.
+      - key: ADMIN_EMAIL
+        sync: false          # Fill in Render dashboard (e.g. admin@yourcollege.edu.in)
+      - key: ADMIN_PASSWORD
+        sync: false          # Fill in Render dashboard (e.g. SecurePassword2026!)
+
       # ─── SECURITY ──────────────────────────────────────────────────────────
       - key: JWT_ACCESS_SECRET
         generateValue: true  # Render auto-generates a secure random value

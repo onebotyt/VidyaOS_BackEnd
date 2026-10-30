@@ -366,4 +366,32 @@ router.post('/registration-gates/toggle', [
   validate
 ], AdminController.toggleRegistrationGate);
 
+// @route   GET /api/v1/admin/administrators
+// @desc    List all system administrator accounts
+// @access  Protected (SYSTEM_ADMIN)
+// @handler AdminController.getAdministrators() -> AdminModel.getAdministrators()
+router.get('/administrators', AdminController.getAdministrators);
+
+// @route   POST /api/v1/admin/administrators
+// @desc    Create a new permanent system administrator in database
+// @access  Protected (SYSTEM_ADMIN)
+// @handler AdminController.createAdministrator() -> AdminModel.createAdministrator()
+router.post('/administrators', [
+  body('email').isEmail().withMessage('Valid email required'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  body('full_name').trim().isLength({ min: 2 }).withMessage('Full name required (min 2 chars)'),
+  body('phone').optional().trim(),
+  body('employee_id').optional().trim(),
+  validate
+], AdminController.createAdministrator);
+
+// @route   DELETE /api/v1/admin/administrators/:id
+// @desc    Remove an administrator account
+// @access  Protected (SYSTEM_ADMIN)
+// @handler AdminController.deleteAdministrator() -> AdminModel.deleteAdministrator()
+router.delete('/administrators/:id', [
+  param('id').isInt().withMessage('Valid user ID required'),
+  validate
+], AdminController.deleteAdministrator);
+
 module.exports = router;

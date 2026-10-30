@@ -7,16 +7,17 @@ package-lock.json
 .env.local
 .env.production
 
-# Local SQLite database (development only)
+# Local SQLite database (development only - NEVER commit or push to remote)
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite.bak*
 *.db
+college_attendance.sqlite
+college_attendance.sqlite-wal
+college_attendance.sqlite-shm
 
-# Allow tracked pre-seeded SQLite database for 2nd developer local testing
-!college_attendance.sqlite
 
 
 # File uploads

@@ -984,6 +984,63 @@ class AdminController {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
   }
+
+  /**
+   * Retrieve list of all administrators
+   * @route GET /api/v1/admin/administrators (routes/admin.js)
+   * @access Protected (SYSTEM_ADMIN)
+   * @usesModel AdminModel.getAdministrators() (models/adminModel.js)
+   */
+  static async getAdministrators(req, res) {
+    try {
+      const admins = await AdminModel.getAdministrators();
+      const enriched = admins.map(a => ({
+        ...a,
+        is_current: parseInt(a.id, 10) === parseInt(req.user.id, 10)
+      }));
+      res.json({ success: true, data: enriched });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Create a new administrator account
+   * @route POST /api/v1/admin/administrators (routes/admin.js)
+   * @access Protected (SYSTEM_ADMIN)
+   * @usesModel AdminModel.createAdministrator() (models/adminModel.js)
+   */
+  static async createAdministrator(req, res) {
+    const { email, password, full_name, phone, employee_id } = req.body;
+    try {
+      const created = await AdminModel.createAdministrator({ email, password, full_name, phone, employee_id });
+      res.status(201).json({
+        success: true,
+        message: 'Administrator account created successfully',
+        data: created
+      });
+    } catch (err) {
+      const status = err.message.includes('already exists') ? 409 : 500;
+      res.status(status).json({ success: false, error: { code: 'ADMIN_CREATION_FAILED', message: err.message } });
+    }
+  }
+
+  /**
+   * Delete an administrator account
+   * @route DELETE /api/v1/admin/administrators/:id (routes/admin.js)
+   * @access Protected (SYSTEM_ADMIN)
+   * @usesModel AdminModel.deleteAdministrator() (models/adminModel.js)
+   */
+  static async deleteAdministrator(req, res) {
+    const adminId = req.params.id;
+    try {
+      await AdminModel.deleteAdministrator(adminId, req.user.id);
+      res.json({ success: true, message: 'Administrator account deleted successfully' });
+    } catch (err) {
+      const status = err.message.includes('cannot delete') ? 400 : 500;
+      res.status(status).json({ success: false, error: { code: 'ADMIN_DELETE_FAILED', message: err.message } });
+    }
+  }
 }
 
 module.exports = AdminController;
