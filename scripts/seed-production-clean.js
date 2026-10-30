@@ -59,7 +59,7 @@ function seedProductionClean(targetDb = null, options = {}) {
       db.exec('PRAGMA foreign_keys = ON;');
       return { success: true, preserved: true, userCount, studentCount, deptCount };
     }
-  } catch (_) {}
+  } catch (_) { }
 
   console.log('=================================================================');
   console.log('🏛️  PROVISIONING CLEAN PRODUCTION ENVIRONMENT (ONLY 1 ADMIN LOGIN)');
@@ -106,12 +106,12 @@ function seedProductionClean(targetDb = null, options = {}) {
   for (const table of tablesToClear) {
     try {
       db.exec(`DELETE FROM ${table};`);
-    } catch (_) {}
+    } catch (_) { }
   }
 
   try {
     db.exec(`DELETE FROM sqlite_sequence;`);
-  } catch (_) {}
+  } catch (_) { }
 
   console.log('    ✓ All demo tables and sequences cleared cleanly.\n');
 
