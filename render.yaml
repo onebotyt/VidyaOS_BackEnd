@@ -16,8 +16,43 @@ services:
         value: 22
 
       # ─── DATABASE CONFIGURATION ────────────────────────────────────────────
-      # Option 1 (Default): SQLite with persistent disk (Starter plan) or auto-snapshots
-      # Option 2 (Recommended for Render Free Tier): 100% Free TiDB Serverless / Aiven MySQL
+      # 🛡️ HOW TO PREVENT DATA LOSS WHEN PUSHING CODE / RESTARTING ON RENDER:
+      #
+      # Render's free tier uses ephemeral containers that recreate their filesystem on every git push.
+      # To preserve all your teachers, students, coursework, and attendance across redeploys,
+      # choose ONE of the 3 supported persistence methods below:
+      #
+      # ───────────────────────────────────────────────────────────────────────
+      # METHOD 1 (Recommended for Free Tier — 100% Free Forever, Zero Data Loss):
+      # Use free TiDB Cloud Serverless MySQL (25GB Free, never resets on restart):
+      # 1. Sign up at https://tidbcloud.com (Free, no credit card required)
+      # 2. Create a free Serverless cluster named "college_attendance"
+      # 3. Set the following environment variables in your Render Dashboard:
+      #    - DB_CLIENT: mysql
+      #    - DB_HOST: <your-gateway-host> (e.g. gateway01.ap-southeast-1.prod.aws.tidbcloud.com)
+      #    - DB_PORT: 4000
+      #    - DB_USER: <your-username>
+      #    - DB_PASSWORD: <your-password>
+      #    - DB_NAME: college_attendance
+      #    - DB_SSL: true
+      #
+      # ───────────────────────────────────────────────────────────────────────
+      # METHOD 2 (Autonomous Cloud Gist Snapshot for SQLite on Free Tier):
+      # Automatically syncs your SQLite database to a private GitHub Gist before
+      # shutdown and restores it on startup. Zero cost, works on Render Free plan!
+      # 1. Generate a GitHub Personal Access Token (classic, check "gist" scope)
+      # 2. Add these to Render Dashboard Environment:
+      #    - GITHUB_BACKUP_TOKEN: <ghp_your_token>
+      #    - GITHUB_BACKUP_GIST: <optional_existing_gist_id_or_leave_empty_to_auto_create>
+      #
+      # ───────────────────────────────────────────────────────────────────────
+      # METHOD 3 (Render Persistent Disk — Starter Plan or Higher):
+      # If using Render's Starter Plan ($7/mo), attach a persistent disk under:
+      # Service Settings -> Disks -> Add Disk:
+      #   Name: vidyaos-data, Mount Path: /var/data, Size: 1 GB
+      # And set:
+      #   SQLITE_FILE: /var/data/college_attendance.sqlite
+      # ───────────────────────────────────────────────────────────────────────
       - key: DB_CLIENT
         value: sqlite
 
@@ -27,22 +62,27 @@ services:
 
       # MySQL / Cloud DB Settings (Used when DB_CLIENT=mysql):
       - key: DB_HOST
-        sync: false          # Fill in Render dashboard (e.g. gateway01...tidbcloud.com)
+        sync: false          # Fill in Render dashboard if DB_CLIENT=mysql
       - key: DB_PORT
         value: 3306
       - key: DB_USER
-        sync: false          # Fill in Render dashboard
+        sync: false
       - key: DB_PASSWORD
-        sync: false          # Fill in Render dashboard
+        sync: false
       - key: DB_NAME
         value: college_attendance
       - key: DB_CONNECTION_LIMIT
         value: 10
 
-      # ─── INITIAL ADMINISTRATOR BOOTSTRAP ──────────────────────────────────
-      # Set these on first deployment to initialize your master administrator login.
-      # Once you log in and create your permanent administrator in the web UI,
-      # you can delete these two environment variables from the Render dashboard.
+      # Autonomous Cloud Snapshot Sync (Used when running SQLite on Free Tier):
+      - key: GITHUB_BACKUP_TOKEN
+        sync: false          # Fill with GitHub PAT to auto-persist SQLite without a paid disk
+      - key: GITHUB_BACKUP_GIST
+        sync: false          # Auto-created on first sync if left blank
+
+      # ─── MASTER ADMINISTRATOR BOOTSTRAP ──────────────────────────────────
+      # Keep ADMIN_EMAIL and ADMIN_PASSWORD permanently configured in your Render
+      # dashboard so that your administrator credentials are preserved across any restart.
       - key: ADMIN_EMAIL
         sync: false          # Fill in Render dashboard (e.g. admin@yourcollege.edu.in)
       - key: ADMIN_PASSWORD

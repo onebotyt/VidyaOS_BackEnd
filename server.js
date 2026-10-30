@@ -358,7 +358,7 @@ setInterval(() => {
 
 // Initialize Server & Database Test
 async function startServer() {
-  dbSyncService.initDatabasePersistence();
+  await dbSyncService.initDatabasePersistence();
   await testConnection();
 
   // Automatically synchronize active academic session & run semester promotion on startup
@@ -453,10 +453,10 @@ async function startServer() {
   }
 
   // Graceful shutdown handling for Docker / Kubernetes / systemd / PM2 / Render
-  const gracefulShutdown = (signal) => {
-    logger.info(`Received ${signal}. Capturing pre-shutdown snapshot and shutting down gracefully...`);
+  const gracefulShutdown = async (signal) => {
+    logger.info(`Received ${signal}. Capturing pre-shutdown snapshot and synchronizing cloud persistence...`);
     try {
-      dbSyncService.capturePreShutdownSnapshot();
+      await dbSyncService.capturePreShutdownSnapshot();
     } catch (_) {}
     serverInstance.close(() => {
       logger.info('HTTP server closed. Exiting process.');
@@ -465,7 +465,7 @@ async function startServer() {
     setTimeout(() => {
       logger.error('Forcefully terminating server after timeout.');
       process.exit(1);
-    }, 10000);
+    }, 15000);
   };
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

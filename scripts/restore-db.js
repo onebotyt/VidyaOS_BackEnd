@@ -10,14 +10,10 @@ const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const logger = require('../src/utils/logger');
+const { getResolvedDatabasePath } = require('../src/config/dbPath');
 
 function getTargetDbPath(overridePath = null) {
-  if (overridePath) {
-    return path.isAbsolute(overridePath) ? overridePath : path.resolve(process.cwd(), overridePath);
-  }
-  return process.env.SQLITE_FILE
-    ? (path.isAbsolute(process.env.SQLITE_FILE) ? process.env.SQLITE_FILE : path.resolve(__dirname, '../', process.env.SQLITE_FILE))
-    : path.resolve(__dirname, '../college_attendance.sqlite');
+  return getResolvedDatabasePath(overridePath);
 }
 
 const BACKUP_DIR = path.resolve(__dirname, '../backups');

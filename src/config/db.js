@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 const logger = require('../utils/logger');
+const { getResolvedDatabasePath } = require('./dbPath');
 
 const DB_CLIENT = (process.env.DB_CLIENT || 'sqlite').toLowerCase();
 
@@ -20,17 +21,7 @@ let sqliteDb = null;
 function getSqliteDb() {
   if (!sqliteDb) {
     const { DatabaseSync } = require('node:sqlite');
-    let defaultDbPath = path.resolve(__dirname, '../../college_attendance.sqlite');
-    if (process.env.SQLITE_FILE) {
-      defaultDbPath = path.isAbsolute(process.env.SQLITE_FILE)
-        ? process.env.SQLITE_FILE
-        : path.resolve(__dirname, '../../', process.env.SQLITE_FILE);
-    } else if (fs.existsSync('/var/data')) {
-      defaultDbPath = '/var/data/college_attendance.sqlite';
-    } else if (fs.existsSync('/data')) {
-      defaultDbPath = '/data/college_attendance.sqlite';
-    }
-    const dbFilePath = defaultDbPath;
+    const dbFilePath = getResolvedDatabasePath();
 
     const dbDir = path.dirname(dbFilePath);
     if (!fs.existsSync(dbDir)) {

@@ -104,25 +104,37 @@ class AdminBootstrapService {
         return { success: true, action: 'PRESERVED', count: existingAdmins.length };
       }
 
-      // 3. Fallback for local development when no admin exists
-      if (process.env.NODE_ENV !== 'production' && (!process.env.RENDER || process.env.RENDER === 'false')) {
-        logger.info('[BOOTSTRAP] Local development detected with 0 administrators. Provisioning default development admin (admin@gmail.com / Admin@123)...');
-        const defaultHash = await bcrypt.hash('Admin@123', 10);
-        const devInsert = await query(
-          `INSERT INTO users (username, email, password_hash, must_change_password, status) VALUES ('admin@gmail.com', 'admin@gmail.com', ?, 0, 'ACTIVE')`,
-          [defaultHash]
-        );
-        const devId = devInsert.insertId || devInsert.lastID || 1;
-        await query(`INSERT INTO user_roles (user_id, role) VALUES (?, 'SYSTEM_ADMIN')`, [devId]);
-        await query(
-          `INSERT INTO teachers (user_id, department_id, full_name, employee_id, phone) VALUES (?, 1, 'Development Administrator', 'ADMIN-DEV', '0000000000')`,
-          [devId]
-        );
-        return { success: true, action: 'DEV_DEFAULT_CREATED' };
-      }
+      // 3. Resilient Fallback: If 0 administrators exist anywhere in the database,
+      // provision a safe emergency administrator so the institution is NEVER locked out!
+      const fallbackEmail = process.env.ADMIN_FALLBACK_EMAIL || 'admin@college.edu';
+      const fallbackPassword = process.env.ADMIN_FALLBACK_PASSWORD || 'Admin@VidyaOS2026!';
+      const fallbackHash = await bcrypt.hash(fallbackPassword, 10);
 
-      logger.warn('[BOOTSTRAP WARNING] No active SYSTEM_ADMIN accounts exist in the database and ADMIN_EMAIL / ADMIN_PASSWORD are not set in environment. Set ADMIN_EMAIL and ADMIN_PASSWORD in Render dashboard to access administration.');
-      return { success: false, action: 'NONE_FOUND' };
+      logger.warn('════════════════════════════════════════════════════════════════════════');
+      logger.warn('🏛️  [ADMINISTRATOR AUTO-PROVISION NOTICE]');
+      logger.warn(`    Zero active administrators detected in database.`);
+      logger.warn(`    Provisioned recovery administrator: ${fallbackEmail}`);
+      logger.warn(`    Password: ${fallbackPassword}`);
+      logger.warn('    Please log in immediately and set your desired permanent credentials.');
+      logger.warn('════════════════════════════════════════════════════════════════════════');
+
+      const recoveryInsert = await query(
+        `INSERT INTO users (username, email, password_hash, must_change_password, status) VALUES (?, ?, ?, 0, 'ACTIVE')`,
+        [fallbackEmail, fallbackEmail, fallbackHash]
+      );
+      const recoveryId = recoveryInsert.insertId || recoveryInsert.lastID || (
+        await query(`SELECT id FROM users WHERE LOWER(email) = ?`, [fallbackEmail])
+      )[0]?.id || 1;
+
+      await query(`INSERT INTO user_roles (user_id, role) VALUES (?, 'SYSTEM_ADMIN')`, [recoveryId]);
+      
+      const depts = await query(`SELECT id FROM departments ORDER BY id ASC LIMIT 1`);
+      const deptId = (depts && depts.length > 0) ? depts[0].id : 1;
+      await query(
+        `INSERT INTO teachers (user_id, department_id, full_name, employee_id, phone) VALUES (?, ?, 'Recovery Administrator', 'ADMIN-RECOVERY', '0000000000')`,
+        [recoveryId, deptId]
+      );
+      return { success: true, action: 'RECOVERY_ADMIN_CREATED', email: fallbackEmail };
     } catch (err) {
       logger.error(`[BOOTSTRAP ERROR] Administrator bootstrapping failed: ${err.message}`, { stack: err.stack });
       return { success: false, error: err.message };
