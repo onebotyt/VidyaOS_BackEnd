@@ -34,8 +34,63 @@ class AdminModel {
       `SELECT COUNT(*) as total FROM attendance_sessions WHERE state = 'OPEN'`
     );
 
+    // Compute real today attendance statistics across all active sessions
+    const [todayAtt] = await query(`
+      SELECT 
+        COUNT(CASE WHEN ar.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) as present_count,
+        COUNT(CASE WHEN ar.attendance_status = 'ABSENT' THEN 1 END) as absent_count,
+        COUNT(ar.id) as total_records
+      FROM register_attendance ar
+      JOIN attendance_sessions s ON ar.session_id = s.id
+      WHERE s.session_date = DATE('now')
+    `);
+
+    const presentCount = todayAtt?.present_count || 0;
+    const absentCount = todayAtt?.absent_count || 0;
+    const totalTodayRecords = todayAtt?.total_records || 0;
+    const todayPct = totalTodayRecords > 0 ? Math.round((presentCount / totalTodayRecords) * 100) : 0;
+
+    // Real department breakdown from live database
+    const deptRows = await query(`
+      SELECT 
+        d.id, 
+        d.name, 
+        d.code,
+        (SELECT COUNT(*) FROM students s 
+         JOIN enrollments e ON e.student_id = s.id 
+         WHERE e.department_id = d.id AND e.status = 'ENROLLED') as student_count,
+        (SELECT COUNT(CASE WHEN ar.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) 
+         FROM register_attendance ar
+         JOIN attendance_sessions s ON ar.session_id = s.id
+         WHERE s.department_id = d.id AND s.session_date = DATE('now')) as dept_present,
+        (SELECT COUNT(ar.id) 
+         FROM register_attendance ar
+         JOIN attendance_sessions s ON ar.session_id = s.id
+         WHERE s.department_id = d.id AND s.session_date = DATE('now')) as dept_total
+      FROM departments d
+      WHERE d.is_active = 1
+      ORDER BY d.id ASC
+    `);
+
+    const departmentBreakdown = (deptRows || []).map(dept => {
+      const dTotal = dept.dept_total || 0;
+      const dPresent = dept.dept_present || 0;
+      const pct = dTotal > 0 ? Math.round((dPresent / dTotal) * 100) : 0;
+      return {
+        id: dept.id,
+        name: dept.name,
+        code: dept.code,
+        student_count: dept.student_count || 0,
+        present_count: dPresent,
+        total_records: dTotal,
+        attendance_pct: pct
+      };
+    });
+
+    const totalStudents = activeStudents?.total || allTimeStudents?.total || 0;
+
     return {
-      total_students: activeStudents?.total || allTimeStudents?.total || 0,
+      total_students: totalStudents,
       total_teachers: teachersCount?.total || 0,
       total_enrolled_students: allTimeStudents?.total || 0,
       total_hods: hodsCount?.total || 0,
@@ -43,7 +98,15 @@ class AdminModel {
       total_branches: deptsCount?.total || 0,
       total_devices: devicesCount?.total || 0,
       today_sessions: todaySessions?.total || 0,
-      open_sessions: openSessions?.total || 0
+      open_sessions: openSessions?.total || 0,
+      today_attendance: {
+        present_count: presentCount,
+        absent_count: absentCount,
+        total_records: totalTodayRecords,
+        attendance_pct: todayPct,
+        has_records: totalTodayRecords > 0
+      },
+      department_breakdown: departmentBreakdown
     };
   }
 

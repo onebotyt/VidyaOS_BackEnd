@@ -90,20 +90,34 @@ class HodModel {
        ORDER BY e.year, e.semester`, [deptId, deptId]
     );
 
+    const counts = {
+      teachers: teachersCount?.total || 0,
+      subjects: subjectsCount?.total || 0,
+      students: studentsCount?.total || 0,
+      active_registers: activeRegisters?.total || 0,
+      avg_attendance_pct: avgAttendance?.avg_pct || 0,
+      devices_total: devicesSummary?.total || 0,
+      devices_online: devicesSummary?.online || 0,
+      pending_students: pendingStudents?.total || 0,
+      pending_leaves: pendingLeaves?.total || 0,
+      pending_faculty: pendingFaculty?.total || 0
+    };
+
     return {
       department: deptInfo,
-      counts: {
-        teachers: teachersCount?.total || 0,
-        subjects: subjectsCount?.total || 0,
-        students: studentsCount?.total || 0,
-        active_registers: activeRegisters?.total || 0,
-        avg_attendance_pct: avgAttendance?.avg_pct || 0,
-        devices_total: devicesSummary?.total || 0,
-        devices_online: devicesSummary?.online || 0,
-        pending_students: pendingStudents?.total || 0,
-        pending_leaves: pendingLeaves?.total || 0,
-        pending_faculty: pendingFaculty?.total || 0
-      },
+      department_name: deptInfo?.name || '',
+      department_code: deptInfo?.code || '',
+      total_teachers: counts.teachers,
+      total_subjects: counts.subjects,
+      total_students: counts.students,
+      active_registers: counts.active_registers,
+      avg_attendance_pct: counts.avg_attendance_pct,
+      devices_total: counts.devices_total,
+      devices_online: counts.devices_online,
+      pending_students: counts.pending_students,
+      pending_leaves: counts.pending_leaves,
+      pending_faculty: counts.pending_faculty,
+      counts,
       today_sessions: todaySessions,
       cohorts
     };
