@@ -91,7 +91,7 @@ class TeachingGroupModel {
       JOIN teaching_groups tg ON a.group_id = tg.id
       WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE' AND tg.deleted_at IS NULL
       ORDER BY 
-        CASE WHEN a.due_date >= date('now') THEN 0 ELSE 1 END,
+        CASE WHEN a.due_date >= CURDATE() THEN 0 ELSE 1 END,
         a.due_date ASC,
         a.created_at DESC
       LIMIT 8
@@ -148,11 +148,11 @@ class TeachingGroupModel {
               FROM attendance_sessions s
               JOIN register_attendance ra ON ra.session_id = s.id
               WHERE s.register_id = ar.id AND s.state != 'DRAFT') as avg_attendance_pct,
-             (SELECT a.title || ':::' || COALESCE(a.due_date, '') || ':::' || a.type
+             (SELECT CONCAT(a.title, ':::', COALESCE(a.due_date, ''), ':::', a.type)
               FROM assessments a
-              WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= date('now', '-2 days'))
+              WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY))
               ORDER BY a.due_date ASC LIMIT 1) as upcoming_work,
-             MAX(0, 7 - CAST((julianday('now') - julianday(COALESCE(tg.deleted_at, 'now'))) AS INTEGER)) as days_remaining
+             GREATEST(0, 7 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW()))) as days_remaining
       FROM teaching_groups tg
       JOIN teachers t ON tg.teacher_id = t.id
       LEFT JOIN departments d ON t.department_id = d.id

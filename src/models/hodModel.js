@@ -73,7 +73,7 @@ class HodModel {
        FROM attendance_sessions s
        JOIN subjects sub ON s.subject_id = sub.id
        JOIN teachers t ON s.teacher_id = t.id
-       WHERE s.department_id = ? AND s.session_date = DATE('now')
+       WHERE s.department_id = ? AND s.session_date = CURDATE()
        ORDER BY s.id DESC`, [deptId]
     );
 
@@ -1813,7 +1813,7 @@ class HodModel {
     const params = [deptId];
 
     if (batch_year) {
-      filter += ` AND (s.graduation_year = ? OR strftime('%Y', e.updated_at) = ?)`;
+      filter += ` AND (s.graduation_year = ? OR YEAR(e.updated_at) = ?)`;
       params.push(parseInt(batch_year, 10), String(batch_year));
     }
 
@@ -1824,7 +1824,7 @@ class HodModel {
 
     const students = await query(
       `SELECT s.id as student_id, s.user_id, s.official_enrollment_no, s.full_name,
-              s.admission_year, COALESCE(s.graduation_year, CAST(strftime('%Y', e.updated_at) AS INTEGER)) as graduation_year,
+              s.admission_year, COALESCE(s.graduation_year, YEAR(e.updated_at)) as graduation_year,
               s.entry_mode, s.is_lateral_entry,
               e.id as enrollment_id, e.year as final_year, e.semester as final_semester, e.class_roll_no as final_class_roll_no,
               e.status as enrollment_status, u.email, u.status as user_status,

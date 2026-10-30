@@ -283,7 +283,7 @@ class StudentModel {
       try {
         await conn.execute(
           `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-           VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
+           VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
           [studentId, departmentId, ayId, year, semester, finalRoll]
         );
       } catch (_) {}
@@ -521,7 +521,7 @@ class StudentModel {
         try {
           await conn.execute(
             `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-             VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
+             VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
             [actualStudentId, student.department_id, student.academic_year_id, student.year, student.semester, finalRollNo]
           );
         } catch (_) {}
@@ -587,7 +587,7 @@ class StudentModel {
     return await withTransaction(async (conn) => {
       await conn.execute(
         `UPDATE student_department_enrollments 
-         SET end_date = DATE('now'), status = 'TRANSFERRED', updated_at = CURRENT_TIMESTAMP 
+         SET end_date = CURDATE(), status = 'TRANSFERRED', updated_at = CURRENT_TIMESTAMP 
          WHERE student_id = ? AND status = 'ACTIVE'`,
         [studentId]
       );
@@ -595,7 +595,7 @@ class StudentModel {
       await conn.execute(
         `INSERT INTO student_department_enrollments 
          (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-         VALUES (?, ?, ?, ?, ?, ?, DATE('now'), 'ACTIVE')`,
+         VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
         [studentId, newDepartmentId, student.academic_year_id, student.year, student.semester, student.class_roll_no]
       );
 

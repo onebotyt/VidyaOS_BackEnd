@@ -40,6 +40,18 @@ function getSqliteDb() {
     sqliteDb.function('NOW', () => new Date().toISOString().replace('T', ' ').slice(0, 19));
     sqliteDb.function('CURDATE', () => new Date().toISOString().slice(0, 10));
     sqliteDb.function('DATE', (d) => (d ? String(d).slice(0, 10) : null));
+    sqliteDb.function('CONCAT', (...args) => args.filter(a => a !== null && a !== undefined).join(''));
+    sqliteDb.function('DATEDIFF', (d1, d2) => {
+      if (!d1 || !d2) return 0;
+      const ms1 = new Date(d1).getTime();
+      const ms2 = new Date(d2).getTime();
+      return Math.floor((ms1 - ms2) / (1000 * 60 * 60 * 24));
+    });
+    sqliteDb.function('GREATEST', (...args) => Math.max(...args.map(Number)));
+    sqliteDb.function('LEAST', (...args) => Math.min(...args.map(Number)));
+    sqliteDb.function('YEAR', (d) => (d ? new Date(d).getFullYear() : null));
+    sqliteDb.function('MONTH', (d) => (d ? new Date(d).getMonth() + 1 : null));
+    sqliteDb.function('DAY', (d) => (d ? new Date(d).getDate() : null));
     sqliteDb.function('TIMESTAMPDIFF', (unit, d1, d2) => {
       if (!d1 || !d2) return null;
       const diffMs = new Date(d2) - new Date(d1);
@@ -487,22 +499,50 @@ function translateSqlForMysql(sql) {
   // 3. TEXT column with DEFAULT -> VARCHAR(255) DEFAULT (MySQL restriction on BLOB/TEXT default)
   trans = trans.replace(/\bTEXT\s+DEFAULT\s+('?[^,\n)]+'?)/gi, 'VARCHAR(255) DEFAULT $1');
 
-  // 4. datetime('now', '-X days/minutes')
+  // 4. date('now', '-X days') and date('now', '+X days')
+  trans = trans.replace(/date\s*\(\s*['"]now['"]\s*,\s*['"]-(\d+)\s*days?['"]\s*\)/gi, 'DATE_SUB(CURDATE(), INTERVAL $1 DAY)');
+  trans = trans.replace(/date\s*\(\s*['"]now['"]\s*,\s*['"]\+(\d+)\s*days?['"]\s*\)/gi, 'DATE_ADD(CURDATE(), INTERVAL $1 DAY)');
+  trans = trans.replace(/date\s*\(\s*['"]now['"]\s*\)/gi, 'CURDATE()');
+  trans = trans.replace(/DATE\s*\(\s*['"]now['"]\s*\)/gi, 'CURDATE()');
+
+  // 5. datetime('now', '-X days/minutes')
   trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]-(\d+)\s*days?['"]\s*\)/gi, 'DATE_SUB(NOW(), INTERVAL $1 DAY)');
   trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]\+(\d+)\s*days?['"]\s*\)/gi, 'DATE_ADD(NOW(), INTERVAL $1 DAY)');
   trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]-(\d+)\s*minutes?['"]\s*\)/gi, 'DATE_SUB(NOW(), INTERVAL $1 MINUTE)');
   trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]\+(\d+)\s*minutes?['"]\s*\)/gi, 'DATE_ADD(NOW(), INTERVAL $1 MINUTE)');
 
-  // 5. datetime(col, '+X hours/days')
+  // 6. datetime(col, '+X hours/days')
   trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]\+(\d+)\s*hours?['"]\s*\)/gi, 'DATE_ADD($1, INTERVAL $2 HOUR)');
   trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]-(\d+)\s*hours?['"]\s*\)/gi, 'DATE_SUB($1, INTERVAL $2 HOUR)');
   trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]\+(\d+)\s*days?['"]\s*\)/gi, 'DATE_ADD($1, INTERVAL $2 DAY)');
   trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]-(\d+)\s*days?['"]\s*\)/gi, 'DATE_SUB($1, INTERVAL $2 DAY)');
 
-  // 6. datetime('now') -> NOW()
+  // 7. datetime('now') -> NOW()
   trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*\)/gi, 'NOW()');
 
-  // 7. ON CONFLICT(...) DO UPDATE SET col = excluded.col -> ON DUPLICATE KEY UPDATE col = VALUES(col)
+  // 8. julianday expressions -> DATEDIFF in MySQL
+  trans = trans.replace(/julianday\s*\(\s*['"]now['"]\s*\)\s*-\s*julianday\s*\(\s*COALESCE\s*\(\s*([^,]+?)\s*,\s*['"]now['"]\s*\)\s*\)/gi, 'DATEDIFF(NOW(), COALESCE($1, NOW()))');
+  trans = trans.replace(/julianday\s*\(\s*['"]now['"]\s*\)\s*-\s*julianday\s*\(\s*([^)]+)\s*\)/gi, 'DATEDIFF(NOW(), $1)');
+  trans = trans.replace(/julianday\s*\(\s*([^)]+)\s*\)\s*-\s*julianday\s*\(\s*([^)]+)\s*\)/gi, 'DATEDIFF($1, $2)');
+
+  // 9. Scalar MAX(0, 7 - ...) -> GREATEST(0, 7 - ...)
+  trans = trans.replace(/MAX\s*\(\s*0\s*,\s*7\s*-\s*CAST\s*\(\s*\(?(?:julianday|DATEDIFF)[^)]+\)?\s*AS\s+INTEGER\s*\)\s*\)/gi, 'GREATEST(0, 7 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())))');
+  trans = trans.replace(/MAX\s*\(\s*0\s*,\s*7\s*-\s*CAST\s*\([^)]+AS\s+INTEGER\s*\)\s*\)/gi, 'GREATEST(0, 7 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())))');
+  trans = trans.replace(/MAX\s*\(\s*0\s*,\s*([^)]+)\s*\)/gi, 'GREATEST(0, $1)');
+
+  // 10. strftime expressions -> YEAR/MONTH/DAY in MySQL
+  trans = trans.replace(/CAST\s*\(\s*strftime\s*\(\s*['"]%Y['"]\s*,\s*([^)]+)\s*\)\s*AS\s+INTEGER\s*\)/gi, 'YEAR($1)');
+  trans = trans.replace(/strftime\s*\(\s*['"]%Y['"]\s*,\s*([^)]+)\s*\)/gi, 'YEAR($1)');
+  trans = trans.replace(/strftime\s*\(\s*['"]%m['"]\s*,\s*([^)]+)\s*\)/gi, 'MONTH($1)');
+  trans = trans.replace(/strftime\s*\(\s*['"]%d['"]\s*,\s*([^)]+)\s*\)/gi, 'DAY($1)');
+
+  // 11. SQLite Pipe Concat || for upcoming_work -> CONCAT(...)
+  trans = trans.replace(
+    /a\.title\s*\|\|\s*':::'\s*\|\|\s*COALESCE\(a\.due_date,\s*''\)\s*\|\|\s*':::'\s*\|\|\s*a\.type/gi,
+    "CONCAT(a.title, ':::', COALESCE(a.due_date, ''), ':::', a.type)"
+  );
+
+  // 12. ON CONFLICT(...) DO UPDATE SET col = excluded.col -> ON DUPLICATE KEY UPDATE col = VALUES(col)
   trans = trans.replace(/ON\s+CONFLICT\s*(\([^)]*\))?\s*DO\s+UPDATE\s+SET/gi, 'ON DUPLICATE KEY UPDATE');
   trans = trans.replace(/excluded\.([a-zA-Z0-9_]+)/gi, 'VALUES($1)');
 

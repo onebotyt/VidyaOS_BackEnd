@@ -28,7 +28,7 @@ class AdminModel {
     const [deptsCount] = await query(`SELECT COUNT(*) as total FROM departments WHERE is_active = 1`);
     const [devicesCount] = await query(`SELECT COUNT(*) as total FROM devices WHERE is_active = 1`);
     const [todaySessions] = await query(
-      `SELECT COUNT(*) as total FROM attendance_sessions WHERE session_date = DATE('now')`
+      `SELECT COUNT(*) as total FROM attendance_sessions WHERE session_date = CURDATE()`
     );
     const [openSessions] = await query(
       `SELECT COUNT(*) as total FROM attendance_sessions WHERE state = 'OPEN'`
@@ -42,7 +42,7 @@ class AdminModel {
         COUNT(ar.id) as total_records
       FROM register_attendance ar
       JOIN attendance_sessions s ON ar.session_id = s.id
-      WHERE s.session_date = DATE('now')
+      WHERE s.session_date = CURDATE()
     `);
 
     const presentCount = todayAtt?.present_count || 0;
@@ -62,11 +62,11 @@ class AdminModel {
         (SELECT COUNT(CASE WHEN ar.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) 
          FROM register_attendance ar
          JOIN attendance_sessions s ON ar.session_id = s.id
-         WHERE s.department_id = d.id AND s.session_date = DATE('now')) as dept_present,
+         WHERE s.department_id = d.id AND s.session_date = CURDATE()) as dept_present,
         (SELECT COUNT(ar.id) 
          FROM register_attendance ar
          JOIN attendance_sessions s ON ar.session_id = s.id
-         WHERE s.department_id = d.id AND s.session_date = DATE('now')) as dept_total
+         WHERE s.department_id = d.id AND s.session_date = CURDATE()) as dept_total
       FROM departments d
       WHERE d.is_active = 1
       ORDER BY d.id ASC
