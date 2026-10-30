@@ -489,6 +489,8 @@ class AuthController {
       }
 
       await authService.logout({ refreshToken, sessionId, userId });
+      res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Strict', path: '/' });
+      res.clearCookie('refreshToken', { path: '/' });
       res.clearCookie('refreshToken');
       res.status(200).json({ success: true, message: 'Logged out successfully' });
     } catch (err) {
