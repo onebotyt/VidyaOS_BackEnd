@@ -181,7 +181,7 @@ class AttendanceService {
     await query(
       `UPDATE attendance_sessions 
        SET state = ?, 
-           end_time = CASE WHEN ? IN ('CLOSED', 'FINALIZED') AND end_time IS NULL THEN datetime('now') ELSE end_time END,
+           end_time = CASE WHEN ? IN ('CLOSED', 'FINALIZED') AND end_time IS NULL THEN NOW() ELSE end_time END,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [newState, newState, sessionId]
@@ -254,7 +254,7 @@ class AttendanceService {
       if (!pin) throw { status: 400, code: 'VALIDATION_ERROR', message: 'PIN code is required' };
       const validPins = await query(
         `SELECT id FROM attendance_sessions 
-         WHERE id = ? AND verification_pin = ? AND verification_expires_at > datetime('now')`,
+         WHERE id = ? AND verification_pin = ? AND verification_expires_at > NOW()`,
         [sessionId, pin]
       );
       if (!validPins || validPins.length === 0) {
@@ -264,7 +264,7 @@ class AttendanceService {
       if (!qr_token) throw { status: 400, code: 'VALIDATION_ERROR', message: 'QR token is required' };
       const validQr = await query(
         `SELECT id FROM attendance_sessions 
-         WHERE id = ? AND verification_qr_hash = ? AND verification_expires_at > datetime('now')`,
+         WHERE id = ? AND verification_qr_hash = ? AND verification_expires_at > NOW()`,
         [sessionId, qr_token]
       );
       if (!validQr || validQr.length === 0) {
@@ -561,14 +561,15 @@ class AttendanceService {
       const result = await query(
         `UPDATE attendance_sessions 
          SET state = 'CLOSED', 
-             end_time = datetime('now'),
-             updated_at = datetime('now')
+             end_time = NOW(),
+             updated_at = NOW()
          WHERE state = 'OPEN' 
            AND auto_close_at IS NOT NULL 
-           AND auto_close_at <= datetime('now')`
+           AND auto_close_at <= NOW()`
       );
-      if (result && result.changes > 0) {
-        logger.info(`Auto-close scanner transitioned ${result.changes} session(s) from OPEN to CLOSED`);
+      const affected = result?.affectedRows ?? result?.changes ?? 0;
+      if (affected > 0) {
+        logger.info(`Auto-close scanner transitioned ${affected} session(s) from OPEN to CLOSED`);
       }
     } catch (err) {
       logger.error('Error executing auto-close session scanner', { error: err.message });

@@ -13,20 +13,28 @@ const logger = require('../utils/logger');
 async function ensureStudentColumns() {
   try {
     const cols = await query("PRAGMA table_info('students')");
-    const colNames = Array.isArray(cols) ? cols.map(c => c.name) : [];
+    const colNames = Array.isArray(cols) ? cols.map(c => c.name || c.COLUMN_NAME) : [];
 
     // 1. Ensure registration_no exists
     if (!colNames.includes('registration_no')) {
-      logger.info('Migrating schema: Adding registration_no column to students table...');
-      await query('ALTER TABLE students ADD COLUMN registration_no TEXT');
-      logger.info('✓ Column registration_no added successfully.');
+      try {
+        logger.info('Migrating schema: Adding registration_no column to students table...');
+        await query('ALTER TABLE students ADD COLUMN registration_no VARCHAR(100)');
+        logger.info('✓ Column registration_no added successfully.');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
     }
 
     // 2. Ensure class_roll_no exists
     if (!colNames.includes('class_roll_no')) {
-      logger.info('Migrating schema: Adding class_roll_no column to students table...');
-      await query('ALTER TABLE students ADD COLUMN class_roll_no INTEGER');
-      logger.info('✓ Column class_roll_no added successfully.');
+      try {
+        logger.info('Migrating schema: Adding class_roll_no column to students table...');
+        await query('ALTER TABLE students ADD COLUMN class_roll_no INTEGER');
+        logger.info('✓ Column class_roll_no added successfully.');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
     }
 
     // 3. Create indexes
@@ -80,64 +88,91 @@ async function ensureStudentColumns() {
  */
 async function ensureOtpAndPhoneColumns() {
   try {
+    const isMysql = (process.env.DB_CLIENT || '').toLowerCase() === 'mysql';
+
     // 1. users.phone
     const userCols = await query("PRAGMA table_info('users')");
-    const userColNames = Array.isArray(userCols) ? userCols.map(c => c.name) : [];
+    const userColNames = Array.isArray(userCols) ? userCols.map(c => c.name || c.COLUMN_NAME) : [];
     if (!userColNames.includes('phone')) {
-      logger.info('Migrating schema: Adding phone column to users table...');
-      await query('ALTER TABLE users ADD COLUMN phone TEXT');
       try {
-        await query('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
-      } catch (_) {}
-      logger.info('✓ Column phone added to users.');
+        logger.info('Migrating schema: Adding phone column to users table...');
+        await query(isMysql ? 'ALTER TABLE users ADD COLUMN phone VARCHAR(20)' : 'ALTER TABLE users ADD COLUMN phone TEXT');
+        try {
+          await query('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
+        } catch (_) {}
+        logger.info('✓ Column phone added to users.');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
     }
 
     // 2. students columns: phone, parent_phone, parent_name, is_phone_verified
     const stdCols = await query("PRAGMA table_info('students')");
-    const stdColNames = Array.isArray(stdCols) ? stdCols.map(c => c.name) : [];
-    if (!stdColNames.includes('phone')) {
-      logger.info('Migrating schema: Adding phone column to students table...');
-      await query('ALTER TABLE students ADD COLUMN phone TEXT');
-      try {
-        await query('CREATE INDEX IF NOT EXISTS idx_students_phone ON students(phone)');
-      } catch (_) {}
-    }
-    if (!stdColNames.includes('parent_phone')) {
-      await query('ALTER TABLE students ADD COLUMN parent_phone TEXT');
-    }
-    if (!stdColNames.includes('parent_name')) {
-      await query('ALTER TABLE students ADD COLUMN parent_name TEXT');
-    }
-    if (!stdColNames.includes('is_phone_verified')) {
-      await query('ALTER TABLE students ADD COLUMN is_phone_verified INTEGER DEFAULT 0');
-    }
+    const stdColNames = Array.isArray(stdCols) ? stdCols.map(c => c.name || c.COLUMN_NAME) : [];
+    const safeAddStudentCol = async (col, def) => {
+      if (!stdColNames.includes(col)) {
+        try {
+          await query(`ALTER TABLE students ADD COLUMN ${col} ${def}`);
+        } catch (e) {
+          if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+        }
+      }
+    };
+
+    await safeAddStudentCol('phone', isMysql ? 'VARCHAR(20)' : 'TEXT');
+    await safeAddStudentCol('parent_phone', isMysql ? 'VARCHAR(20)' : 'TEXT');
+    await safeAddStudentCol('parent_name', isMysql ? 'VARCHAR(150)' : 'TEXT');
+    await safeAddStudentCol('is_phone_verified', 'INTEGER DEFAULT 0');
 
     // 3. teachers columns: is_phone_verified
     const teachCols = await query("PRAGMA table_info('teachers')");
-    const teachColNames = Array.isArray(teachCols) ? teachCols.map(c => c.name) : [];
+    const teachColNames = Array.isArray(teachCols) ? teachCols.map(c => c.name || c.COLUMN_NAME) : [];
     if (!teachColNames.includes('is_phone_verified')) {
-      await query('ALTER TABLE teachers ADD COLUMN is_phone_verified INTEGER DEFAULT 0');
+      try {
+        await query('ALTER TABLE teachers ADD COLUMN is_phone_verified INTEGER DEFAULT 0');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
     }
 
     // 4. Create otp_verifications table
-    await query(`
-      CREATE TABLE IF NOT EXISTS otp_verifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        identifier TEXT NOT NULL,
-        otp_code TEXT NOT NULL,
-        purpose TEXT NOT NULL,
-        user_id INTEGER,
-        verification_token TEXT,
-        expires_at DATETIME NOT NULL,
-        attempts INTEGER DEFAULT 0,
-        is_verified INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    try {
-      await query('CREATE INDEX IF NOT EXISTS idx_otp_identifier_purpose ON otp_verifications(identifier, purpose)');
-      await query('CREATE INDEX IF NOT EXISTS idx_otp_token ON otp_verifications(verification_token)');
-    } catch (_) {}
+    if (isMysql) {
+      await query(`
+        CREATE TABLE IF NOT EXISTS otp_verifications (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          identifier VARCHAR(150) NOT NULL,
+          otp_code VARCHAR(20) NOT NULL,
+          purpose VARCHAR(50) NOT NULL,
+          user_id INT,
+          verification_token VARCHAR(255),
+          expires_at DATETIME NOT NULL,
+          attempts INT DEFAULT 0,
+          is_verified INT DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_otp_identifier_purpose (identifier, purpose),
+          INDEX idx_otp_token (verification_token)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    } else {
+      await query(`
+        CREATE TABLE IF NOT EXISTS otp_verifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          identifier TEXT NOT NULL,
+          otp_code TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          user_id INTEGER,
+          verification_token TEXT,
+          expires_at DATETIME NOT NULL,
+          attempts INTEGER DEFAULT 0,
+          is_verified INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      try {
+        await query('CREATE INDEX IF NOT EXISTS idx_otp_identifier_purpose ON otp_verifications(identifier, purpose)');
+        await query('CREATE INDEX IF NOT EXISTS idx_otp_token ON otp_verifications(verification_token)');
+      } catch (_) {}
+    }
 
     // 5. Backfill demo phones for test accounts if empty (enabling seamless phone login testing)
     try {

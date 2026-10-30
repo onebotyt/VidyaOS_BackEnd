@@ -85,10 +85,15 @@ function getBookletRegistry() {
  */
 async function ensureSyllabusSchemeColumn() {
   try {
-    await query("ALTER TABLE subjects ADD COLUMN syllabus_scheme TEXT DEFAULT '2026-27'");
+    const isMysql = (process.env.DB_CLIENT || '').toLowerCase() === 'mysql';
+    if (isMysql) {
+      await query("ALTER TABLE subjects ADD COLUMN syllabus_scheme VARCHAR(50) DEFAULT '2026-27'");
+    } else {
+      await query("ALTER TABLE subjects ADD COLUMN syllabus_scheme TEXT DEFAULT '2026-27'");
+    }
     logger.info('[CurriculumModel] Added syllabus_scheme column to subjects table.');
   } catch (err) {
-    if (!/duplicate column|already exists/i.test(err.message)) {
+    if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(err.message)) {
       logger.warn('[CurriculumModel] Could not add syllabus_scheme column:', { error: err.message });
     }
   }

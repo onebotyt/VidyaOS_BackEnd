@@ -186,7 +186,7 @@ async function syncAcademicSession(targetDate = new Date()) {
       }
 
       // Ensure is_current = 1
-      await conn.execute(`UPDATE academic_years SET is_current = 0 WHERE id != ?`, [currentAyId]);
+      await conn.execute(`UPDATE academic_years SET is_current = 0 WHERE id != ?`, [currentAyId || 0]);
       await conn.execute(`UPDATE academic_years SET is_current = 1, label = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [targetLabel, currentAyId]);
       resolved.session_label = targetLabel;
     } else {
@@ -196,7 +196,7 @@ async function syncAcademicSession(targetDate = new Date()) {
          VALUES (?, ?, ?, 1)`,
         [resolved.session_label, resolved.start_date, resolved.end_date]
       );
-      currentAyId = result[0]?.insertId ?? result.lastInsertRowid;
+      currentAyId = result?.insertId ?? result[0]?.insertId ?? result?.lastInsertRowid ?? 1;
       await conn.execute(`UPDATE academic_years SET is_current = 0 WHERE id != ?`, [currentAyId]);
     }
 

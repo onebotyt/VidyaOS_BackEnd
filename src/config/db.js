@@ -461,6 +461,55 @@ function normalizeParams(params = []) {
 }
 
 // =============================================================================
+// MySQL SQL Dialect Translator & Parameter Normalizer
+// =============================================================================
+
+function normalizeParamsForMysql(params = []) {
+  if (!Array.isArray(params)) return [];
+  return params.map((p) => {
+    if (p === undefined) return null;
+    return p;
+  });
+}
+
+function translateSqlForMysql(sql) {
+  let trans = sql;
+
+  // 1. PRAGMA table_info('table_name') -> information_schema query returning { name, type }
+  trans = trans.replace(
+    /PRAGMA\s+table_info\s*\(\s*['"]?([a-zA-Z0-9_]+)['"]?\s*\)/gi,
+    "SELECT COLUMN_NAME as name, DATA_TYPE as type FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '$1'"
+  );
+
+  // 2. AUTOINCREMENT -> AUTO_INCREMENT
+  trans = trans.replace(/\bAUTOINCREMENT\b/gi, 'AUTO_INCREMENT');
+
+  // 3. TEXT column with DEFAULT -> VARCHAR(255) DEFAULT (MySQL restriction on BLOB/TEXT default)
+  trans = trans.replace(/\bTEXT\s+DEFAULT\s+('?[^,\n)]+'?)/gi, 'VARCHAR(255) DEFAULT $1');
+
+  // 4. datetime('now', '-X days/minutes')
+  trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]-(\d+)\s*days?['"]\s*\)/gi, 'DATE_SUB(NOW(), INTERVAL $1 DAY)');
+  trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]\+(\d+)\s*days?['"]\s*\)/gi, 'DATE_ADD(NOW(), INTERVAL $1 DAY)');
+  trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]-(\d+)\s*minutes?['"]\s*\)/gi, 'DATE_SUB(NOW(), INTERVAL $1 MINUTE)');
+  trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*,\s*['"]\+(\d+)\s*minutes?['"]\s*\)/gi, 'DATE_ADD(NOW(), INTERVAL $1 MINUTE)');
+
+  // 5. datetime(col, '+X hours/days')
+  trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]\+(\d+)\s*hours?['"]\s*\)/gi, 'DATE_ADD($1, INTERVAL $2 HOUR)');
+  trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]-(\d+)\s*hours?['"]\s*\)/gi, 'DATE_SUB($1, INTERVAL $2 HOUR)');
+  trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]\+(\d+)\s*days?['"]\s*\)/gi, 'DATE_ADD($1, INTERVAL $2 DAY)');
+  trans = trans.replace(/datetime\s*\(\s*([^,]+?)\s*,\s*['"]-(\d+)\s*days?['"]\s*\)/gi, 'DATE_SUB($1, INTERVAL $2 DAY)');
+
+  // 6. datetime('now') -> NOW()
+  trans = trans.replace(/datetime\s*\(\s*['"]now['"]\s*\)/gi, 'NOW()');
+
+  // 7. ON CONFLICT(...) DO UPDATE SET col = excluded.col -> ON DUPLICATE KEY UPDATE col = VALUES(col)
+  trans = trans.replace(/ON\s+CONFLICT\s*(\([^)]*\))?\s*DO\s+UPDATE\s+SET/gi, 'ON DUPLICATE KEY UPDATE');
+  trans = trans.replace(/excluded\.([a-zA-Z0-9_]+)/gi, 'VALUES($1)');
+
+  return trans;
+}
+
+// =============================================================================
 // MySQL Helper Layer
 // =============================================================================
 
@@ -531,7 +580,30 @@ function getPool() {
 async function query(sql, params = []) {
   if (DB_CLIENT === 'mysql') {
     const p = getPool();
-    const [rows] = await p.execute(sql, params);
+    const transSql = translateSqlForMysql(sql);
+    const normParams = normalizeParamsForMysql(params);
+
+    // Handle CREATE INDEX IF NOT EXISTS in MySQL idempotently
+    const idxMatch = transSql.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/i);
+    if (idxMatch) {
+      const [, idxName, tblName, cols] = idxMatch;
+      try {
+        const [chk] = await p.execute(
+          'SELECT INDEX_NAME FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1',
+          [tblName, idxName]
+        );
+        if (!chk || chk.length === 0) {
+          const [res] = await p.execute(`CREATE INDEX ${idxName} ON ${tblName}(${cols})`);
+          return res;
+        }
+        return [{ affectedRows: 0 }];
+      } catch (err) {
+        if (/Duplicate key name/i.test(err.message)) return [{ affectedRows: 0 }];
+        throw err;
+      }
+    }
+
+    const [rows] = await p.execute(transSql, normParams);
     return rows;
   }
 
@@ -576,7 +648,25 @@ async function query(sql, params = []) {
  */
 async function getConnection() {
   if (DB_CLIENT === 'mysql') {
-    return await getPool().getConnection();
+    const rawConn = await getPool().getConnection();
+    return {
+      _raw: rawConn,
+      execute: async (sql, params = []) => {
+        const transSql = translateSqlForMysql(sql);
+        const normParams = normalizeParamsForMysql(params);
+        return await rawConn.execute(transSql, normParams);
+      },
+      query: async (sql, params = []) => {
+        const transSql = translateSqlForMysql(sql);
+        const normParams = normalizeParamsForMysql(params);
+        const [rows] = await rawConn.execute(transSql, normParams);
+        return rows;
+      },
+      beginTransaction: async () => await rawConn.beginTransaction(),
+      commit: async () => await rawConn.commit(),
+      rollback: async () => await rawConn.rollback(),
+      release: () => rawConn.release()
+    };
   }
 
   const db = getSqliteDb();
