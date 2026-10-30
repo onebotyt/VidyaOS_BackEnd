@@ -20,57 +20,35 @@ services:
       #
       # Render's free tier uses ephemeral containers that recreate their filesystem on every git push.
       # To preserve all your teachers, students, coursework, and attendance across redeploys,
-      # choose ONE of the 3 supported persistence methods below:
+      # use Aiven Cloud MySQL (or TiDB / AWS RDS / any remote MySQL host):
       #
       # ───────────────────────────────────────────────────────────────────────
-      # METHOD 1 (Recommended for Free Tier — 100% Free Forever, Zero Data Loss):
-      # Use free TiDB Cloud Serverless MySQL (25GB Free, never resets on restart):
-      # 1. Sign up at https://tidbcloud.com (Free, no credit card required)
-      # 2. Create a free Serverless cluster named "college_attendance"
-      # 3. Set the following environment variables in your Render Dashboard:
+      # METHOD 1 (Recommended — Aiven Cloud MySQL with SSL):
+      # Set the following environment variables in your Render Dashboard:
       #    - DB_CLIENT: mysql
-      #    - DB_HOST: <your-gateway-host> (e.g. gateway01.ap-southeast-1.prod.aws.tidbcloud.com)
-      #    - DB_PORT: 4000
-      #    - DB_USER: <your-username>
-      #    - DB_PASSWORD: <your-password>
-      #    - DB_NAME: college_attendance
+      #    - DB_HOST: mysql-25075aad-gdhami115-b393.k.aivencloud.com (or your Aiven host)
+      #    - DB_PORT: 26368
+      #    - DB_USER: avnadmin
+      #    - DB_PASSWORD: <your-aiven-password>
+      #    - DB_NAME: defaultdb
       #    - DB_SSL: true
-      #
-      # ───────────────────────────────────────────────────────────────────────
-      # METHOD 2 (Autonomous Cloud Gist Snapshot for SQLite on Free Tier):
-      # Automatically syncs your SQLite database to a private GitHub Gist before
-      # shutdown and restores it on startup. Zero cost, works on Render Free plan!
-      # 1. Generate a GitHub Personal Access Token (classic, check "gist" scope)
-      # 2. Add these to Render Dashboard Environment:
-      #    - GITHUB_BACKUP_TOKEN: <ghp_your_token>
-      #    - GITHUB_BACKUP_GIST: <optional_existing_gist_id_or_leave_empty_to_auto_create>
-      #
-      # ───────────────────────────────────────────────────────────────────────
-      # METHOD 3 (Render Persistent Disk — Starter Plan or Higher):
-      # If using Render's Starter Plan ($7/mo), attach a persistent disk under:
-      # Service Settings -> Disks -> Add Disk:
-      #   Name: vidyaos-data, Mount Path: /var/data, Size: 1 GB
-      # And set:
-      #   SQLITE_FILE: /var/data/college_attendance.sqlite
       # ───────────────────────────────────────────────────────────────────────
       - key: DB_CLIENT
-        value: sqlite
-
-      # If using Render Persistent Disk (mountPath: /var/data), uncomment below:
-      # - key: SQLITE_FILE
-      #   value: /var/data/college_attendance.sqlite
+        value: mysql
 
       # MySQL / Cloud DB Settings (Used when DB_CLIENT=mysql):
       - key: DB_HOST
-        sync: false          # Fill in Render dashboard if DB_CLIENT=mysql
+        sync: false          # Fill in Render dashboard
       - key: DB_PORT
-        value: 3306
+        value: 26368
       - key: DB_USER
-        sync: false
+        value: avnadmin
       - key: DB_PASSWORD
         sync: false
       - key: DB_NAME
-        value: college_attendance
+        value: defaultdb
+      - key: DB_SSL
+        value: true
       - key: DB_CONNECTION_LIMIT
         value: 10
 

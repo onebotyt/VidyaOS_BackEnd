@@ -38,3 +38,4 @@ function getResolvedDatabasePath(overridePath = null) {
 module.exports = {
   getResolvedDatabasePath
 };
+
