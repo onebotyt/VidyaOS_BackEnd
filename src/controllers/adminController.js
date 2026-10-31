@@ -728,7 +728,11 @@ class AdminController {
   static async getHierarchy(req, res) {
     try {
       const hierarchy = await AdminModel.getHierarchy();
-      res.json({ success: true, data: hierarchy });
+      res.json({
+        success: true,
+        data: hierarchy,
+        departments: hierarchy
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
