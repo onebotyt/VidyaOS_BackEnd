@@ -148,11 +148,11 @@ class TeachingGroupModel {
               FROM attendance_sessions s
               JOIN register_attendance ra ON ra.session_id = s.id
               WHERE s.register_id = ar.id AND s.state != 'DRAFT') as avg_attendance_pct,
-             (SELECT (a.title || ':::' || COALESCE(a.due_date, '') || ':::' || a.type)
+             (SELECT CONCAT(a.title, ':::', COALESCE(a.due_date, ''), ':::', a.type)
               FROM assessments a
-              WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= date('now', '-2 days'))
+              WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY))
               ORDER BY a.due_date ASC LIMIT 1) as upcoming_work,
-             MAX(0, CAST(7 - (julianday('now') - julianday(COALESCE(tg.deleted_at, 'now'))) AS INTEGER)) as days_remaining
+             GREATEST(0, CAST(7 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())) AS SIGNED)) as days_remaining
       FROM teaching_groups tg
       JOIN teachers t ON tg.teacher_id = t.id
       LEFT JOIN departments d ON t.department_id = d.id
@@ -1242,7 +1242,7 @@ class TeachingGroupModel {
        JOIN students s ON s.id = gm.student_id
        LEFT JOIN assessment_submissions sub ON sub.assessment_id = ? AND sub.student_id = s.id
        WHERE gm.group_id = ? AND gm.status = 'ENROLLED'
-       ORDER BY CAST(s.class_roll_no AS INTEGER) ASC, s.class_roll_no ASC`,
+       ORDER BY CAST(s.class_roll_no AS SIGNED) ASC, s.class_roll_no ASC`,
       [testId, groupId]
     );
   }

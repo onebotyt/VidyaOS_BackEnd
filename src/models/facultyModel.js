@@ -440,9 +440,9 @@ class FacultyModel {
   static async getExamsForMonth(register, targetMonth) {
     if (!register.department_id) return [];
     return await query(
-      `SELECT id, name, exam_date, max_marks FROM exams 
-       WHERE (subject_id = ? OR (department_id = ? AND year = ? AND semester = ?))
-         AND exam_date LIKE ? ORDER BY exam_date ASC`,
+      `SELECT id, title as name, due_date as exam_date, max_marks FROM assessments
+       WHERE type = 'EXAM' AND (subject_id = ? OR (department_id = ? AND year = ? AND semester = ?))
+         AND due_date LIKE ? ORDER BY due_date ASC`,
       [register.subject_id, register.department_id, register.year, register.semester, `${targetMonth}%`]
     );
   }
@@ -457,8 +457,8 @@ class FacultyModel {
   static async getAssignmentsForMonth(register, targetMonth) {
     if (!register.department_id) return [];
     return await query(
-      `SELECT id, title, due_date, max_marks FROM assignments
-       WHERE (subject_id = ? OR (department_id = ? AND year = ? AND semester = ?))
+      `SELECT id, title, due_date, max_marks FROM assessments
+       WHERE type = 'ASSIGNMENT' AND (subject_id = ? OR (department_id = ? AND year = ? AND semester = ?))
          AND due_date LIKE ? ORDER BY due_date ASC`,
       [register.subject_id, register.department_id, register.year, register.semester, `${targetMonth}%`]
     );

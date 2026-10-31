@@ -110,7 +110,7 @@ class ReportModel {
          LEFT JOIN register_attendance ra ON ra.session_id = s.id AND ra.student_id = ass.student_id
          WHERE ${trendWhere}
          GROUP BY ass.student_id
-         HAVING total > 0 AND (CAST(attended AS REAL) / total) * 100 < ?
+         HAVING total > 0 AND ((attended * 100.0) / total) < ?
        ) d`,
       trendParams
     );

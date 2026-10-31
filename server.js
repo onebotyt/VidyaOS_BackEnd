@@ -361,6 +361,16 @@ async function startServer() {
   await dbSyncService.initDatabasePersistence();
   await testConnection();
 
+  // Ensure compatibility views (exams, exam_scores, assignments, etc.) exist across MySQL / SQLite
+  try {
+    const { ensureCompatibilityViews } = require('./src/config/db');
+    if (typeof ensureCompatibilityViews === 'function') {
+      await ensureCompatibilityViews();
+    }
+  } catch (err) {
+    logger.warn(`Failed to auto-create compatibility views: ${err.message}`);
+  }
+
   // Automatically synchronize active academic session & run semester promotion on startup
   try {
     const syncRes = await sessionService.syncAcademicSession();
