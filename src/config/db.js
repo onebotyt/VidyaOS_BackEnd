@@ -9,43 +9,7 @@ require('dotenv').config();
 const logger = require('../utils/logger');
 const { getResolvedDatabasePath } = require('./dbPath');
 
-let DB_CLIENT = (process.env.DB_CLIENT || 'sqlite').toLowerCase();
-
-/**
- * Checks whether an error is a network, host resolution, or connection drop failure.
- */
-function isNetworkOrDnsError(err) {
-  if (!err) return false;
-  const msg = String(err.message || '');
-  const code = String(err.code || '');
-  return (
-    code === 'ENOTFOUND' ||
-    code === 'ECONNREFUSED' ||
-    code === 'ETIMEDOUT' ||
-    code === 'EHOSTUNREACH' ||
-    code === 'ENETUNREACH' ||
-    code === 'PROTOCOL_CONNECTION_LOST' ||
-    code === 'ER_BAD_DB_ERROR' ||
-    code === 'ER_ACCESS_DENIED_ERROR' ||
-    /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|Access denied|getaddrinfo/i.test(msg)
-  );
-}
-
-/**
- * Handles automatic graceful failover from MySQL to SQLite if MySQL is unreachable or down.
- */
-function handleMysqlConnectionFailure(err) {
-  if (DB_CLIENT === 'mysql' && isNetworkOrDnsError(err)) {
-    logger.warn(`[DB FAILOVER] MySQL connection failed (${err.code || err.message}). Gracefully switching to local SQLite database.`);
-    DB_CLIENT = 'sqlite';
-    if (pool) {
-      try { pool.end().catch(() => {}); } catch (_) {}
-      pool = null;
-    }
-    return true;
-  }
-  return false;
-}
+const DB_CLIENT = (process.env.DB_CLIENT || 'sqlite').toLowerCase();
 
 let pool = null;
 let sqliteDb = null;
@@ -771,42 +735,32 @@ function getPool() {
  */
 async function query(sql, params = []) {
   if (DB_CLIENT === 'mysql') {
-    try {
-      const p = getPool();
-      const transSql = translateSqlForMysql(sql);
-      const normParams = normalizeParamsForMysql(params);
+    const p = getPool();
+    const transSql = translateSqlForMysql(sql);
+    const normParams = normalizeParamsForMysql(params);
 
-      // Handle CREATE INDEX IF NOT EXISTS in MySQL idempotently
-      const idxMatch = transSql.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/i);
-      if (idxMatch) {
-        const [, idxName, tblName, cols] = idxMatch;
-        try {
-          const [chk] = await p.execute(
-            'SELECT INDEX_NAME FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1',
-            [tblName, idxName]
-          );
-          if (!chk || chk.length === 0) {
-            const [res] = await p.execute(`CREATE INDEX ${idxName} ON ${tblName}(${cols})`);
-            return res;
-          }
-          return [{ affectedRows: 0 }];
-        } catch (err) {
-          if (/Duplicate key name/i.test(err.message)) return [{ affectedRows: 0 }];
-          if (handleMysqlConnectionFailure(err)) {
-            return await query(sql, params);
-          }
-          throw err;
+    // Handle CREATE INDEX IF NOT EXISTS in MySQL idempotently
+    const idxMatch = transSql.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/i);
+    if (idxMatch) {
+      const [, idxName, tblName, cols] = idxMatch;
+      try {
+        const [chk] = await p.execute(
+          'SELECT INDEX_NAME FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1',
+          [tblName, idxName]
+        );
+        if (!chk || chk.length === 0) {
+          const [res] = await p.execute(`CREATE INDEX ${idxName} ON ${tblName}(${cols})`);
+          return res;
         }
+        return [{ affectedRows: 0 }];
+      } catch (err) {
+        if (/Duplicate key name/i.test(err.message)) return [{ affectedRows: 0 }];
+        throw err;
       }
-
-      const [rows] = await p.execute(transSql, normParams);
-      return rows;
-    } catch (err) {
-      if (handleMysqlConnectionFailure(err)) {
-        return await query(sql, params);
-      }
-      throw err;
     }
+
+    const [rows] = await p.execute(transSql, normParams);
+    return rows;
   }
 
   // SQLite Execution
@@ -855,32 +809,25 @@ async function query(sql, params = []) {
  */
 async function getConnection() {
   if (DB_CLIENT === 'mysql') {
-    try {
-      const rawConn = await getPool().getConnection();
-      return {
-        _raw: rawConn,
-        execute: async (sql, params = []) => {
-          const transSql = translateSqlForMysql(sql);
-          const normParams = normalizeParamsForMysql(params);
-          return await rawConn.execute(transSql, normParams);
-        },
-        query: async (sql, params = []) => {
-          const transSql = translateSqlForMysql(sql);
-          const normParams = normalizeParamsForMysql(params);
-          const [rows] = await rawConn.execute(transSql, normParams);
-          return rows;
-        },
-        beginTransaction: async () => await rawConn.beginTransaction(),
-        commit: async () => await rawConn.commit(),
-        rollback: async () => await rawConn.rollback(),
-        release: () => rawConn.release()
-      };
-    } catch (err) {
-      if (handleMysqlConnectionFailure(err)) {
-        return await getConnection();
-      }
-      throw err;
-    }
+    const rawConn = await getPool().getConnection();
+    return {
+      _raw: rawConn,
+      execute: async (sql, params = []) => {
+        const transSql = translateSqlForMysql(sql);
+        const normParams = normalizeParamsForMysql(params);
+        return await rawConn.execute(transSql, normParams);
+      },
+      query: async (sql, params = []) => {
+        const transSql = translateSqlForMysql(sql);
+        const normParams = normalizeParamsForMysql(params);
+        const [rows] = await rawConn.execute(transSql, normParams);
+        return rows;
+      },
+      beginTransaction: async () => await rawConn.beginTransaction(),
+      commit: async () => await rawConn.commit(),
+      rollback: async () => await rawConn.rollback(),
+      release: () => rawConn.release()
+    };
   }
 
   const db = getSqliteDb();
@@ -920,24 +867,17 @@ async function getConnection() {
  */
 async function withTransaction(callback) {
   if (DB_CLIENT === 'mysql') {
+    const connection = await getConnection();
     try {
-      const connection = await getConnection();
-      try {
-        await connection.beginTransaction();
-        const result = await callback(connection);
-        await connection.commit();
-        return result;
-      } catch (error) {
-        await connection.rollback();
-        throw error;
-      } finally {
-        connection.release();
-      }
-    } catch (err) {
-      if (handleMysqlConnectionFailure(err)) {
-        return await withTransaction(callback);
-      }
-      throw err;
+      await connection.beginTransaction();
+      const result = await callback(connection);
+      await connection.commit();
+      return result;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
   }
 
@@ -1117,9 +1057,6 @@ async function ensureCompatibilityViews() {
       `);
       logger.info('MySQL compatibility views (exams, exam_scores, assignments, etc.) verified successfully.');
     } catch (err) {
-      if (handleMysqlConnectionFailure(err)) {
-        return await ensureCompatibilityViews();
-      }
       logger.warn('Failed to ensure MySQL compatibility views', { error: err.message });
     }
   } else {
@@ -1178,15 +1115,14 @@ async function testConnection() {
     } catch (err) {
       logger.warn(
         'MySQL Connection Warning: Unable to connect to MySQL database at ' +
-          `${process.env.DB_HOST}:${process.env.DB_PORT}. Automatically failing over to local SQLite database.`,
+          `${process.env.DB_HOST}:${process.env.DB_PORT}. Ensure MySQL service is running and database exists.`,
         { error: err.message }
       );
-      handleMysqlConnectionFailure(err);
-      // Fall through to SQLite initialization and testing below
+      return false;
     }
   }
 
-  // SQLite (Primary or Failover)
+  // SQLite
   try {
     const db = getSqliteDb();
     const row = db.prepare('SELECT 1 + 1 AS solution').get();

@@ -357,8 +357,9 @@ class AdminController {
    * @usesModel AdminModel.createHODTransaction() (models/adminModel.js)
    */
   static async createHod(req, res) {
-    const { full_name, email, password, department_id, phone, employee_id } = req.body;
+    const { full_name, email, password, department_id, phone, employee_id, employeeId } = req.body;
     const gmail = email.toLowerCase().trim();
+    const effectiveEmployeeId = employeeId || employee_id || null;
 
     try {
       const depts = await AdminModel.getDepartmentById(department_id);
@@ -388,7 +389,7 @@ class AdminController {
         gmail,
         passwordHash,
         departmentId: department_id,
-        employeeId,
+        employeeId: effectiveEmployeeId,
         fullName: full_name,
         phone,
         ayId: currentAy.id,
