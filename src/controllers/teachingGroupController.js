@@ -90,7 +90,11 @@ class TeachingGroupController {
         exists = await TeachingGroupModel.checkInviteCode(inviteCode);
       }
 
-      const targetDeptId = department_id ? Number(department_id) : (teacher.department_id || null);
+      let targetDeptId = department_id ? Number(department_id) : (teacher.department_id || null);
+      if (!targetDeptId) {
+        const defaultDept = await query(`SELECT id FROM departments ORDER BY id ASC LIMIT 1`);
+        targetDeptId = defaultDept[0]?.id || 2;
+      }
       const finalName = (name && name.trim()) ? name.trim() : subject_name.trim();
       const finalUnits = Math.min(20, Math.max(1, parseInt(total_units) || 5));
 
@@ -210,7 +214,7 @@ class TeachingGroupController {
           message: `You have successfully enrolled into teaching group "${group.name}".`,
           linkUrl: `/student/groups.html?id=${group.id}`
         });
-      } catch (_) {}
+      } catch (_) { }
 
       res.status(201).json({
         success: true,
@@ -805,7 +809,7 @@ class TeachingGroupController {
               linkUrl: `/student/groups.html`
             });
             notifiedCount++;
-          } catch (_) {}
+          } catch (_) { }
         }
       }
 
@@ -1109,11 +1113,11 @@ class TeachingGroupController {
       const formatted = await Promise.all(rows.map(async r => {
         let qList = null;
         if (r.questions) {
-          try { qList = typeof r.questions === 'string' ? JSON.parse(r.questions) : r.questions; } catch {}
+          try { qList = typeof r.questions === 'string' ? JSON.parse(r.questions) : r.questions; } catch { }
         }
         let instList = null;
         if (r.instructions) {
-          try { instList = typeof r.instructions === 'string' ? JSON.parse(r.instructions) : r.instructions; } catch {}
+          try { instList = typeof r.instructions === 'string' ? JSON.parse(r.instructions) : r.instructions; } catch { }
         }
 
         // Student Visibility Rule:
@@ -1316,7 +1320,7 @@ class TeachingGroupController {
             if (parsed.remarks !== undefined) rem = parsed.remarks;
             if (parsed.question_scores) question_scores = parsed.question_scores;
             if (parsed.questions) questions = parsed.questions;
-          } catch {}
+          } catch { }
         }
 
         const isRegAbsent = absentStudentIds.has(s.student_id);
@@ -1353,8 +1357,8 @@ class TeachingGroupController {
         }
       }
 
-      res.status(200).json({ 
-        success: true, 
+      res.status(200).json({
+        success: true,
         data: cleaned,
         meta: {
           attendance_session_found: sessionFound,
@@ -1413,12 +1417,12 @@ class TeachingGroupController {
 
       let questions = customData.questions;
       if (!questions && t.questions) {
-        try { questions = typeof t.questions === 'string' ? JSON.parse(t.questions) : t.questions; } catch {}
+        try { questions = typeof t.questions === 'string' ? JSON.parse(t.questions) : t.questions; } catch { }
       }
 
       let instructions = customData.instructions;
       if (!instructions && t.instructions) {
-        try { instructions = typeof t.instructions === 'string' ? JSON.parse(t.instructions) : t.instructions; } catch {}
+        try { instructions = typeof t.instructions === 'string' ? JSON.parse(t.instructions) : t.instructions; } catch { }
       }
 
       let roster = customData.roster;
@@ -1432,7 +1436,7 @@ class TeachingGroupController {
               const fb = JSON.parse(s.feedback);
               if (fb.is_absent !== undefined) isAb = Boolean(fb.is_absent);
               if (Array.isArray(fb.question_scores)) qScores = fb.question_scores;
-            } catch {}
+            } catch { }
           }
           return {
             student_id: s.student_id,

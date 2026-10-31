@@ -148,11 +148,11 @@ class TeachingGroupModel {
               FROM attendance_sessions s
               JOIN register_attendance ra ON ra.session_id = s.id
               WHERE s.register_id = ar.id AND s.state != 'DRAFT') as avg_attendance_pct,
-             (SELECT CONCAT(a.title, ':::', COALESCE(a.due_date, ''), ':::', a.type)
+             (SELECT (a.title || ':::' || COALESCE(a.due_date, '') || ':::' || a.type)
               FROM assessments a
-              WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY))
+              WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= date('now', '-2 days'))
               ORDER BY a.due_date ASC LIMIT 1) as upcoming_work,
-             GREATEST(0, 7 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW()))) as days_remaining
+             MAX(0, CAST(7 - (julianday('now') - julianday(COALESCE(tg.deleted_at, 'now'))) AS INTEGER)) as days_remaining
       FROM teaching_groups tg
       JOIN teachers t ON tg.teacher_id = t.id
       LEFT JOIN departments d ON t.department_id = d.id
@@ -246,10 +246,15 @@ class TeachingGroupModel {
         if (subRows && subRows[0]) {
           targetSubjectId = subRows[0].id;
         } else {
+          let effDeptId = targetDeptId;
+          if (!effDeptId) {
+            const firstDept = await conn.query(`SELECT id FROM departments ORDER BY id ASC LIMIT 1`);
+            effDeptId = firstDept[0]?.id || 2;
+          }
           const newSub = await conn.query(
-            `INSERT INTO subjects (name, code, department_id, year, semester, credits, is_active, created_at)
-             VALUES (?, ?, ?, ?, ?, 3, 1, CURRENT_TIMESTAMP)`,
-            [subjectName || name, finalCode || 'SUB101', targetDeptId, year, semester]
+            `INSERT INTO subjects (name, code, department_id, year, semester, is_active, created_at)
+             VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
+            [subjectName || name, finalCode || 'SUB101', effDeptId, year, semester]
           );
           targetSubjectId = newSub.insertId || newSub.lastInsertRowid;
         }

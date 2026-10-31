@@ -451,8 +451,12 @@ function translateSqlForSqlite(sql) {
   }
 
   // Handle DATE_SUB and DATE_ADD (allowing nested expressions with commas like COALESCE)
-  trans = trans.replace(/DATE_SUB\s*\(\s*(.+?)\s*,\s*INTERVAL\s+(\d+)\s+MINUTE\s*\)/gi, "datetime($1, '-$2 minutes')");
-  trans = trans.replace(/DATE_ADD\s*\(\s*(.+?)\s*,\s*INTERVAL\s+(\d+)\s+MINUTE\s*\)/gi, "datetime($1, '+$2 minutes')");
+  trans = trans.replace(/DATE_SUB\s*\(\s*(.+?)\s*,\s*INTERVAL\s+(\d+)\s+(MINUTE|DAY|HOUR|SECOND)S?\s*\)/gi, (m, expr, num, unit) => {
+    return `datetime(${expr}, '-${num} ${unit.toLowerCase()}s')`;
+  });
+  trans = trans.replace(/DATE_ADD\s*\(\s*(.+?)\s*,\s*INTERVAL\s+(\d+)\s+(MINUTE|DAY|HOUR|SECOND)S?\s*\)/gi, (m, expr, num, unit) => {
+    return `datetime(${expr}, '+${num} ${unit.toLowerCase()}s')`;
+  });
 
   // Handle MySQL CURDATE() -> SQLite CURRENT_DATE
   trans = trans.replace(/CURDATE\s*\(\s*\)/gi, "CURRENT_DATE");
@@ -676,6 +680,7 @@ async function query(sql, params = []) {
       return resultArr;
     }
   } catch (err) {
+    console.error('[SQL ERROR]', err.message, '\nSQL:', transSql, '\nPARAMS:', normParams);
     if (err.message && err.message.includes('UNIQUE constraint failed')) {
       err.code = 'ER_DUP_ENTRY';
     }
