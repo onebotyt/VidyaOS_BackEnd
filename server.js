@@ -293,6 +293,34 @@ app.use((req, res, next) => {
 // Public Departments Route for Student & Faculty Registration
 app.get(['/api/v1/departments', '/api/v1/auth/departments'], (req, res) => authController.getDepartments(req, res));
 
+// Public & Authenticated Institutional Branding / Settings Endpoint
+app.get(['/api/v1/settings/institution', '/api/v1/auth/institution-profile', '/api/v1/admin/settings/public'], async (req, res) => {
+  try {
+    const { query } = require('./src/config/db');
+    const rows = await query(`
+      SELECT setting_key, setting_value 
+      FROM system_settings 
+      WHERE setting_key IN ('institution_name', 'institution_code', 'institution_tagline', 'institution_logo_url', 'institution_banner_url', 'institution_affiliation', 'campus_location')
+    `);
+    const map = {};
+    (rows || []).forEach(r => { map[r.setting_key] = r.setting_value; });
+    res.json({
+      success: true,
+      data: {
+        institution_name: map.institution_name || 'Government Polytechnic Nainital',
+        institution_code: map.institution_code || 'GP-UBTER-101',
+        institution_tagline: map.institution_tagline || 'Uttarakhand | Completely Adhered to NBA Guidelines',
+        institution_logo_url: map.institution_logo_url || '/images/college-logo.svg',
+        institution_banner_url: map.institution_banner_url || '/admin/dashboard/campus-nainital.jpg',
+        institution_affiliation: map.institution_affiliation || 'Uttarakhand Board of Technical Education, Roorkee (UBTER)',
+        campus_location: map.campus_location || 'Uttarakhand, India'
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
 // Mount /api/v1 REST API Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/students', studentRoutes);

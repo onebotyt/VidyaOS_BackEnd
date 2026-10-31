@@ -10,7 +10,9 @@ const { body, param } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
 const validate = require('../middleware/validate');
+const { makeUploader } = require('../middleware/upload');
 const AdminController = require('../controllers/adminController');
+const uploadBranding = makeUploader('branding', 15);
 
 // All admin routes require authentication and SYSTEM_ADMIN role
 router.use(auth, requireRole('SYSTEM_ADMIN'));
@@ -232,6 +234,35 @@ router.put('/settings', [
   body('settings').isObject().withMessage('settings object required'),
   validate
 ], AdminController.updateSettings);
+
+// @route   POST /api/v1/admin/branding/upload
+// @desc    Upload institutional college logo or campus building banner
+// @access  Protected (SYSTEM_ADMIN)
+router.post('/branding/upload', uploadBranding.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: { message: 'No image file uploaded' } });
+    }
+    const fileUrl = `/uploads/branding/${req.file.filename}`;
+    const type = req.body.type || 'logo';
+    const key = type === 'banner' ? 'institution_banner_url' : 'institution_logo_url';
+
+    const AdminModel = require('../models/adminModel');
+    await AdminModel.updateSettings([[key, fileUrl]], req.user?.id || 1);
+
+    res.json({
+      success: true,
+      message: `${type === 'banner' ? 'Campus banner' : 'College logo'} uploaded and saved successfully`,
+      data: {
+        url: fileUrl,
+        key: key,
+        filename: req.file.filename
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
 
 // @route   GET /api/v1/admin/reports/department
 // @route   GET /api/v1/admin/reports/attendance
