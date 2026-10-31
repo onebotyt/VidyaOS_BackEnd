@@ -18,6 +18,16 @@ const validate = require('../middleware/validate');
 const StudentController = require('../controllers/studentController');
 
 // ==========================================
+// Department Roster & Students Management
+// ==========================================
+
+// @route   GET /api/v1/students
+// @desc    Retrieve department student roster with optional cohort & search filters
+// @access  Protected (TEACHER, SYSTEM_ADMIN)
+// @handler StudentController.getStudents() -> StudentModel.getStudents()
+router.get('/', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), StudentController.getStudents);
+
+// ==========================================
 // Student Self-Service Profile & Attendance
 // ==========================================
 

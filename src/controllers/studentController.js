@@ -18,6 +18,32 @@ const notificationService = require('../services/notificationService');
 
 class StudentController {
   /**
+   * Retrieve department student roster
+   * @route GET /api/v1/students (routes/students.js)
+   * @access Protected (TEACHER, SYSTEM_ADMIN)
+   * @usesModel StudentModel.getStudents() (models/studentModel.js)
+   */
+  static async getStudents(req, res) {
+    try {
+      let deptId = req.query.department_id || req.query.branch_id || req.teacher_department_id || req.user.department_id || req.user.hod_department_id;
+      if (!deptId && req.user.teacher_id) {
+        deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+      }
+      const { year, semester, search, status, academic_year_id, limit = 500, offset = 0 } = req.query;
+      const result = await StudentModel.getStudents(deptId, { year, semester, search, status, academic_year_id, limit, offset });
+      res.json({
+        success: true,
+        data: result.students,
+        students: result.students,
+        total: result.total,
+        pagination: { total: result.total, limit: parseInt(limit, 10), offset: parseInt(offset, 10) }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
    * Retrieves self student profile including biometric enrollment status and attendance overview.
    * @route GET /api/v1/students/me (routes/students.js)
    * @access STUDENT
