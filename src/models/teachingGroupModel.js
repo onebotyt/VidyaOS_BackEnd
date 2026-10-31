@@ -727,15 +727,16 @@ class TeachingGroupModel {
    */
   static async getUnenrolledStudents(groupId, group, targetDeptId, search) {
     let sql = `
-      SELECT DISTINCT s.id as student_id, s.full_name, s.official_enrollment_no, s.official_enrollment_no as enrollment_no,
-             s.registration_no,
-             COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
-             e.semester, e.year,
-             d.id as department_id, d.name as department_name, d.code as department_code
-      FROM students s
-      JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
-      LEFT JOIN departments d ON e.department_id = d.id
-      WHERE s.id NOT IN (SELECT student_id FROM teaching_group_members WHERE group_id = ?)
+      SELECT sub.* FROM (
+        SELECT DISTINCT s.id as student_id, s.full_name, s.official_enrollment_no, s.official_enrollment_no as enrollment_no,
+               s.registration_no,
+               COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no,
+               e.semester, e.year,
+               d.id as department_id, d.name as department_name, d.code as department_code
+        FROM students s
+        JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+        LEFT JOIN departments d ON e.department_id = d.id
+        WHERE s.id NOT IN (SELECT student_id FROM teaching_group_members WHERE group_id = ?)
     `;
     const params = [groupId];
 
@@ -751,7 +752,11 @@ class TeachingGroupModel {
       params.push(search, search, search);
     }
 
-    sql += ` ORDER BY class_roll_no ASC, s.full_name ASC LIMIT 100`;
+    sql += `
+      ) sub
+      ORDER BY sub.class_roll_no ASC, sub.full_name ASC
+      LIMIT 100
+    `;
     return await query(sql, params);
   }
 

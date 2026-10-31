@@ -421,13 +421,16 @@ class ReportModel {
     }
 
     const students = await query(
-      `SELECT DISTINCT s.id as student_id, s.full_name, s.official_enrollment_no, COALESCE(e.class_roll_no, s.class_roll_no) as class_roll_no,
-              COALESCE(d.name, 'General') as department_name
-       FROM students s
-       LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
-       LEFT JOIN departments d ON e.department_id = d.id
-       ${studentFilter}
-       ORDER BY class_roll_no ASC, s.full_name ASC`,
+      `SELECT sub.* FROM (
+         SELECT DISTINCT s.id as student_id, s.full_name, s.official_enrollment_no,
+                COALESCE(e.class_roll_no, s.class_roll_no, 0) as class_roll_no,
+                COALESCE(d.name, 'General') as department_name
+         FROM students s
+         LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+         LEFT JOIN departments d ON e.department_id = d.id
+         ${studentFilter}
+       ) sub
+       ORDER BY sub.class_roll_no ASC, sub.full_name ASC`,
       params
     );
 

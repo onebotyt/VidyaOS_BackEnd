@@ -108,40 +108,44 @@ class FacultyModel {
     let studentRows = [];
     if (teacherId) {
       studentRows = await query(
-        `SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
-                COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
-                u.email, u.phone,
-                e.year, e.semester,
-                d.name as department_name,
-                tg.id as group_id, tg.name as group_name, tg.subject_name
-         FROM teaching_groups tg
-         JOIN teaching_group_members tgm ON tgm.group_id = tg.id AND tgm.status IN ('ENROLLED', 'ACTIVE')
-         JOIN students st ON tgm.student_id = st.id
-         JOIN users u ON st.user_id = u.id
-         LEFT JOIN enrollments e ON e.student_id = st.id AND e.status = 'ENROLLED'
-         LEFT JOIN departments d ON e.department_id = d.id
-         WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE'
-         ORDER BY class_roll_no ASC, st.full_name ASC`,
+        `SELECT sub.* FROM (
+           SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+                  COALESCE(st.class_roll_no, e.class_roll_no, 0) as class_roll_no,
+                  u.email, u.phone,
+                  e.year, e.semester,
+                  d.name as department_name,
+                  tg.id as group_id, tg.name as group_name, tg.subject_name
+           FROM teaching_groups tg
+           JOIN teaching_group_members tgm ON tgm.group_id = tg.id AND tgm.status IN ('ENROLLED', 'ACTIVE')
+           JOIN students st ON tgm.student_id = st.id
+           JOIN users u ON st.user_id = u.id
+           LEFT JOIN enrollments e ON e.student_id = st.id AND e.status = 'ENROLLED'
+           LEFT JOIN departments d ON e.department_id = d.id
+           WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE'
+         ) sub
+         ORDER BY sub.class_roll_no ASC, sub.full_name ASC`,
         [teacherId]
       );
     }
 
     if (!studentRows.length && teacherId) {
       studentRows = await query(
-        `SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
-                COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
-                u.email, u.phone,
-                e.year, e.semester,
-                d.name as department_name,
-                ar.id as group_id, ar.name as group_name, s.name as subject_name
-         FROM attendance_registers ar
-         LEFT JOIN subjects s ON ar.subject_id = s.id
-         JOIN enrollments e ON e.department_id = ar.department_id AND e.year = ar.year AND e.semester = ar.semester AND e.status = 'ENROLLED'
-         JOIN students st ON e.student_id = st.id
-         JOIN users u ON st.user_id = u.id
-         LEFT JOIN departments d ON e.department_id = d.id
-         WHERE ar.teacher_id = ? AND ar.is_active = 1
-         ORDER BY class_roll_no ASC, st.full_name ASC`,
+        `SELECT sub.* FROM (
+           SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+                  COALESCE(st.class_roll_no, e.class_roll_no, 0) as class_roll_no,
+                  u.email, u.phone,
+                  e.year, e.semester,
+                  d.name as department_name,
+                  ar.id as group_id, ar.name as group_name, s.name as subject_name
+           FROM attendance_registers ar
+           LEFT JOIN subjects s ON ar.subject_id = s.id
+           JOIN enrollments e ON e.department_id = ar.department_id AND e.year = ar.year AND e.semester = ar.semester AND e.status = 'ENROLLED'
+           JOIN students st ON e.student_id = st.id
+           JOIN users u ON st.user_id = u.id
+           LEFT JOIN departments d ON e.department_id = d.id
+           WHERE ar.teacher_id = ? AND ar.is_active = 1
+         ) sub
+         ORDER BY sub.class_roll_no ASC, sub.full_name ASC`,
         [teacherId]
       );
     }
