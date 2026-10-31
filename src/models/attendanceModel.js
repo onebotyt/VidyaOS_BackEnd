@@ -261,47 +261,47 @@ class AttendanceModel {
   static async getEsp32DayScans(reg, date) {
     if (reg.group_id) {
       return await query(
-        `SELECT ep.id as scan_id, ep.scan_time, ep.device_id,
+        `SELECT MIN(ep.id) as scan_id, MIN(ep.scan_time) as scan_time, MIN(ep.device_id) as device_id,
                 s.id as student_id, s.full_name, s.official_enrollment_no, s.registration_no,
-                COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no,
-                d.name as device_name
+                COALESCE(s.class_roll_no, MAX(e.class_roll_no), 0) as class_roll_no,
+                MAX(d.name) as device_name
          FROM esp32_presence ep
          JOIN students s ON ep.student_id = s.id
          JOIN teaching_group_members tgm ON tgm.student_id = s.id AND tgm.group_id = ? AND tgm.status = 'ENROLLED'
          LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
          LEFT JOIN devices d ON ep.device_id = d.id
          WHERE DATE(ep.scan_time) = ?
-         GROUP BY s.id
-         ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 0) ASC`,
+         GROUP BY s.id, s.full_name, s.official_enrollment_no, s.registration_no, s.class_roll_no
+         ORDER BY COALESCE(s.class_roll_no, MAX(e.class_roll_no), 0) ASC`,
         [reg.group_id, date]
       );
     } else if (reg.department_id) {
       return await query(
-        `SELECT ep.id as scan_id, ep.scan_time, ep.device_id,
+        `SELECT MIN(ep.id) as scan_id, MIN(ep.scan_time) as scan_time, MIN(ep.device_id) as device_id,
                 s.id as student_id, s.full_name, s.official_enrollment_no, s.registration_no,
-                COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no,
-                d.name as device_name
+                COALESCE(s.class_roll_no, MAX(e.class_roll_no), 0) as class_roll_no,
+                MAX(d.name) as device_name
          FROM esp32_presence ep
          JOIN students s ON ep.student_id = s.id
          JOIN enrollments e ON e.student_id = s.id 
               AND e.department_id = ? AND e.year = ? AND e.semester = ? AND e.academic_year_id = ? AND e.status = 'ENROLLED'
          LEFT JOIN devices d ON ep.device_id = d.id
          WHERE DATE(ep.scan_time) = ?
-         GROUP BY s.id
-         ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 0) ASC`,
+         GROUP BY s.id, s.full_name, s.official_enrollment_no, s.registration_no, s.class_roll_no
+         ORDER BY COALESCE(s.class_roll_no, MAX(e.class_roll_no), 0) ASC`,
         [reg.department_id, reg.year, reg.semester, reg.academic_year_id, date]
       );
     } else {
       return await query(
-        `SELECT ep.id as scan_id, ep.scan_time, ep.device_id,
+        `SELECT MIN(ep.id) as scan_id, MIN(ep.scan_time) as scan_time, MIN(ep.device_id) as device_id,
                 s.id as student_id, s.full_name, s.official_enrollment_no,
                 1 as class_roll_no,
-                d.name as device_name
+                MAX(d.name) as device_name
          FROM esp32_presence ep
          JOIN students s ON ep.student_id = s.id
          LEFT JOIN devices d ON ep.device_id = d.id
          WHERE DATE(ep.scan_time) = ?
-         GROUP BY s.id
+         GROUP BY s.id, s.full_name, s.official_enrollment_no
          ORDER BY s.full_name ASC`,
         [date]
       );

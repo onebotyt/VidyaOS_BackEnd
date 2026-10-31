@@ -626,6 +626,15 @@ function getPool() {
       timezone: '+00:00',
       dateStrings: true
     });
+
+    // Ensure session sql_mode removes ONLY_FULL_GROUP_BY for seamless MySQL compatibility
+    try {
+      pool.on('connection', (conn) => {
+        try {
+          conn.query("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))", () => {});
+        } catch (_) {}
+      });
+    } catch (_) {}
   }
   return pool;
 }
@@ -840,6 +849,9 @@ async function ensureCompatibilityViews() {
     const p = getPool();
     if (!p) return;
     try {
+      try {
+        await p.execute("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))");
+      } catch (_) {}
       await p.execute(`
         CREATE OR REPLACE VIEW exams AS
         SELECT id, teacher_id, subject_id, department_id, group_id, year, semester, academic_year_id,

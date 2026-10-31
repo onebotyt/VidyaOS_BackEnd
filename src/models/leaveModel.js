@@ -84,7 +84,7 @@ class LeaveModel {
        LEFT JOIN enrollments e ON e.student_id = s.id
        LEFT JOIN departments d ON e.department_id = d.id
        ${where} ${teacherFilter}
-       GROUP BY la.id
+       GROUP BY la.id, s.full_name, e.class_roll_no, d.name, e.year, e.semester
        ORDER BY la.status = 'PENDING' DESC, la.id DESC`,
       params
     );

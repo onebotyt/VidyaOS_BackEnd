@@ -653,7 +653,7 @@ class AdminModel {
        LEFT JOIN students st ON ep.student_id = st.id
        LEFT JOIN enrollments e ON e.student_id = st.id
        WHERE ${whereSql}
-       GROUP BY d.id, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)
+       GROUP BY d.id, d.name, d.code, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)
        ORDER BY scan_count DESC`,
       params
     );
@@ -720,7 +720,7 @@ class AdminModel {
        FROM enrollments e
        JOIN departments d ON e.department_id = d.id
        WHERE ${cohortWhere.join(' AND ')}
-       GROUP BY d.id, e.year, e.semester
+       GROUP BY d.id, d.name, d.code, e.year, e.semester
        ORDER BY d.name, e.year, e.semester`,
       cohortParams
     );
@@ -746,7 +746,7 @@ class AdminModel {
        LEFT JOIN students st ON ep.student_id = st.id
        LEFT JOIN enrollments e ON e.student_id = st.id
        WHERE ${whereSql}
-       GROUP BY d.id, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)`,
+       GROUP BY d.id, d.name, d.code, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)`,
       params
     );
 
@@ -890,7 +890,7 @@ class AdminModel {
       deptBreakdownSql += ' AND d.id = ?';
       deptParams.push(deptId);
     }
-    deptBreakdownSql += ' GROUP BY d.id ORDER BY d.name';
+    deptBreakdownSql += ' GROUP BY d.id, d.name, d.code ORDER BY d.name';
     const departmentBreakdown = await query(deptBreakdownSql, deptParams);
 
     const cohortBreakdown = await query(
@@ -920,7 +920,7 @@ class AdminModel {
        JOIN students s ON e.student_id = s.id
        LEFT JOIN fingerprint_slots fs ON fs.student_id = s.id AND fs.is_active = 1
        ${filterSql}
-       GROUP BY d.id, e.year, e.semester
+       GROUP BY d.id, d.name, d.code, e.year, e.semester
        ORDER BY d.name, e.year, e.semester`,
       filterParams
     );

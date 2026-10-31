@@ -237,23 +237,23 @@ class MediaModel {
 
       query(`
         SELECT s.id, s.full_name, s.class_roll_no, s.official_enrollment_no, s.registration_no, s.phone,
-               d.name as department_name, d.code as department_code,
-               e.year, e.semester
+               MAX(d.name) as department_name, MAX(d.code) as department_code,
+               MAX(e.year) as year, MAX(e.semester) as semester
         FROM students s
         LEFT JOIN enrollments e ON e.student_id = s.id AND (e.status = 'ENROLLED' OR e.status = 'ACTIVE')
         LEFT JOIN departments d ON d.id = e.department_id
         WHERE (LOWER(s.full_name) LIKE ? OR LOWER(COALESCE(s.class_roll_no, '')) LIKE ? OR LOWER(COALESCE(s.official_enrollment_no, '')) LIKE ? OR LOWER(COALESCE(s.registration_no, '')) LIKE ? OR s.phone LIKE ?)
-        GROUP BY s.id
+        GROUP BY s.id, s.full_name, s.class_roll_no, s.official_enrollment_no, s.registration_no, s.phone
         LIMIT 8
       `, [term, term, term, term, term]),
 
       query(`
-        SELECT ar.id as register_id, ar.name as register_name, ar.session_type_scope as component,
+        SELECT MAX(ar.id) as register_id, MAX(ar.name) as register_name, MAX(ar.session_type_scope) as component,
                s.id as subject_id, s.name as subject_name, s.code as subject_code
         FROM subjects s
         LEFT JOIN attendance_registers ar ON ar.subject_id = s.id AND ar.is_active = 1
         WHERE (LOWER(s.name) LIKE ? OR LOWER(s.code) LIKE ? OR LOWER(COALESCE(ar.name, '')) LIKE ?)
-        GROUP BY s.id
+        GROUP BY s.id, s.name, s.code
         LIMIT 6
       `, [term, term, term])
     ]);

@@ -32,7 +32,7 @@ class ReportModel {
        JOIN attendance_sessions s ON s.register_id = r.id AND s.state = 'FINALIZED'
        LEFT JOIN register_attendance ra ON ra.session_id = s.id
        WHERE ${whereClause}
-       GROUP BY r.id, tg.id, sub.id
+       GROUP BY r.id, tg.id, sub.id, tg.subject_name, sub.name, r.name
        ORDER BY subject_name ASC`,
       params
     );
@@ -271,7 +271,8 @@ class ReportModel {
        LEFT JOIN attendance_session_students ass ON ass.session_id = asess.id AND ass.included = 1
        LEFT JOIN register_attendance ra ON ra.session_id = asess.id AND ra.student_id = ass.student_id
        ${where}
-       GROUP BY asess.id
+       GROUP BY asess.id, asess.label, asess.session_type, asess.state, asess.session_date,
+                tg.subject_name, sub.name, r.name, sub.code, t.full_name, d.name, asess.year, asess.semester
        ORDER BY asess.id DESC`,
       params
     );

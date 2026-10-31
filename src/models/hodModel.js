@@ -141,7 +141,7 @@ class HodModel {
        JOIN users u ON t.user_id = u.id
        LEFT JOIN teacher_assignments ta ON ta.teacher_id = t.id AND ta.is_active = 1
        WHERE t.department_id = ?
-       GROUP BY t.id
+       GROUP BY t.id, t.user_id, t.full_name, t.employee_id, t.phone, u.email, u.username, u.status, u.must_change_password, u.google_sub, t.created_at
        ORDER BY t.full_name`, [deptId]
     );
   }
@@ -577,7 +577,7 @@ class HodModel {
        JOIN departments d ON s.department_id = d.id
        LEFT JOIN teacher_assignments ta ON ta.subject_id = s.id AND ta.is_active = 1
        WHERE s.department_id = ? AND s.is_active = 1
-       GROUP BY s.id
+       GROUP BY s.id, d.name, d.code
        ORDER BY s.year, s.semester, s.code`, [deptId]
     );
   }
@@ -835,7 +835,7 @@ class HodModel {
        LEFT JOIN students st ON ep.student_id = st.id
        LEFT JOIN enrollments e ON e.student_id = st.id
        WHERE ${whereSql}
-       GROUP BY d.id, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)
+       GROUP BY d.id, d.name, d.code, COALESCE(e.year, dev.year), COALESCE(e.semester, dev.semester)
        ORDER BY scan_count DESC`,
       params
     );
@@ -889,7 +889,7 @@ class HodModel {
        FROM enrollments e
        JOIN departments d ON e.department_id = d.id
        WHERE ${cohortWhere.join(' AND ')}
-       GROUP BY d.id, e.year, e.semester
+       GROUP BY d.id, d.name, d.code, e.year, e.semester
        ORDER BY e.year, e.semester`,
       cohortParams
     );

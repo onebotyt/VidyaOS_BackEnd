@@ -76,7 +76,7 @@ class FacultyModel {
          JOIN teachers t ON ar.teacher_id = t.id
          LEFT JOIN attendance_sessions asess ON asess.register_id = ar.id
          WHERE ar.is_official = 1
-         GROUP BY ar.id ORDER BY ar.created_at DESC`
+         GROUP BY ar.id, s.name, s.code, d.name, ay.label, t.full_name ORDER BY ar.created_at DESC`
       );
     }
 
@@ -92,7 +92,7 @@ class FacultyModel {
        LEFT JOIN academic_years ay ON ar.academic_year_id = ay.id
        LEFT JOIN attendance_sessions asess ON asess.register_id = ar.id
        WHERE ar.teacher_id = ? AND ar.is_active = 1
-       GROUP BY ar.id ORDER BY ar.is_official DESC, ar.created_at DESC`,
+       GROUP BY ar.id, s.name, s.code, d.name, ay.label ORDER BY ar.is_official DESC, ar.created_at DESC`,
       [teacherId]
     );
   }
