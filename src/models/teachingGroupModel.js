@@ -751,7 +751,7 @@ class TeachingGroupModel {
       params.push(search, search, search);
     }
 
-    sql += ` ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 9999) ASC, s.full_name ASC LIMIT 100`;
+    sql += ` ORDER BY class_roll_no ASC, s.full_name ASC LIMIT 100`;
     return await query(sql, params);
   }
 

@@ -566,6 +566,9 @@ function translateSqlForMysql(sql) {
   // 15. CAST(... AS REAL) -> CAST(... AS DECIMAL(10,2)) (MySQL portability)
   trans = trans.replace(/\bAS\s+REAL\b/gi, 'AS DECIMAL(10,2)');
 
+  // 16. ORDER BY COALESCE(s.class_roll_no, ...) with DISTINCT -> ORDER BY class_roll_no
+  trans = trans.replace(/ORDER\s+BY\s+COALESCE\s*\(\s*(?:s|st|e)\.class_roll_no[^)]+\)/gi, 'ORDER BY class_roll_no');
+
   return trans;
 }
 

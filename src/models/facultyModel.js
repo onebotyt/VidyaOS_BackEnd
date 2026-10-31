@@ -121,7 +121,7 @@ class FacultyModel {
          LEFT JOIN enrollments e ON e.student_id = st.id AND e.status = 'ENROLLED'
          LEFT JOIN departments d ON e.department_id = d.id
          WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE'
-         ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC`,
+         ORDER BY class_roll_no ASC, st.full_name ASC`,
         [teacherId]
       );
     }
@@ -141,7 +141,7 @@ class FacultyModel {
          JOIN users u ON st.user_id = u.id
          LEFT JOIN departments d ON e.department_id = d.id
          WHERE ar.teacher_id = ? AND ar.is_active = 1
-         ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC`,
+         ORDER BY class_roll_no ASC, st.full_name ASC`,
         [teacherId]
       );
     }
@@ -253,9 +253,9 @@ class FacultyModel {
        (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, state)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
       [register.id, register.teacher_id, register.subject_id, register.department_id,
-       register.year, register.semester, register.academic_year_id,
-       register.session_type_scope === 'PRACTICAL' ? 'PRACTICAL' : 'THEORY',
-       sessionLabel, today]
+      register.year, register.semester, register.academic_year_id,
+      register.session_type_scope === 'PRACTICAL' ? 'PRACTICAL' : 'THEORY',
+        sessionLabel, today]
     );
 
     const newSession = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ?`, [register.id, today]))[0];
@@ -321,7 +321,7 @@ class FacultyModel {
       }
       try {
         await query(`UPDATE attendance_registers SET subject_id = ? WHERE id = ?`, [effSubjectId, registerId]);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     const insertRes = await query(
@@ -383,10 +383,10 @@ class FacultyModel {
       throw new Error('Session not found under this register');
     }
 
-    try { await query(`DELETE FROM student_self_attendance WHERE session_id = ?`, [sessionId]); } catch (_) {}
-    try { await query(`DELETE FROM attendance_corrections WHERE session_id = ?`, [sessionId]); } catch (_) {}
-    try { await query(`DELETE FROM attendance_session_students WHERE session_id = ?`, [sessionId]); } catch (_) {}
-    try { await query(`DELETE FROM register_attendance WHERE session_id = ?`, [sessionId]); } catch (_) {}
+    try { await query(`DELETE FROM student_self_attendance WHERE session_id = ?`, [sessionId]); } catch (_) { }
+    try { await query(`DELETE FROM attendance_corrections WHERE session_id = ?`, [sessionId]); } catch (_) { }
+    try { await query(`DELETE FROM attendance_session_students WHERE session_id = ?`, [sessionId]); } catch (_) { }
+    try { await query(`DELETE FROM register_attendance WHERE session_id = ?`, [sessionId]); } catch (_) { }
     await query(`DELETE FROM attendance_sessions WHERE id = ?`, [sessionId]);
 
     return true;
@@ -1193,7 +1193,7 @@ class FacultyModel {
     // Institution & Session
     const instRow = (await query(`SELECT setting_value FROM system_settings WHERE setting_key = 'institution_name'`))[0];
     const institutionName = instRow?.setting_value || 'Uttarakhand Government Institute of Polytechnic, Nainital';
-    
+
     const ayRow = (await query(`SELECT label FROM academic_years WHERE is_current = 1 LIMIT 1`))[0];
     const sessionLabel = ayRow?.label || register.academic_year_label || '2026 Session';
 

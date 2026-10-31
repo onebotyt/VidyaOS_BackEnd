@@ -14,8 +14,8 @@ class ReportModel {
    * @returns {Promise<Array<Object>>} Class attendance summaries
    */
   async getAnalyticsClasses({ teacherId, isHod, deptId }) {
-    const whereClause = isHod && deptId 
-      ? '(r.teacher_id = ? OR r.department_id = ? OR sub.department_id = ?)' 
+    const whereClause = isHod && deptId
+      ? '(r.teacher_id = ? OR r.department_id = ? OR sub.department_id = ?)'
       : 'r.teacher_id = ?';
     const params = isHod && deptId ? [teacherId || -1, deptId, deptId] : [teacherId];
 
@@ -427,7 +427,7 @@ class ReportModel {
        LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
        LEFT JOIN departments d ON e.department_id = d.id
        ${studentFilter}
-       ORDER BY COALESCE(e.class_roll_no, s.class_roll_no) ASC, s.full_name ASC`,
+       ORDER BY class_roll_no ASC, s.full_name ASC`,
       params
     );
 
