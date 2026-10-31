@@ -674,6 +674,10 @@ async function query(sql, params = []) {
         lastInsertRowid: insertId
       };
 
+      try {
+        db.exec('PRAGMA wal_checkpoint(PASSIVE);');
+      } catch (_) {}
+
       const resultArr = [resultObj];
       resultArr.insertId = insertId;
       resultArr.affectedRows = affectedRows;
@@ -801,6 +805,7 @@ async function withTransaction(callback) {
   try {
     const result = await callback(connection);
     db.exec('COMMIT');
+    try { db.exec('PRAGMA wal_checkpoint(PASSIVE);'); } catch (_) {}
     return result;
   } catch (error) {
     try {
