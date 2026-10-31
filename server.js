@@ -44,6 +44,7 @@ const teachingGroupRoutes = require('./src/routes/teachingGroups');
 const notificationRoutes = require('./src/routes/notifications');
 const courseFileRoutes = require('./src/routes/courseFile');
 const theoryClassRoutes = require('./src/routes/theoryClass');
+const labClassRoutes = require('./src/routes/labClass');
 const mediaRoutes = require('./src/routes/media');
 const ocrRoutes = require('./src/routes/ocr');
 
@@ -340,6 +341,7 @@ app.use('/api/v1/teaching-groups', teachingGroupRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/course-files', courseFileRoutes);
 app.use('/api/v1/theory-classes', theoryClassRoutes);
+app.use('/api/v1/lab-classes', labClassRoutes);
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/search', mediaRoutes);
 app.use('/api/v1/ocr', ocrRoutes);

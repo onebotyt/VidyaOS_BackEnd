@@ -36,3 +36,4 @@ router.delete('/:id/documents/:item_key', (req, res) => theoryClassController.de
 router.post('/:id/audit', requireRole('HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'), (req, res) => theoryClassController.auditTheoryClass(req, res));
 
 module.exports = router;
+
