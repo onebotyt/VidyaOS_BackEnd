@@ -13,6 +13,7 @@ const LAB_CLASS_ITEMS = [
     type: 'Hybrid (Live + PDF)',
     category: 'attendance',
     reqType: 'hybrid',
+    can_upload: true,
     desc: 'Lab batch turnout, attendance matrix ledger, and session-wise student practical attendance.'
   },
   {
@@ -22,6 +23,7 @@ const LAB_CLASS_ITEMS = [
     type: 'PDF',
     category: 'attendance',
     reqType: 'upload',
+    can_upload: true,
     desc: 'Official laboratory manuals, experiment list, apparatus specifications, and safety precautions.'
   },
   {
@@ -31,6 +33,7 @@ const LAB_CLASS_ITEMS = [
     type: 'PDF',
     category: 'experimentation',
     reqType: 'upload',
+    can_upload: true,
     desc: 'Standard student job cards, workshop instruction sheets, and observation data recording templates.'
   },
   {
@@ -40,6 +43,7 @@ const LAB_CLASS_ITEMS = [
     type: 'PDF',
     category: 'experimentation',
     reqType: 'upload',
+    can_upload: true,
     desc: 'Evaluated sample laboratory write-ups, student experiment records, and signed index sheets.'
   },
   {
@@ -49,6 +53,7 @@ const LAB_CLASS_ITEMS = [
     type: 'Hybrid (Live + PDF)',
     category: 'assessment',
     reqType: 'hybrid',
+    can_upload: true,
     desc: 'Day-to-day practical performance marks, viva-voce rubrics, and continuous assessment registers.'
   },
   {
@@ -58,6 +63,7 @@ const LAB_CLASS_ITEMS = [
     type: 'PDF',
     category: 'assessment',
     reqType: 'upload',
+    can_upload: true,
     desc: 'Equipment logbook, machine utilization records, workstation allocation, and running hour sheets.'
   },
   {
@@ -67,6 +73,7 @@ const LAB_CLASS_ITEMS = [
     type: 'PDF',
     category: 'assessment',
     reqType: 'upload',
+    can_upload: true,
     desc: 'Preventive maintenance logs, calibration certificates, breakdown/repair reports, and stock register.'
   }
 ];
@@ -291,3 +298,4 @@ class LabClassModel {
 }
 
 module.exports = new LabClassModel();
+

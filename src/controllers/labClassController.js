@@ -307,3 +307,4 @@ class LabClassController {
 }
 
 module.exports = new LabClassController();
+
