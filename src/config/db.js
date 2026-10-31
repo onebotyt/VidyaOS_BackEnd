@@ -358,6 +358,48 @@ function getSqliteDb() {
         CREATE INDEX IF NOT EXISTS idx_course_files_dept ON course_files(department_id);
         CREATE INDEX IF NOT EXISTS idx_course_file_docs ON course_file_documents(course_file_id, item_key);
 
+        -- Theory Class Preparation Tables (Milestone 316)
+        CREATE TABLE IF NOT EXISTS theory_class_files (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          teaching_group_id INTEGER REFERENCES teaching_groups(id) ON DELETE CASCADE,
+          subject_id INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
+          teacher_id INTEGER NOT NULL REFERENCES teachers(id),
+          department_id INTEGER NOT NULL REFERENCES departments(id),
+          academic_year_id INTEGER REFERENCES academic_years(id),
+          semester INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+          hod_remarks TEXT,
+          audited_at DATETIME,
+          audited_by INTEGER REFERENCES users(id),
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(teaching_group_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS theory_class_documents (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          theory_class_id INTEGER NOT NULL REFERENCES theory_class_files(id) ON DELETE CASCADE,
+          item_key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          file_name TEXT NOT NULL,
+          file_size INTEGER,
+          mime_type TEXT,
+          status TEXT NOT NULL DEFAULT 'UPLOADED',
+          version INTEGER NOT NULL DEFAULT 1,
+          uploaded_by INTEGER NOT NULL REFERENCES users(id),
+          verified_by INTEGER REFERENCES users(id),
+          verified_at DATETIME,
+          notes TEXT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(theory_class_id, item_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_theory_class_teacher ON theory_class_files(teacher_id);
+        CREATE INDEX IF NOT EXISTS idx_theory_class_dept ON theory_class_files(department_id);
+        CREATE INDEX IF NOT EXISTS idx_theory_class_docs ON theory_class_documents(theory_class_id, item_key);
+
         -- Dedicated Faculty Drive & Media Asset Hub (Approach B)
         CREATE TABLE IF NOT EXISTS faculty_media_assets (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -892,6 +934,45 @@ async function ensureCompatibilityViews() {
         SELECT id AS session_id, verification_qr_hash AS token_hash, verification_expires_at AS expires_at, created_at
         FROM attendance_sessions
         WHERE verification_qr_hash IS NOT NULL
+      `);
+      await p.execute(`
+        CREATE TABLE IF NOT EXISTS theory_class_files (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          teaching_group_id INT NOT NULL,
+          subject_id INT NULL,
+          teacher_id INT NOT NULL,
+          department_id INT NOT NULL,
+          academic_year_id INT NULL,
+          semester INT NOT NULL DEFAULT 1,
+          status VARCHAR(50) NOT NULL DEFAULT 'IN_PROGRESS',
+          hod_remarks TEXT NULL,
+          audited_at DATETIME NULL,
+          audited_by INT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_tc_tg (teaching_group_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      await p.execute(`
+        CREATE TABLE IF NOT EXISTS theory_class_documents (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          theory_class_id INT NOT NULL,
+          item_key VARCHAR(100) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          file_path VARCHAR(500) NOT NULL,
+          file_name VARCHAR(255) NOT NULL,
+          file_size INT NULL DEFAULT 0,
+          mime_type VARCHAR(100) NULL DEFAULT 'application/pdf',
+          status VARCHAR(50) NOT NULL DEFAULT 'UPLOADED',
+          version INT NOT NULL DEFAULT 1,
+          uploaded_by INT NOT NULL,
+          verified_by INT NULL,
+          verified_at DATETIME NULL,
+          notes TEXT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_tc_doc (theory_class_id, item_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
       logger.info('MySQL compatibility views (exams, exam_scores, assignments, etc.) verified successfully.');
     } catch (err) {
