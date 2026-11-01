@@ -136,6 +136,7 @@ class HodModel {
               u.email as gmail, u.username, u.status, u.must_change_password,
               CASE WHEN u.google_sub IS NOT NULL THEN 1 ELSE 0 END as google_linked,
               COUNT(DISTINCT ta.id) as active_assignments,
+              MAX(CASE WHEN ta.assignment_type = 'HOD' THEN 1 ELSE 0 END) as is_hod,
               t.created_at
        FROM teachers t
        JOIN users u ON t.user_id = u.id

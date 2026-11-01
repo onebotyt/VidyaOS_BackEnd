@@ -152,15 +152,24 @@ class HodController {
    */
   static async resetTeacherPassword(req, res) {
     try {
-      const teacherRows = await query(
-        `SELECT user_id, full_name FROM teachers WHERE id = ? AND department_id = ?`,
-        [req.params.id, req.hod_department_id]
-      );
+      let teacherRows;
+      if (req.user.roles.includes('SYSTEM_ADMIN') && !req.hod_department_id) {
+        teacherRows = await query(
+          `SELECT user_id, full_name FROM teachers WHERE id = ?`,
+          [req.params.id]
+        );
+      } else {
+        teacherRows = await query(
+          `SELECT user_id, full_name FROM teachers WHERE id = ? AND department_id = ?`,
+          [req.params.id, req.hod_department_id]
+        );
+      }
       if (!teacherRows.length) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teacher not found in your department' } });
       }
 
-      if (teacherRows[0].user_id === req.user.id) {
+      const callerUserId = req.user.id || req.user.user_id;
+      if (teacherRows[0].user_id === callerUserId) {
         return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'HOD password can only be reset from your Profile page or by an Admin.' } });
       }
 

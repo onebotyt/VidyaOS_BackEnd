@@ -215,6 +215,20 @@ function requireHOD() {
           req.hod_department_name = hodAssignment[0].department_name;
           return next();
         }
+
+        // Also check if teacher's user account is directly appointed in departments table
+        const deptHod = await query(
+          `SELECT d.id as department_id, d.name as department_name
+           FROM departments d
+           WHERE (d.hod_user_id = ? OR d.hod_user_id = ?) AND d.is_active = 1
+           LIMIT 1`,
+          [req.user.id, req.user.user_id || req.user.id]
+        );
+        if (deptHod && deptHod.length > 0) {
+          req.hod_department_id = deptHod[0].department_id;
+          req.hod_department_name = deptHod[0].department_name;
+          return next();
+        }
       }
 
       if (req.user.roles.includes('SYSTEM_ADMIN')) {
