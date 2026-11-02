@@ -264,7 +264,7 @@ if (fs.existsSync(frontendDir)) {
 
 // Serve Uploaded Files (assignment attachments & student submissions)
 const uploadsDir = process.env.UPLOADS_DIR
-  ? (path.isAbsolute(process.env.UPLOADS_DIR) ? process.env.UPLOADS_DIR : path.resolve(process.cwd(), process.env.UPLOADS_DIR))
+  ? (path.isAbsolute(process.env.UPLOADS_DIR) ? process.env.UPLOADS_DIR : path.resolve(__dirname, process.env.UPLOADS_DIR))
   : path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });

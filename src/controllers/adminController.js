@@ -578,6 +578,31 @@ class AdminController {
     } else if (settingsObj.attendance_threshold && !settingsObj.default_attendance_threshold_percent) {
       settingsObj.default_attendance_threshold_percent = settingsObj.attendance_threshold;
     }
+
+    // Convert any Base64 Data URL images (e.g. logo or banner) into saved files on disk to prevent database bloat and column overflow
+    const fs = require('fs');
+    const path = require('path');
+    for (const [key, val] of Object.entries(settingsObj)) {
+      if (typeof val === 'string' && val.startsWith('data:image/')) {
+        try {
+          const match = val.match(/^data:image\/([a-zA-Z0-9+.-]+)(?:;[a-zA-Z0-9=-]+)*;base64,([\s\S]+)$/);
+          if (match) {
+            const rawMime = (match[1] || '').toLowerCase();
+            const ext = rawMime === 'jpeg' ? 'jpg' : (rawMime === 'svg+xml' ? 'svg' : (rawMime || 'png'));
+            const cleanBase64 = match[2].replace(/\s+/g, '');
+            const buffer = Buffer.from(cleanBase64, 'base64');
+            const uploadsDir = path.resolve(__dirname, '../../uploads/branding');
+            if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+            const filename = `${key}_${Date.now()}.${ext}`;
+            fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+            settingsObj[key] = `/uploads/branding/${filename}`;
+          }
+        } catch (e) {
+          logger.warn(`Failed to write base64 image for ${key}:`, e.message);
+        }
+      }
+    }
+
     const entries = Object.entries(settingsObj);
     if (!entries.length) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No settings provided' } });
 

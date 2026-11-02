@@ -1055,6 +1055,15 @@ async function ensureCompatibilityViews() {
           UNIQUE KEY uq_lc_doc (lab_class_id, item_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
+
+      // Ensure system_settings.setting_value is LONGTEXT to permanently prevent column overflow on branding assets
+      try {
+        await p.execute("ALTER TABLE system_settings MODIFY COLUMN setting_value LONGTEXT NOT NULL");
+        logger.info('MySQL system_settings.setting_value verified/modified to LONGTEXT successfully.');
+      } catch (colErr) {
+        // Table might not exist yet or already altered
+      }
+
       logger.info('MySQL compatibility views (exams, exam_scores, assignments, etc.) verified successfully.');
     } catch (err) {
       logger.warn('Failed to ensure MySQL compatibility views', { error: err.message });
