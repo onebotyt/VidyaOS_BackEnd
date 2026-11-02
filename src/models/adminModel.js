@@ -27,6 +27,9 @@ class AdminModel {
     );
     const [deptsCount] = await query(`SELECT COUNT(*) as total FROM departments WHERE is_active = 1`);
     const [devicesCount] = await query(`SELECT COUNT(*) as total FROM devices WHERE is_active = 1`);
+    const [classesCount] = await query(
+      `SELECT COUNT(*) as total FROM teaching_groups WHERE status = 'ACTIVE' AND deleted_at IS NULL`
+    );
     const [todaySessions] = await query(
       `SELECT COUNT(*) as total FROM attendance_sessions WHERE session_date = CURDATE()`
     );
@@ -96,6 +99,8 @@ class AdminModel {
       total_hods: hodsCount?.total || 0,
       total_departments: deptsCount?.total || 0,
       total_branches: deptsCount?.total || 0,
+      total_classes: classesCount?.total || 0,
+      active_classes: classesCount?.total || 0,
       total_devices: devicesCount?.total || 0,
       today_sessions: todaySessions?.total || 0,
       open_sessions: openSessions?.total || 0,
