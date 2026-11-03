@@ -9,7 +9,43 @@ require('dotenv').config();
 const logger = require('../utils/logger');
 const { getResolvedDatabasePath } = require('./dbPath');
 
-const DB_CLIENT = (process.env.DB_CLIENT || 'sqlite').toLowerCase();
+let DB_CLIENT = (process.env.DB_CLIENT || 'sqlite').toLowerCase();
+
+/**
+ * Checks whether an error is a network, host resolution, or connection drop failure.
+ */
+function isNetworkOrDnsError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '');
+  const code = String(err.code || '');
+  return (
+    code === 'ENOTFOUND' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ENETUNREACH' ||
+    code === 'PROTOCOL_CONNECTION_LOST' ||
+    code === 'ER_BAD_DB_ERROR' ||
+    code === 'ER_ACCESS_DENIED_ERROR' ||
+    /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|Access denied|getaddrinfo/i.test(msg)
+  );
+}
+
+/**
+ * Handles automatic graceful failover from MySQL to SQLite if MySQL is unreachable or down.
+ */
+function handleMysqlConnectionFailure(err) {
+  if (DB_CLIENT === 'mysql' && isNetworkOrDnsError(err)) {
+    logger.warn(`[DB FAILOVER] MySQL connection failed (${err.code || err.message}). Gracefully switching to local SQLite database.`);
+    DB_CLIENT = 'sqlite';
+    if (pool) {
+      try { pool.end().catch(() => {}); } catch (_) {}
+      pool = null;
+    }
+    return true;
+  }
+  return false;
+}
 
 let pool = null;
 let sqliteDb = null;
@@ -442,6 +478,48 @@ function getSqliteDb() {
         CREATE INDEX IF NOT EXISTS idx_lab_class_dept ON lab_class_files(department_id);
         CREATE INDEX IF NOT EXISTS idx_lab_class_docs ON lab_class_documents(lab_class_id, item_key);
 
+        -- Student Performance Monitoring Tables (Milestone 322)
+        CREATE TABLE IF NOT EXISTS student_performance_files (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          teaching_group_id INTEGER REFERENCES teaching_groups(id) ON DELETE CASCADE,
+          subject_id INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
+          teacher_id INTEGER NOT NULL REFERENCES teachers(id),
+          department_id INTEGER NOT NULL REFERENCES departments(id),
+          academic_year_id INTEGER REFERENCES academic_years(id),
+          semester INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+          hod_remarks TEXT,
+          audited_at DATETIME,
+          audited_by INTEGER REFERENCES users(id),
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(teaching_group_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS student_performance_documents (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          performance_file_id INTEGER NOT NULL REFERENCES student_performance_files(id) ON DELETE CASCADE,
+          item_key TEXT NOT NULL,
+          title TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          file_name TEXT NOT NULL,
+          file_size INTEGER,
+          mime_type TEXT,
+          status TEXT NOT NULL DEFAULT 'UPLOADED',
+          version INTEGER NOT NULL DEFAULT 1,
+          uploaded_by INTEGER NOT NULL REFERENCES users(id),
+          verified_by INTEGER REFERENCES users(id),
+          verified_at DATETIME,
+          notes TEXT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(performance_file_id, item_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_perf_file_teacher ON student_performance_files(teacher_id);
+        CREATE INDEX IF NOT EXISTS idx_perf_file_dept ON student_performance_files(department_id);
+        CREATE INDEX IF NOT EXISTS idx_perf_docs ON student_performance_documents(performance_file_id, item_key);
+
         -- Dedicated Faculty Drive & Media Asset Hub (Approach B)
         CREATE TABLE IF NOT EXISTS faculty_media_assets (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -735,32 +813,42 @@ function getPool() {
  */
 async function query(sql, params = []) {
   if (DB_CLIENT === 'mysql') {
-    const p = getPool();
-    const transSql = translateSqlForMysql(sql);
-    const normParams = normalizeParamsForMysql(params);
+    try {
+      const p = getPool();
+      const transSql = translateSqlForMysql(sql);
+      const normParams = normalizeParamsForMysql(params);
 
-    // Handle CREATE INDEX IF NOT EXISTS in MySQL idempotently
-    const idxMatch = transSql.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/i);
-    if (idxMatch) {
-      const [, idxName, tblName, cols] = idxMatch;
-      try {
-        const [chk] = await p.execute(
-          'SELECT INDEX_NAME FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1',
-          [tblName, idxName]
-        );
-        if (!chk || chk.length === 0) {
-          const [res] = await p.execute(`CREATE INDEX ${idxName} ON ${tblName}(${cols})`);
-          return res;
+      // Handle CREATE INDEX IF NOT EXISTS in MySQL idempotently
+      const idxMatch = transSql.match(/CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\)/i);
+      if (idxMatch) {
+        const [, idxName, tblName, cols] = idxMatch;
+        try {
+          const [chk] = await p.execute(
+            'SELECT INDEX_NAME FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? LIMIT 1',
+            [tblName, idxName]
+          );
+          if (!chk || chk.length === 0) {
+            const [res] = await p.execute(`CREATE INDEX ${idxName} ON ${tblName}(${cols})`);
+            return res;
+          }
+          return [{ affectedRows: 0 }];
+        } catch (err) {
+          if (/Duplicate key name/i.test(err.message)) return [{ affectedRows: 0 }];
+          if (handleMysqlConnectionFailure(err)) {
+            return await query(sql, params);
+          }
+          throw err;
         }
-        return [{ affectedRows: 0 }];
-      } catch (err) {
-        if (/Duplicate key name/i.test(err.message)) return [{ affectedRows: 0 }];
-        throw err;
       }
-    }
 
-    const [rows] = await p.execute(transSql, normParams);
-    return rows;
+      const [rows] = await p.execute(transSql, normParams);
+      return rows;
+    } catch (err) {
+      if (handleMysqlConnectionFailure(err)) {
+        return await query(sql, params);
+      }
+      throw err;
+    }
   }
 
   // SQLite Execution
@@ -809,25 +897,32 @@ async function query(sql, params = []) {
  */
 async function getConnection() {
   if (DB_CLIENT === 'mysql') {
-    const rawConn = await getPool().getConnection();
-    return {
-      _raw: rawConn,
-      execute: async (sql, params = []) => {
-        const transSql = translateSqlForMysql(sql);
-        const normParams = normalizeParamsForMysql(params);
-        return await rawConn.execute(transSql, normParams);
-      },
-      query: async (sql, params = []) => {
-        const transSql = translateSqlForMysql(sql);
-        const normParams = normalizeParamsForMysql(params);
-        const [rows] = await rawConn.execute(transSql, normParams);
-        return rows;
-      },
-      beginTransaction: async () => await rawConn.beginTransaction(),
-      commit: async () => await rawConn.commit(),
-      rollback: async () => await rawConn.rollback(),
-      release: () => rawConn.release()
-    };
+    try {
+      const rawConn = await getPool().getConnection();
+      return {
+        _raw: rawConn,
+        execute: async (sql, params = []) => {
+          const transSql = translateSqlForMysql(sql);
+          const normParams = normalizeParamsForMysql(params);
+          return await rawConn.execute(transSql, normParams);
+        },
+        query: async (sql, params = []) => {
+          const transSql = translateSqlForMysql(sql);
+          const normParams = normalizeParamsForMysql(params);
+          const [rows] = await rawConn.execute(transSql, normParams);
+          return rows;
+        },
+        beginTransaction: async () => await rawConn.beginTransaction(),
+        commit: async () => await rawConn.commit(),
+        rollback: async () => await rawConn.rollback(),
+        release: () => rawConn.release()
+      };
+    } catch (err) {
+      if (handleMysqlConnectionFailure(err)) {
+        return await getConnection();
+      }
+      throw err;
+    }
   }
 
   const db = getSqliteDb();
@@ -867,17 +962,24 @@ async function getConnection() {
  */
 async function withTransaction(callback) {
   if (DB_CLIENT === 'mysql') {
-    const connection = await getConnection();
     try {
-      await connection.beginTransaction();
-      const result = await callback(connection);
-      await connection.commit();
-      return result;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
+      const connection = await getConnection();
+      try {
+        await connection.beginTransaction();
+        const result = await callback(connection);
+        await connection.commit();
+        return result;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (err) {
+      if (handleMysqlConnectionFailure(err)) {
+        return await withTransaction(callback);
+      }
+      throw err;
     }
   }
 
@@ -1055,6 +1157,45 @@ async function ensureCompatibilityViews() {
           UNIQUE KEY uq_lc_doc (lab_class_id, item_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
+      await p.execute(`
+        CREATE TABLE IF NOT EXISTS student_performance_files (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          teaching_group_id INT NOT NULL,
+          subject_id INT NULL,
+          teacher_id INT NOT NULL,
+          department_id INT NOT NULL,
+          academic_year_id INT NULL,
+          semester INT NOT NULL DEFAULT 1,
+          status VARCHAR(50) NOT NULL DEFAULT 'IN_PROGRESS',
+          hod_remarks TEXT NULL,
+          audited_at DATETIME NULL,
+          audited_by INT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_spf_tg (teaching_group_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      await p.execute(`
+        CREATE TABLE IF NOT EXISTS student_performance_documents (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          performance_file_id INT NOT NULL,
+          item_key VARCHAR(100) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          file_path VARCHAR(500) NOT NULL,
+          file_name VARCHAR(255) NOT NULL,
+          file_size INT NULL DEFAULT 0,
+          mime_type VARCHAR(100) NULL DEFAULT 'application/pdf',
+          status VARCHAR(50) NOT NULL DEFAULT 'UPLOADED',
+          version INT NOT NULL DEFAULT 1,
+          uploaded_by INT NOT NULL,
+          verified_by INT NULL,
+          verified_at DATETIME NULL,
+          notes TEXT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_spd_doc (performance_file_id, item_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
 
       // Ensure system_settings.setting_value is LONGTEXT to permanently prevent column overflow on branding assets
       try {
@@ -1066,6 +1207,9 @@ async function ensureCompatibilityViews() {
 
       logger.info('MySQL compatibility views (exams, exam_scores, assignments, etc.) verified successfully.');
     } catch (err) {
+      if (handleMysqlConnectionFailure(err)) {
+        return await ensureCompatibilityViews();
+      }
       logger.warn('Failed to ensure MySQL compatibility views', { error: err.message });
     }
   } else {
@@ -1124,14 +1268,15 @@ async function testConnection() {
     } catch (err) {
       logger.warn(
         'MySQL Connection Warning: Unable to connect to MySQL database at ' +
-          `${process.env.DB_HOST}:${process.env.DB_PORT}. Ensure MySQL service is running and database exists.`,
+          `${process.env.DB_HOST}:${process.env.DB_PORT}. Automatically failing over to local SQLite database.`,
         { error: err.message }
       );
-      return false;
+      handleMysqlConnectionFailure(err);
+      // Fall through to SQLite initialization and testing below
     }
   }
 
-  // SQLite
+  // SQLite (Primary or Failover)
   try {
     const db = getSqliteDb();
     const row = db.prepare('SELECT 1 + 1 AS solution').get();
