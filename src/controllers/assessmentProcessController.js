@@ -1,5 +1,5 @@
 /**
- * Assessment Process Controller — HTTP request/response handlers for 13 Direct & Indirect Assessment artifacts.
+ * Assessment Process Controller — Handlers for Direct (8 items) & Indirect (5 items) Assessment artifacts.
  * Location: src/controllers/assessmentProcessController.js
  * VidyaOS Institutional Campus Operating System
  */
@@ -12,7 +12,29 @@ const logger = require('../utils/logger');
 
 class AssessmentProcessController {
   /**
-   * Returns definitions for the 13 Assessment Process records.
+   * Returns definitions for Direct Assessment records (8 items).
+   * @route GET /api/v1/direct-assessment/definitions
+   */
+  getDirectDefinitions(req, res) {
+    return res.json({
+      success: true,
+      data: assessmentProcessModel.getDirectAssessmentItems()
+    });
+  }
+
+  /**
+   * Returns definitions for Indirect Assessment records (5 items).
+   * @route GET /api/v1/indirect-assessment/definitions
+   */
+  getIndirectDefinitions(req, res) {
+    return res.json({
+      success: true,
+      data: assessmentProcessModel.getIndirectAssessmentItems()
+    });
+  }
+
+  /**
+   * Returns definitions for all 13 records (backward compatibility).
    * @route GET /api/v1/assessment-process/definitions
    */
   getDefinitions(req, res) {
@@ -23,12 +45,42 @@ class AssessmentProcessController {
   }
 
   /**
-   * Retrieves or auto-provisions Assessment Process dossier for a teaching group.
+   * Retrieves or provisions Direct Assessment dossier for a teaching group (8 items).
+   * @route GET /api/v1/direct-assessment
+   */
+  async getDirectAssessmentDossier(req, res) {
+    return this._getScopedDossier(req, res, 'DIRECT');
+  }
+
+  /**
+   * Retrieves or provisions Indirect Assessment dossier for a teaching group (5 items).
+   * @route GET /api/v1/indirect-assessment
+   */
+  async getIndirectAssessmentDossier(req, res) {
+    return this._getScopedDossier(req, res, 'INDIRECT');
+  }
+
+  /**
+   * Combined dossier handler (backward compatibility or full query).
    * @route GET /api/v1/assessment-process
    */
   async getAssessmentDossier(req, res) {
+    const scope = (req.query.scope || req.query.type || '').toUpperCase();
+    if (scope === 'DIRECT') {
+      return this._getScopedDossier(req, res, 'DIRECT');
+    }
+    if (scope === 'INDIRECT') {
+      return this._getScopedDossier(req, res, 'INDIRECT');
+    }
+    return this._getScopedDossier(req, res, 'ALL');
+  }
+
+  /**
+   * Internal helper to compute scoped dossier data, readiness score, and items.
+   */
+  async _getScopedDossier(req, res, scope = 'ALL') {
     try {
-      const groupId = parseInt(req.query.group_id || req.query.teaching_group_id, 10);
+      const groupId = parseInt(req.query.group_id || req.query.teaching_group_id || req.query.groupId, 10);
       const subjectId = req.query.subject_id ? parseInt(req.query.subject_id, 10) : null;
 
       if (!groupId && !subjectId) {
@@ -63,244 +115,287 @@ class AssessmentProcessController {
       const docMap = {};
       docs.forEach(d => { docMap[d.item_key] = d; });
 
-      const itemsDef = assessmentProcessModel.getItemsDefinition();
-      let completedCount = 0;
-      let directCompleted = 0;
-      let indirectCompleted = 0;
+      let itemsDef;
+      if (scope === 'DIRECT') {
+        itemsDef = assessmentProcessModel.getDirectAssessmentItems();
+      } else if (scope === 'INDIRECT') {
+        itemsDef = assessmentProcessModel.getIndirectAssessmentItems();
+      } else {
+        itemsDef = assessmentProcessModel.getItemsDefinition();
+      }
 
-      const items = itemsDef.map(itemDef => {
+      let completedCount = 0;
+      const items = itemsDef.map((itemDef, idx) => {
         const doc = docMap[itemDef.key] || null;
         const isCompleted = !!doc;
         if (isCompleted) {
           completedCount++;
-          if (itemDef.section_code === 'DIRECT') directCompleted++;
-          if (itemDef.section_code === 'INDIRECT') indirectCompleted++;
         }
 
         return {
           ...itemDef,
+          num: idx + 1,
           is_completed: isCompleted,
           document: doc
         };
       });
 
-      const completionPct = Math.round((completedCount / itemsDef.length) * 100);
+      const totalItems = itemsDef.length;
+      const completionPct = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
 
       return res.json({
         success: true,
         data: {
           assessment_file: {
             ...assessFile,
-            total_items: itemsDef.length,
+            scope,
+            total_items: totalItems,
             completed_items: completedCount,
-            pending_items: itemsDef.length - completedCount,
-            direct_total: 8,
-            direct_completed: directCompleted,
-            indirect_total: 5,
-            indirect_completed: indirectCompleted,
-            completion_pct: completionPct
+            pending_items: totalItems - completedCount,
+            completion_pct: completionPct,
+            readiness: {
+              completed: completedCount,
+              total: totalItems,
+              pct: completionPct
+            }
           },
           group: {
             id: group.id,
             name: group.name,
-            subject_name: group.subject_name,
+            subject_name: group.subject_name || group.name,
             subject_code: group.subject_code,
-            component: group.component || 'THEORY',
             semester: group.semester,
-            academic_year_label: group.academic_year_label || '2026-27',
-            teacher_name: group.teacher_name,
-            teacher_code: group.teacher_code,
+            component: group.component,
             department_name: group.department_name,
             department_code: group.department_code,
-            invite_code: group.invite_code,
-            register_id: group.register_id,
-            register_name: group.register_name
+            teacher_name: group.teacher_name,
+            teacher_code: group.teacher_code,
+            academic_year: group.academic_year_label,
+            register_id: group.register_id
           },
           items
         }
       });
     } catch (err) {
-      logger.error('[AssessmentProcessController] getAssessmentDossier error:', { error: err.message });
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+      logger.error('AssessmentProcessController._getScopedDossier error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'SERVER_ERROR', message: 'Failed to retrieve assessment dossier' }
+      });
     }
   }
 
   /**
-   * Uploads or updates a PDF document for one of the 13 Assessment Process items.
-   * @route POST /api/v1/assessment-process/:id/documents
+   * Uploads or replaces an assessment PDF document.
+   * @route POST /api/v1/direct-assessment/documents or /api/v1/indirect-assessment/documents
    */
   async uploadDocument(req, res) {
     try {
-      const assessmentFileId = parseInt(req.params.id, 10);
-      const { item_key, title, notes } = req.body;
+      const groupId = parseInt(req.body.group_id || req.body.groupId, 10);
+      const subjectId = req.body.subject_id ? parseInt(req.body.subject_id, 10) : null;
+      const itemKey = req.body.item_key;
+      const notes = req.body.notes || null;
 
-      if (!req.file) {
-        return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'No document file uploaded' } });
-      }
-      if (!item_key) {
-        return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'item_key is required' } });
-      }
-
-      // Strictly validate PDF extension & mimetype
-      const ext = path.extname(req.file.originalname).toLowerCase();
-      if (ext !== '.pdf') {
-        try { fs.unlinkSync(req.file.path); } catch (_) {}
+      if (!itemKey) {
         return res.status(400).json({
           success: false,
-          error: { code: 'INVALID_FILE_TYPE', message: 'Only PDF documents (.pdf) are allowed for upload.' }
+          error: { code: 'BAD_REQUEST', message: 'item_key is required' }
         });
       }
 
-      const assessFile = await assessmentProcessModel.getById(assessmentFileId);
-      if (!assessFile) {
-        try { fs.unlinkSync(req.file.path); } catch (_) {}
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Assessment process record not found' } });
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'NO_FILE', message: 'No PDF file uploaded' }
+        });
       }
 
-      // Check teacher/HOD authorization
-      const isTeacher = req.user && req.user.teacher_id && req.user.teacher_id === assessFile.teacher_id;
-      const isPrivileged = req.user && (req.user.is_hod || req.user.role === 'HOD' || req.user.role === 'SYSTEM_ADMIN');
-      if (!isTeacher && !isPrivileged) {
-        try { fs.unlinkSync(req.file.path); } catch (_) {}
-        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You are not authorized to upload documents for this class.' } });
+      // Check item validity across all items
+      const allItems = assessmentProcessModel.getItemsDefinition();
+      const itemDef = allItems.find(i => i.key === itemKey);
+      if (!itemDef) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_ITEM', message: `Unknown assessment item key: ${itemKey}` }
+        });
       }
 
-      // Standard item definition lookup
-      const itemsDef = assessmentProcessModel.getItemsDefinition();
-      const itemDef = itemsDef.find(i => i.key === item_key);
-      const docTitle = title || (itemDef ? itemDef.title : item_key);
+      let group = null;
+      if (groupId) {
+        group = await assessmentProcessModel.getGroupDetails(groupId);
+      }
 
-      const filePathRel = `/uploads/assessment_process/${path.basename(req.file.path)}`;
+      const assessFile = await assessmentProcessModel.getOrCreateAssessmentFile({
+        groupId,
+        subjectId,
+        teacherId: group?.teacher_id || req.user?.id || 1,
+        academicYearId: group?.academic_year_id,
+        departmentId: group?.department_id,
+        semester: group?.semester || 1
+      });
+
+      const filePath = `/uploads/assessment_process/${req.file.filename}`;
+      const fileName = req.file.originalname || req.file.filename;
+      const fileSize = req.file.size;
+      const mimeType = req.file.mimetype || 'application/pdf';
+      const userId = req.user?.id || 1;
 
       const { doc, oldFilePath } = await assessmentProcessModel.upsertDocument({
-        assessmentFileId,
-        itemKey: item_key,
-        docTitle,
-        filePath: filePathRel,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        mimeType: req.file.mimetype || 'application/pdf',
-        userId: req.user ? req.user.id : 1,
-        notes: notes || null
+        assessmentFileId: assessFile.id,
+        itemKey,
+        docTitle: itemDef.title,
+        filePath,
+        fileName,
+        fileSize,
+        mimeType,
+        userId,
+        notes
       });
 
-      // Cleanup prior version file on disk if replacing
-      if (oldFilePath && oldFilePath !== filePathRel) {
-        try {
-          const absoluteOld = path.join(process.cwd(), oldFilePath.startsWith('/') ? oldFilePath.slice(1) : oldFilePath);
-          if (fs.existsSync(absoluteOld)) fs.unlinkSync(absoluteOld);
-        } catch (_) {}
+      // Cleanup prior file if replaced
+      if (oldFilePath && oldFilePath !== filePath) {
+        const oldDiskPath = path.join(__dirname, '../../', oldFilePath.replace(/^\//, ''));
+        if (fs.existsSync(oldDiskPath)) {
+          fs.unlink(oldDiskPath, () => {});
+        }
       }
 
-      await auditService.log({
-        userId: req.user ? req.user.id : 1,
-        action: 'ASSESSMENT_DOCUMENT_UPLOAD',
-        resourceType: 'assessment_process_documents',
-        resourceId: doc.id,
-        details: { assessmentFileId, itemKey: item_key, fileName: req.file.originalname, size: req.file.size }
-      });
+      if (auditService && auditService.logAction) {
+        auditService.logAction({
+          userId,
+          action: 'ASSESSMENT_DOCUMENT_UPLOAD',
+          details: `Uploaded ${itemDef.title} for group ${groupId || 'N/A'}`
+        }).catch(() => {});
+      }
 
       return res.status(201).json({
         success: true,
-        message: 'Assessment Process document uploaded successfully',
-        data: doc
+        data: {
+          document: doc,
+          item: itemDef
+        }
       });
     } catch (err) {
-      logger.error('[AssessmentProcessController] uploadDocument error:', { error: err.message });
-      if (req.file && req.file.path) {
-        try { fs.unlinkSync(req.file.path); } catch (_) {}
-      }
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+      logger.error('AssessmentProcessController.uploadDocument error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'SERVER_ERROR', message: 'Failed to upload assessment document' }
+      });
     }
   }
 
   /**
-   * Deletes a document artifact associated with an item key.
-   * @route DELETE /api/v1/assessment-process/:id/documents/:item_key
+   * Deletes an assessment PDF document.
+   * @route DELETE /api/v1/direct-assessment/documents or /api/v1/indirect-assessment/documents
    */
   async deleteDocument(req, res) {
     try {
-      const assessmentFileId = parseInt(req.params.id, 10);
-      const itemKey = req.params.item_key;
+      const groupId = parseInt(req.body.group_id || req.body.groupId || req.query.group_id, 10);
+      const subjectId = req.body.subject_id ? parseInt(req.body.subject_id, 10) : null;
+      const itemKey = req.body.item_key || req.query.item_key;
 
-      const assessFile = await assessmentProcessModel.getById(assessmentFileId);
-      if (!assessFile) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Assessment process record not found' } });
+      if (!itemKey) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'BAD_REQUEST', message: 'item_key is required' }
+        });
       }
 
-      const isTeacher = req.user && req.user.teacher_id && req.user.teacher_id === assessFile.teacher_id;
-      const isPrivileged = req.user && (req.user.is_hod || req.user.role === 'HOD' || req.user.role === 'SYSTEM_ADMIN');
-      if (!isTeacher && !isPrivileged) {
-        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You are not authorized to delete documents from this class.' } });
+      let where = 'WHERE 1=1';
+      const params = [];
+      if (groupId) {
+        where += ' AND teaching_group_id = ?';
+        params.push(groupId);
+      } else if (subjectId) {
+        where += ' AND subject_id = ?';
+        params.push(subjectId);
       }
 
-      const deletedDoc = await assessmentProcessModel.deleteDocument(assessmentFileId, itemKey);
+      const { query } = require('../config/db');
+      const files = await query(`SELECT * FROM assessment_process_files ${where} LIMIT 1`, params);
+      if (!files || files.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Assessment file not found' }
+        });
+      }
+
+      const assessFile = files[0];
+      const deletedDoc = await assessmentProcessModel.deleteDocument(assessFile.id, itemKey);
+
       if (!deletedDoc) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Document artifact not found' } });
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'No document found to delete' }
+        });
       }
 
-      // Cleanup file from disk
       if (deletedDoc.file_path) {
-        try {
-          const absolutePath = path.join(process.cwd(), deletedDoc.file_path.startsWith('/') ? deletedDoc.file_path.slice(1) : deletedDoc.file_path);
-          if (fs.existsSync(absolutePath)) fs.unlinkSync(absolutePath);
-        } catch (_) {}
+        const diskPath = path.join(__dirname, '../../', deletedDoc.file_path.replace(/^\//, ''));
+        if (fs.existsSync(diskPath)) {
+          fs.unlink(diskPath, () => {});
+        }
       }
-
-      await auditService.log({
-        userId: req.user ? req.user.id : 1,
-        action: 'ASSESSMENT_DOCUMENT_DELETE',
-        resourceType: 'assessment_process_documents',
-        resourceId: deletedDoc.id,
-        details: { assessmentFileId, itemKey, fileName: deletedDoc.file_name }
-      });
 
       return res.json({
         success: true,
-        message: 'Document deleted successfully',
-        data: { item_key: itemKey }
+        message: 'Assessment document deleted successfully'
       });
     } catch (err) {
-      logger.error('[AssessmentProcessController] deleteDocument error:', { error: err.message });
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+      logger.error('AssessmentProcessController.deleteDocument error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'SERVER_ERROR', message: 'Failed to delete assessment document' }
+      });
     }
   }
 
   /**
-   * HOD / Auditor approves or reviews the Assessment Process dossier.
-   * @route POST /api/v1/assessment-process/:id/audit
+   * HOD Audit Verification for Assessment File.
+   * @route POST /api/v1/direct-assessment/audit or /api/v1/indirect-assessment/audit
    */
   async auditAssessment(req, res) {
     try {
-      const assessmentFileId = parseInt(req.params.id, 10);
+      const groupId = parseInt(req.body.group_id || req.body.groupId, 10);
+      const subjectId = req.body.subject_id ? parseInt(req.body.subject_id, 10) : null;
       const { status, remarks } = req.body;
 
-      const validStatuses = ['APPROVED', 'REVISION_REQUESTED', 'IN_PROGRESS'];
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: `Invalid audit status. Must be one of: ${validStatuses.join(', ')}` } });
+      let where = 'WHERE 1=1';
+      const params = [];
+      if (groupId) {
+        where += ' AND teaching_group_id = ?';
+        params.push(groupId);
+      } else if (subjectId) {
+        where += ' AND subject_id = ?';
+        params.push(subjectId);
       }
 
-      await assessmentProcessModel.auditAssessment(assessmentFileId, {
-        status,
-        hodRemarks: remarks,
-        auditorId: req.user ? req.user.id : 1
-      });
+      const { query } = require('../config/db');
+      const files = await query(`SELECT * FROM assessment_process_files ${where} LIMIT 1`, params);
+      if (!files || files.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Assessment file not found' }
+        });
+      }
 
-      await auditService.log({
-        userId: req.user ? req.user.id : 1,
-        action: 'ASSESSMENT_DOSSIER_AUDIT',
-        resourceType: 'assessment_process_files',
-        resourceId: assessmentFileId,
-        details: { status, remarks }
+      const assessFile = files[0];
+      await assessmentProcessModel.auditAssessment(assessFile.id, {
+        status: status || 'APPROVED',
+        hodRemarks: remarks || null,
+        auditorId: req.user?.id || 1
       });
 
       return res.json({
         success: true,
-        message: `Assessment Process dossier audit status updated to ${status}`
+        message: 'Assessment audit status updated successfully'
       });
     } catch (err) {
-      logger.error('[AssessmentProcessController] auditAssessment error:', { error: err.message });
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+      logger.error('AssessmentProcessController.auditAssessment error:', err);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'SERVER_ERROR', message: 'Failed to save assessment audit' }
+      });
     }
   }
 }

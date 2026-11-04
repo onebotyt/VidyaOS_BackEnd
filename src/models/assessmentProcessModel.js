@@ -1,18 +1,18 @@
 /**
- * Assessment Process Model — Data access layer for 13 Direct & Indirect Assessment artifacts.
+ * Assessment Process Model — Data access layer for Direct Assessment (8 items) & Indirect Assessment (5 items).
  * Location: src/models/assessmentProcessModel.js
  * VidyaOS Institutional Campus Operating System
  */
 
 const { query } = require('../config/db');
 
-const ASSESSMENT_PROCESS_ITEMS = [
-  // A. Direct Assessment (8 items)
+// A. Direct Assessment (8 items)
+const DIRECT_ASSESSMENT_ITEMS = [
   {
     key: 'internal_examinations',
     num: 1,
     title: 'Internal Examinations',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -25,7 +25,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'class_tests',
     num: 2,
     title: 'Class Tests',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -38,7 +38,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'assignments_records',
     num: 3,
     title: 'Assignments',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -51,7 +51,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'laboratory_performance',
     num: 4,
     title: 'Laboratory Performance',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -64,7 +64,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'practical_examinations',
     num: 5,
     title: 'Practical Examinations',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -77,7 +77,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'mini_projects',
     num: 6,
     title: 'Mini Projects',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -90,7 +90,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'end_sem_examinations',
     num: 7,
     title: 'End-Semester Examinations',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -103,7 +103,7 @@ const ASSESSMENT_PROCESS_ITEMS = [
     key: 'co_mapping',
     num: 8,
     title: 'Course Outcome (CO) Mapping',
-    section: 'A. Direct Assessment',
+    section: 'Direct Assessment',
     section_code: 'DIRECT',
     category: 'direct_assessment',
     category_label: 'Direct Assessment',
@@ -111,14 +111,16 @@ const ASSESSMENT_PROCESS_ITEMS = [
     reqType: 'upload',
     can_upload: true,
     desc: 'Map each assessment component with its corresponding Course Outcomes (COs). Upload CO mapping documents, attainment calculations, and supporting reports.'
-  },
+  }
+];
 
-  // B. Indirect Assessment (5 items)
+// B. Indirect Assessment (5 items)
+const INDIRECT_ASSESSMENT_ITEMS = [
   {
     key: 'course_exit_survey',
-    num: 9,
+    num: 1,
     title: 'Course Exit Survey',
-    section: 'B. Indirect Assessment',
+    section: 'Indirect Assessment',
     section_code: 'INDIRECT',
     category: 'indirect_assessment',
     category_label: 'Indirect Assessment',
@@ -129,9 +131,9 @@ const ASSESSMENT_PROCESS_ITEMS = [
   },
   {
     key: 'student_feedback',
-    num: 10,
+    num: 2,
     title: 'Student Feedback',
-    section: 'B. Indirect Assessment',
+    section: 'Indirect Assessment',
     section_code: 'INDIRECT',
     category: 'indirect_assessment',
     category_label: 'Indirect Assessment',
@@ -142,9 +144,9 @@ const ASSESSMENT_PROCESS_ITEMS = [
   },
   {
     key: 'alumni_feedback',
-    num: 11,
+    num: 3,
     title: 'Alumni Feedback',
-    section: 'B. Indirect Assessment',
+    section: 'Indirect Assessment',
     section_code: 'INDIRECT',
     category: 'indirect_assessment',
     category_label: 'Indirect Assessment',
@@ -155,9 +157,9 @@ const ASSESSMENT_PROCESS_ITEMS = [
   },
   {
     key: 'employer_feedback',
-    num: 12,
+    num: 4,
     title: 'Employer Feedback',
-    section: 'B. Indirect Assessment',
+    section: 'Indirect Assessment',
     section_code: 'INDIRECT',
     category: 'indirect_assessment',
     category_label: 'Indirect Assessment',
@@ -168,9 +170,9 @@ const ASSESSMENT_PROCESS_ITEMS = [
   },
   {
     key: 'graduate_exit_survey',
-    num: 13,
+    num: 5,
     title: 'Graduate Exit Survey',
-    section: 'B. Indirect Assessment',
+    section: 'Indirect Assessment',
     section_code: 'INDIRECT',
     category: 'indirect_assessment',
     category_label: 'Indirect Assessment',
@@ -181,12 +183,31 @@ const ASSESSMENT_PROCESS_ITEMS = [
   }
 ];
 
+const ALL_ASSESSMENT_ITEMS = [
+  ...DIRECT_ASSESSMENT_ITEMS.map((item, idx) => ({ ...item, num: idx + 1 })),
+  ...INDIRECT_ASSESSMENT_ITEMS.map((item, idx) => ({ ...item, num: idx + 9 }))
+];
+
 class AssessmentProcessModel {
   /**
-   * Returns standard 13 items definitions array.
+   * Returns standard definitions array (all 13).
    */
   getItemsDefinition() {
-    return ASSESSMENT_PROCESS_ITEMS;
+    return ALL_ASSESSMENT_ITEMS;
+  }
+
+  /**
+   * Returns Direct Assessment items definitions (8 items).
+   */
+  getDirectAssessmentItems() {
+    return DIRECT_ASSESSMENT_ITEMS;
+  }
+
+  /**
+   * Returns Indirect Assessment items definitions (5 items).
+   */
+  getIndirectAssessmentItems() {
+    return INDIRECT_ASSESSMENT_ITEMS;
   }
 
   /**
@@ -270,14 +291,17 @@ class AssessmentProcessModel {
   }
 
   /**
-   * Retrieves all document artifacts uploaded to an assessment dossier.
+   * Retrieves all uploaded document artifacts for a specific assessment file.
    */
   async getDocuments(assessmentFileId) {
-    return await query(`SELECT * FROM assessment_process_documents WHERE assessment_file_id = ?`, [assessmentFileId]);
+    return await query(
+      `SELECT * FROM assessment_process_documents WHERE assessment_file_id = ? ORDER BY id ASC`,
+      [assessmentFileId]
+    );
   }
 
   /**
-   * Retrieves single assessment process file row by ID.
+   * Retrieves assessment file record by ID.
    */
   async getById(id) {
     const rows = await query(`SELECT * FROM assessment_process_files WHERE id = ?`, [id]);
@@ -285,16 +309,17 @@ class AssessmentProcessModel {
   }
 
   /**
-   * Upserts a document artifact for an item key and increments version.
+   * Saves or replaces a document artifact.
    */
   async upsertDocument({ assessmentFileId, itemKey, docTitle, filePath, fileName, fileSize, mimeType, userId, notes }) {
     const existing = await query(
-      `SELECT id, file_path, version FROM assessment_process_documents WHERE assessment_file_id = ? AND item_key = ?`,
+      `SELECT * FROM assessment_process_documents WHERE assessment_file_id = ? AND item_key = ?`,
       [assessmentFileId, itemKey]
     );
 
     let docId = null;
     let oldFilePath = null;
+
     if (existing && existing.length > 0) {
       const prev = existing[0];
       oldFilePath = prev.file_path;
