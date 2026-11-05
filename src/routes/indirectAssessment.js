@@ -14,6 +14,7 @@ const assessmentProcessController = require('../controllers/assessmentProcessCon
 const uploadAssessmentProcess = makeUploader('assessment_process');
 
 router.use(auth);
+router.use(requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'));
 
 // @route   GET /api/v1/indirect-assessment/definitions
 // @desc    Return 5 Indirect Assessment items schema definitions
@@ -45,3 +46,4 @@ router.post('/audit', requireRole('HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'), (req, res
 router.post('/:id/audit', requireRole('HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'), (req, res) => assessmentProcessController.auditAssessment(req, res));
 
 module.exports = router;
+

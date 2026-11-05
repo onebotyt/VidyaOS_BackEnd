@@ -14,6 +14,7 @@ const assessmentProcessController = require('../controllers/assessmentProcessCon
 const uploadAssessmentProcess = makeUploader('assessment_process');
 
 router.use(auth);
+router.use(requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'));
 
 // @route   GET /api/v1/assessment-process/definitions
 // @desc    Return standard 13 items schema definitions

@@ -14,6 +14,7 @@ const courseFileController = require('../controllers/courseFileController');
 const uploadCourseFile = makeUploader('course_files');
 
 router.use(auth);
+router.use(requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'));
 
 // @route   GET /api/v1/course-files/definitions
 // @desc    Return standard 18 items schema definitions

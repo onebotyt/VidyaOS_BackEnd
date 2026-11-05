@@ -14,6 +14,7 @@ const theoryClassController = require('../controllers/theoryClassController');
 const uploadTheoryClass = makeUploader('theory_classes');
 
 router.use(auth);
+router.use(requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'));
 
 // @route   GET /api/v1/theory-classes/definitions
 // @desc    Return standard 7 items schema definitions

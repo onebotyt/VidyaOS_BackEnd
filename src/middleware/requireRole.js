@@ -15,7 +15,12 @@ function requireRole(...allowedRoles) {
     }
 
     // System Admins always pass
-    if (req.user.roles.includes('SYSTEM_ADMIN')) {
+    if (req.user.roles.includes('SYSTEM_ADMIN') || req.user.roles.includes('ADMIN')) {
+      return next();
+    }
+
+    // HODs pass for HOD, TEACHER, and FACULTY roles
+    if (req.user.is_hod && (allowedRoles.includes('HOD') || allowedRoles.includes('DEPT_HEAD') || allowedRoles.includes('TEACHER') || allowedRoles.includes('FACULTY'))) {
       return next();
     }
 

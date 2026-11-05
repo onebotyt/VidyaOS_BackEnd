@@ -14,6 +14,7 @@ const labClassController = require('../controllers/labClassController');
 const uploadLabClass = makeUploader('lab_classes');
 
 router.use(auth);
+router.use(requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'));
 
 // @route   GET /api/v1/lab-classes/definitions
 // @desc    Return standard 7 items schema definitions
