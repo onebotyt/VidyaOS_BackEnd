@@ -786,10 +786,13 @@ function getPool() {
 
     // Configure SSL for Cloud MySQL providers (Aiven, TiDB, AWS RDS, PlanetScale)
     let sslConfig = undefined;
-    const isSslRequired = process.env.DB_SSL === 'true' || 
-                          process.env.MYSQL_SSL === 'true' || 
-                          Boolean(process.env.DB_CA_CERT) || 
-                          fs.existsSync(path.resolve(__dirname, '../../ca.pem'));
+    const isSslExplicitlyDisabled = process.env.DB_SSL === 'false';
+    const isSslRequired = !isSslExplicitlyDisabled && (
+      process.env.DB_SSL === 'true' || 
+      process.env.MYSQL_SSL === 'true' || 
+      Boolean(process.env.DB_CA_CERT) || 
+      fs.existsSync(path.resolve(__dirname, '../../ca.pem'))
+    );
 
     if (isSslRequired) {
       let caCert = undefined;
@@ -1111,15 +1114,15 @@ async function ensureCompatibilityViews() {
       `);
       await p.execute(`
         CREATE OR REPLACE VIEW attendance_session_pins AS
-        SELECT id AS session_id, verification_pin AS pin_code, verification_expires_at AS expires_at, created_at
+        SELECT id AS session_id, pin_code, token_expires_at AS expires_at, created_at
         FROM attendance_sessions
-        WHERE verification_pin IS NOT NULL
+        WHERE pin_code IS NOT NULL
       `);
       await p.execute(`
         CREATE OR REPLACE VIEW attendance_session_qr AS
-        SELECT id AS session_id, verification_qr_hash AS token_hash, verification_expires_at AS expires_at, created_at
+        SELECT id AS session_id, qr_token AS token_hash, token_expires_at AS expires_at, created_at
         FROM attendance_sessions
-        WHERE verification_qr_hash IS NOT NULL
+        WHERE qr_token IS NOT NULL
       `);
       await p.execute(`
         CREATE TABLE IF NOT EXISTS theory_class_files (

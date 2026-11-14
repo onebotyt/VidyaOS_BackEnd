@@ -381,11 +381,88 @@ router.delete('/common-faculty-manager', AdminController.removeCommonFacultyMana
 // @handler AdminController.getAllTeachers() -> AdminModel.getAllTeachers()
 router.get('/teachers', AdminController.getAllTeachers);
 
+// @route   POST /api/v1/admin/teachers
+// @desc    Create any faculty member (Teacher, HOD, Common Faculty)
+// @access  Protected (SYSTEM_ADMIN)
+router.post('/teachers', [
+  body('full_name').custom((val, { req }) => {
+    const name = val || req.body.fullName;
+    if (!name || !String(name).trim()) throw new Error('Full name required');
+    return true;
+  }),
+  body('email').isEmail().withMessage('Valid institutional Gmail required'),
+  body('department_id').custom((val, { req }) => {
+    const dept = val !== undefined ? val : req.body.departmentId;
+    if (dept === undefined || isNaN(parseInt(dept, 10))) throw new Error('Department ID required');
+    return true;
+  }),
+  body('password').optional().isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+  body('role').optional().isIn(['TEACHER', 'HOD', 'COMMON_FACULTY_MANAGER', 'CFM']),
+  body('phone').optional().trim(),
+  body('employee_id').optional().trim(),
+  validate
+], AdminController.createFaculty);
+
+// @route   PUT /api/v1/admin/teachers/:id
+// @desc    Update faculty details, department, status, or role
+// @access  Protected (SYSTEM_ADMIN)
+router.put('/teachers/:id', [
+  param('id').isInt(),
+  body('full_name').optional().trim(),
+  body('department_id').optional(),
+  body('status').optional().isIn(['ACTIVE', 'INACTIVE', 'SUSPENDED']),
+  body('role').optional().isIn(['TEACHER', 'HOD', 'COMMON_FACULTY_MANAGER', 'CFM']),
+  validate
+], AdminController.updateFaculty);
+
+// @route   PATCH /api/v1/admin/teachers/:id/status
+// @desc    Toggle faculty active/inactive status
+// @access  Protected (SYSTEM_ADMIN)
+router.patch('/teachers/:id/status', [param('id').isInt(), validate], AdminController.toggleFacultyStatus);
+
+// @route   POST /api/v1/admin/teachers/:id/reset-password
+// @desc    Reset password for any faculty member
+// @access  Protected (SYSTEM_ADMIN)
+router.post('/teachers/:id/reset-password', [
+  param('id').isInt(),
+  body('new_password').custom((val, { req }) => {
+    const pw = val || req.body.newPassword;
+    if (!pw || pw.length < 8) throw new Error('Password must be at least 8 characters');
+    return true;
+  }),
+  validate
+], AdminController.resetFacultyPassword);
+
+// @route   DELETE /api/v1/admin/teachers/:id
+// @desc    Delete or safely deactivate faculty member (soft delete with 30-day retention)
+// @access  Protected (SYSTEM_ADMIN)
+router.delete('/teachers/:id', [param('id').isInt(), validate], AdminController.deleteFaculty);
+
+// @route   GET /api/v1/admin/trash/faculty
+// @desc    Retrieve soft-deleted faculty in trash with countdown days left (30-day retention)
+// @access  Protected (SYSTEM_ADMIN)
+router.get('/trash/faculty', AdminController.getTrashFaculty);
+
+// @route   POST /api/v1/admin/trash/faculty/:id/restore
+// @desc    Restore a soft-deleted faculty member from trash back to active roster
+// @access  Protected (SYSTEM_ADMIN)
+router.post('/trash/faculty/:id/restore', [param('id').isInt(), validate], AdminController.restoreFaculty);
+
+// @route   DELETE /api/v1/admin/trash/faculty/:id/permanent
+// @desc    Permanently delete a faculty member from database (manual purge)
+// @access  Protected (SYSTEM_ADMIN)
+router.delete('/trash/faculty/:id/permanent', [param('id').isInt(), validate], AdminController.permanentDeleteFaculty);
+
 // @route   GET /api/v1/admin/registration-gates
 // @desc    Retrieve state of registration gates for HOD and Common Faculty
 // @access  Protected (SYSTEM_ADMIN)
 // @handler AdminController.getRegistrationGates() -> AdminModel.getRegistrationGates()
 router.get('/registration-gates', AdminController.getRegistrationGates);
+
+// @route   PUT /api/v1/admin/registration-gates
+// @desc    Update registration gates configuration (open for all, department checkboxes, HOD, Common Faculty)
+// @access  Protected (SYSTEM_ADMIN)
+router.put('/registration-gates', AdminController.updateRegistrationGates);
 
 // @route   POST /api/v1/admin/registration-gates/toggle
 // @desc    Toggle open/closed state of institutional registration gate (HOD or COMMON_FACULTY)

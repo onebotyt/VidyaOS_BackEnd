@@ -25,6 +25,32 @@ function getClientInfo(req) {
   };
 }
 
+function setAuthCookies(res, result) {
+  if (result && result.access_token) {
+    res.cookie('accessToken', result.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+  }
+  if (result && result.refresh_token) {
+    res.cookie('refreshToken', result.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+  }
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie('accessToken', { path: '/' });
+  res.clearCookie('refreshToken', { path: '/' });
+}
+
 class AuthController {
   /**
    * Handles faculty/admin credential login and sets secure refresh token cookie.
@@ -41,12 +67,7 @@ class AuthController {
       const clientInfo = getClientInfo(req);
       const result = await authService.facultyLogin(credential, req.body.password, clientInfo);
 
-      if (result.refresh_token) {
-        res.cookie('refreshToken', result.refresh_token, {
-          httpOnly: true, secure: process.env.NODE_ENV === 'production',
-          sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-      }
+      setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {
       res.status(err.status || 500).json({
@@ -90,12 +111,7 @@ class AuthController {
       const clientInfo = getClientInfo(req);
       const result = await authService.studentLogin(credential, req.body.password, clientInfo);
 
-      if (result.refresh_token) {
-        res.cookie('refreshToken', result.refresh_token, {
-          httpOnly: true, secure: process.env.NODE_ENV === 'production',
-          sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-      }
+      setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {
       res.status(err.status || 500).json({
@@ -131,12 +147,7 @@ class AuthController {
         if (err.code === 'ACCOUNT_ALREADY_ACTIVE') throw err;
         result = await authService.studentLogin(credential, req.body.password, clientInfo);
       }
-      if (result.refresh_token) {
-        res.cookie('refreshToken', result.refresh_token, {
-          httpOnly: true, secure: process.env.NODE_ENV === 'production',
-          sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-      }
+      setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {
       res.status(err.status || 500).json({
@@ -159,12 +170,7 @@ class AuthController {
   static async changePassword(req, res) {
     try {
       const result = await authService.changePassword(req.user.id, req.body.new_password, req.body.current_password);
-      if (result.access_token) {
-        res.cookie('refreshToken', result.refresh_token, {
-          httpOnly: true, secure: process.env.NODE_ENV === 'production',
-          sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-      }
+      setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {
       res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -276,12 +282,7 @@ class AuthController {
       const result = await authService.handleGoogleCallback(code, state, clientInfo);
       result.frontendOrigin = frontendBase;
 
-      if (result.refresh_token) {
-        res.cookie('refreshToken', result.refresh_token, {
-          httpOnly: true, secure: process.env.NODE_ENV === 'production',
-          sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-      }
+      setAuthCookies(res, result);
 
       return res.send(`
         <!DOCTYPE html>
@@ -321,7 +322,14 @@ class AuthController {
                 } else if (payload.user && payload.user.roles && payload.user.roles.includes('SYSTEM_ADMIN')) {
                   target = '/admin/dashboard.html';
                 }
-                window.location.href = origin + target + '?token=' + encodeURIComponent(payload.access_token) + '&user=' + encodeURIComponent(JSON.stringify(payload.user));
+                try {
+                  if (payload.user) {
+                    localStorage.setItem('user', JSON.stringify(payload.user));
+                    localStorage.setItem('currentUser', JSON.stringify(payload.user));
+                  }
+                } catch (_) {}
+                // Clean URL redirect: Zero tokens in query string!
+                window.location.href = origin + target;
               } else {
                 window.location.href = origin + '/faculty/profile.html?google_linked=1';
               }
@@ -427,13 +435,7 @@ class AuthController {
     try {
       const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
       const result = await authService.googleLogin(req.body.id_token, clientInfo);
-
-      if (result.refresh_token) {
-        res.cookie('refreshToken', result.refresh_token, {
-          httpOnly: true, secure: process.env.NODE_ENV === 'production',
-          sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-      }
+      setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {
       res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -454,10 +456,7 @@ class AuthController {
     try {
       const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
       const result = await authService.refreshTokens(refreshToken, clientInfo);
-      res.cookie('refreshToken', result.refresh_token, {
-        httpOnly: true, secure: process.env.NODE_ENV === 'production',
-        sameSite: 'Strict', maxAge: 7 * 24 * 60 * 60 * 1000
-      });
+      setAuthCookies(res, result);
       res.status(200).json({ success: true, data: { access_token: result.access_token } });
     } catch (err) {
       res.status(err.status || 401).json({ success: false, error: { code: err.code || 'UNAUTHORIZED', message: err.message } });
@@ -477,10 +476,11 @@ class AuthController {
       let userId = null;
 
       const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
+      const rawToken = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : req.cookies?.accessToken;
+      if (rawToken) {
         try {
           const { verifyAccessToken } = require('../utils/tokenHelper');
-          const decoded = verifyAccessToken(authHeader.split(' ')[1]);
+          const decoded = verifyAccessToken(rawToken);
           if (decoded) {
             userId = decoded.user_id;
             sessionId = sessionId || decoded.session_id;
@@ -489,11 +489,10 @@ class AuthController {
       }
 
       await authService.logout({ refreshToken, sessionId, userId });
-      res.clearCookie('refreshToken', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Strict', path: '/' });
-      res.clearCookie('refreshToken', { path: '/' });
-      res.clearCookie('refreshToken');
+      clearAuthCookies(res);
       res.status(200).json({ success: true, message: 'Logged out successfully' });
     } catch (err) {
+      clearAuthCookies(res);
       res.status(200).json({ success: true, message: 'Logged out' });
     }
   }

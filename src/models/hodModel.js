@@ -40,7 +40,7 @@ class HodModel {
     const [devicesSummary] = await query(
       `SELECT 
          COUNT(*) as total,
-         SUM(CASE WHEN is_active = 1 AND last_heartbeat_at >= datetime('now', '-10 minutes') THEN 1 ELSE 0 END) as online
+         SUM(CASE WHEN is_active = 1 AND last_heartbeat_at >= NOW() - INTERVAL 10 MINUTE THEN 1 ELSE 0 END) as online
        FROM devices WHERE department_id = ?`, [deptId]
     );
 
@@ -2017,13 +2017,37 @@ class HodModel {
    * @returns {Promise<boolean>}
    */
   static async getFacultyRegistrationStatus(deptId) {
-    const settingKey = `faculty_reg_dept_${deptId}`;
-    const setting = await query(`SELECT setting_value FROM system_settings WHERE setting_key = ?`, [settingKey]);
-    return setting.length > 0 && setting[0].setting_value === '1';
+    const dRows = await query(`SELECT id, code FROM departments WHERE id = ?`, [deptId]);
+    const deptCode = dRows[0]?.code;
+
+    const settings = await query(
+      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('admin_reg_all_open', 'admin_reg_open_departments', ?)`,
+      [`faculty_reg_dept_${deptId}`]
+    );
+
+    const isAll = settings.some(s => s.setting_key === 'admin_reg_all_open' && (s.setting_value === '1' || s.setting_value === 'true'));
+    if (isAll) return true;
+
+    const deptSetting = settings.find(s => s.setting_key === `faculty_reg_dept_${deptId}`);
+    if (deptSetting) {
+      return deptSetting.setting_value === '1' || deptSetting.setting_value === 'true';
+    }
+
+    const deptsSetting = settings.find(s => s.setting_key === 'admin_reg_open_departments');
+    if (deptsSetting && deptsSetting.setting_value) {
+      try {
+        const arr = JSON.parse(deptsSetting.setting_value);
+        if (Array.isArray(arr) && (arr.includes(deptCode) || arr.includes(Number(deptId)) || arr.includes(String(deptId)))) {
+          return true;
+        }
+      } catch (_) {}
+    }
+
+    return false;
   }
 
   /**
-   * Toggle departmental faculty self-registration gate with audit trail
+   * Toggle departmental faculty self-registration gate with audit trail and two-way sync with Admin Console
    * @calledBy HodController.toggleFacultyRegistration() (controllers/hodController.js)
    * @route POST /api/v1/hod/faculty-registration-toggle (routes/hod.js)
    * @param {number} deptId Department ID
@@ -2036,15 +2060,49 @@ class HodModel {
     await query(
       `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
        VALUES (?, ?, 'Department Faculty Self-Registration Open/Closed', ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(setting_key)
-       DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
       [settingKey, isOpen ? '1' : '0', userId]
+    );
+
+    // Get department details
+    const dRows = await query(`SELECT id, code, name FROM departments WHERE id = ?`, [deptId]);
+    const deptCode = dRows[0]?.code;
+
+    // Two-way synchronization with admin_reg_open_departments and admin_reg_all_open
+    const gates = await query(`SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('admin_reg_all_open', 'admin_reg_open_departments')`);
+    const allSetting = gates.find(s => s.setting_key === 'admin_reg_all_open');
+    const deptsSetting = gates.find(s => s.setting_key === 'admin_reg_open_departments');
+
+    let openDepts = [];
+    if (deptsSetting && deptsSetting.setting_value) {
+      try { openDepts = JSON.parse(deptsSetting.setting_value); } catch (_) { openDepts = []; }
+    }
+    if (!Array.isArray(openDepts)) openDepts = [];
+
+    if (isOpen) {
+      if (deptCode && !openDepts.includes(deptCode)) openDepts.push(deptCode);
+    } else {
+      openDepts = openDepts.filter(x => x !== deptCode && x !== Number(deptId) && x !== String(deptId));
+      // If all_open was enabled, close it since this department is now closed
+      await query(
+        `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+         VALUES ('admin_reg_all_open', '0', 'Allow Registration For All Departments', ?, CURRENT_TIMESTAMP)
+         ON DUPLICATE KEY UPDATE setting_value = '0', updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
+        [userId]
+      );
+    }
+
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+       VALUES ('admin_reg_open_departments', ?, 'Departments with Open Self-Registration', ?, CURRENT_TIMESTAMP)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
+      [JSON.stringify(openDepts), userId]
     );
 
     await query(
       `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
        VALUES (?, 'FACULTY_REGISTRATION_TOGGLED', 'departments', ?, ?, CURRENT_TIMESTAMP)`,
-      [userId, String(deptId), JSON.stringify({ is_open: isOpen, department_id: deptId })]
+      [userId, String(deptId), JSON.stringify({ is_open: isOpen, department_id: deptId, code: deptCode })]
     );
   }
 }

@@ -70,6 +70,20 @@ app.use(cors({
   origin: true,
   credentials: true
 }));
+
+// Cookie Parser Middleware for HttpOnly token extraction
+app.use((req, res, next) => {
+  req.cookies = req.cookies || {};
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    cookieHeader.split(';').forEach(c => {
+      const [k, ...v] = c.trim().split('=');
+      if (k) req.cookies[k] = decodeURIComponent(v.join('='));
+    });
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(generalLimiter);

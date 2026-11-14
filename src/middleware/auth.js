@@ -11,6 +11,8 @@ async function auth(req, res, next) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.split(' ')[1];
+    } else if (req.cookies && (req.cookies.accessToken || req.cookies.token)) {
+      token = req.cookies.accessToken || req.cookies.token;
     } else if (req.query && req.query.token) {
       token = req.query.token;
     }
@@ -45,7 +47,9 @@ async function auth(req, res, next) {
       );
       if (sessionRows && sessionRows.length > 0) {
         const sess = sessionRows[0];
-        const lastActiveTime = sess.last_active_at ? new Date(sess.last_active_at.includes('Z') ? sess.last_active_at : sess.last_active_at.replace(' ', 'T') + 'Z').getTime() : Date.now();
+        const lastActiveTime = sess.last_active_at instanceof Date
+          ? sess.last_active_at.getTime()
+          : (sess.last_active_at ? new Date(typeof sess.last_active_at === 'string' && sess.last_active_at.includes('Z') ? sess.last_active_at : String(sess.last_active_at).replace(' ', 'T') + 'Z').getTime() : Date.now());
         const isIdleExpired = (Date.now() - lastActiveTime) > (24 * 60 * 60 * 1000);
 
         if (sess.is_revoked === 1 || isIdleExpired) {
