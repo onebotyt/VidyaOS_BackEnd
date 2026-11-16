@@ -9,10 +9,36 @@ const { body } = require('express-validator');
 const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
 const validate = require('../middleware/validate');
+const { makeUploader } = require('../middleware/upload');
 const timetableController = require('../controllers/timetableController');
+
+const uploadTimetable = makeUploader('timetable', 50);
 
 router.use(auth);
 
+// ── Simple Year-Based PDF Timetable Routes ──
+// @route   GET /api/v1/timetable/pdf
+// @desc    View timetable PDFs filtered by year or student cohort
+router.get('/pdf', (req, res) => timetableController.getPdfTimetables(req, res));
+
+// @route   POST /api/v1/timetable/pdf
+// @desc    Upload timetable PDF according to academic year (1st, 2nd, 3rd, 4th Year)
+router.post(
+  '/pdf',
+  requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'),
+  uploadTimetable.single('file'),
+  (req, res) => timetableController.uploadPdfTimetable(req, res)
+);
+
+// @route   DELETE /api/v1/timetable/pdf/:id
+// @desc    Delete an uploaded timetable PDF
+router.delete(
+  '/pdf/:id',
+  requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN'),
+  (req, res) => timetableController.deletePdfTimetable(req, res)
+);
+
+// ── Legacy / Matrix Timetable Routes ──
 // @route   GET /api/v1/timetable
 // @desc    View timetable slots for cohort or student
 // @access  Protected (All Authenticated Users)

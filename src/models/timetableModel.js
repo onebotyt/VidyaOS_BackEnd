@@ -77,6 +77,54 @@ class TimetableModel {
     const res = await query(`DELETE FROM timetable_slots WHERE id = ?`, [id]);
     return res.affectedRows > 0 || res.changes > 0;
   }
+
+  /**
+   * Retrieves uploaded PDF timetables filtered by year and department.
+   */
+  async getPdfTimetables({ year, departmentId } = {}) {
+    let sql = `
+      SELECT tf.*, d.name as department_name, d.code as department_code
+      FROM timetable_files tf
+      LEFT JOIN departments d ON d.id = tf.department_id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (year) {
+      sql += ' AND tf.year = ?';
+      params.push(year);
+    }
+    if (departmentId) {
+      sql += ' AND (tf.department_id = ? OR tf.department_id IS NULL)';
+      params.push(departmentId);
+    }
+    sql += ' ORDER BY tf.year ASC, tf.created_at DESC';
+    return await query(sql, params);
+  }
+
+  /**
+   * Saves a newly uploaded PDF timetable record.
+   */
+  async createPdfTimetable({ departmentId, year, semester, academicYearId, title, filePath, fileName, fileSize, uploadedBy, uploaderName }) {
+    const res = await query(
+      `INSERT INTO timetable_files 
+       (department_id, year, semester, academic_year_id, title, file_path, file_name, file_size, uploaded_by, uploader_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [departmentId || null, year, semester || null, academicYearId || null, title, filePath, fileName, fileSize || 0, uploadedBy || null, uploaderName || null]
+    );
+    const newId = res.insertId || res.lastInsertRowid;
+    const rows = await query(`SELECT * FROM timetable_files WHERE id = ?`, [newId]);
+    return rows[0] || null;
+  }
+
+  /**
+   * Deletes an uploaded PDF timetable by ID.
+   */
+  async deletePdfTimetable(id) {
+    const rows = await query(`SELECT * FROM timetable_files WHERE id = ?`, [id]);
+    if (!rows || rows.length === 0) return null;
+    await query(`DELETE FROM timetable_files WHERE id = ?`, [id]);
+    return rows[0];
+  }
 }
 
 module.exports = new TimetableModel();

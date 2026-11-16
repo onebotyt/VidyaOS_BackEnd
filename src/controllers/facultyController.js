@@ -181,9 +181,28 @@ class FacultyController {
         academicEvents.push({ id: asg.id, type: 'ASSIGNMENT', title: label, date: asgDate, max_marks: asg.max_marks });
       }
 
-      const allFinalizedSessions = sessions.filter(s => s.state === 'FINALIZED');
-      const monthFinalizedSessions = sessions.filter(s => s.session_date.startsWith(targetMonth));
+      const allFinalizedSessions = sessions.filter(s => s.state === 'FINALIZED' || s.state === 'CLOSED');
+      const monthFinalizedSessions = allFinalizedSessions.filter(s => s.session_date.startsWith(targetMonth));
       const prevFinalizedSessions = allFinalizedSessions.filter(s => s.session_date < `${targetMonth}-01`);
+
+      // Ensure distinct sequential period numbers for multiple sessions on the same date
+      const dateSessionGroups = {};
+      monthFinalizedSessions.forEach(s => {
+        if (!dateSessionGroups[s.session_date]) dateSessionGroups[s.session_date] = [];
+        dateSessionGroups[s.session_date].push(s);
+      });
+      Object.values(dateSessionGroups).forEach(group => {
+        if (group.length > 1) {
+          const pNums = group.map(s => s.period_number);
+          const hasDistinctPeriods = (new Set(pNums)).size === group.length && !pNums.includes(null) && !pNums.includes(undefined);
+          if (!hasDistinctPeriods) {
+            group.forEach((s, idx) => {
+              s.period_number = idx + 1;
+              s.label = s.label || `Period ${idx + 1}`;
+            });
+          }
+        }
+      });
 
       let gridData = [];
       const dailyTotals = {};

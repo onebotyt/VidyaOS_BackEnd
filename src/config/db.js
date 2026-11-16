@@ -212,7 +212,84 @@ async function ensureCompatibilityViews() {
       logger.warn(`Failed to create compatibility view: ${err.message}`);
     }
   }
-  logger.info('✓ MySQL 8.x compatibility views verified (exams, exam_scores, assignments, etc.)');
+
+  // Ensure crucial tables and columns exist across any MySQL database instance
+  try {
+    // 1. Ensure teaching_groups.subject_code exists
+    const tgCols = await query("SHOW COLUMNS FROM teaching_groups LIKE 'subject_code'");
+    if (!tgCols || tgCols.length === 0) {
+      await query("ALTER TABLE teaching_groups ADD COLUMN subject_code VARCHAR(50) DEFAULT NULL AFTER subject_name");
+      logger.info('✓ Added missing column teaching_groups.subject_code');
+    }
+  } catch (err) {
+    logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
+  }
+
+  try {
+    // 2. Ensure theory_class_files table exists
+    await query(`
+      CREATE TABLE IF NOT EXISTS theory_class_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        teaching_group_id INT NULL,
+        subject_id INT NULL,
+        teacher_id INT NULL,
+        department_id INT NULL,
+        semester INT DEFAULT 1,
+        academic_year_id INT NULL,
+        status VARCHAR(50) DEFAULT 'IN_PROGRESS',
+        hod_remarks TEXT NULL,
+        audited_by INT NULL,
+        audited_at DATETIME NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_tc_group (teaching_group_id),
+        INDEX idx_tc_teacher (teacher_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 3. Ensure theory_class_documents table exists
+    await query(`
+      CREATE TABLE IF NOT EXISTS theory_class_documents (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        theory_class_id INT NOT NULL,
+        item_key VARCHAR(100) NOT NULL,
+        document_name VARCHAR(255) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_size BIGINT DEFAULT 0,
+        mime_type VARCHAR(100) DEFAULT 'application/pdf',
+        uploaded_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_tcd_class (theory_class_id),
+        INDEX idx_tcd_item (item_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 4. Ensure timetable_files table exists for simple year-based PDF timetable uploads
+    await query(`
+      CREATE TABLE IF NOT EXISTS timetable_files (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        department_id INT NULL,
+        year INT NOT NULL,
+        semester INT NULL,
+        academic_year_id INT NULL,
+        title VARCHAR(255) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_name VARCHAR(255) NOT NULL,
+        file_size BIGINT DEFAULT 0,
+        uploaded_by INT NULL,
+        uploader_name VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_tt_year (year),
+        INDEX idx_tt_dept (department_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  } catch (err) {
+    logger.warn(`Note on tables auto-provision check: ${err.message}`);
+  }
+
+  logger.info('✓ MySQL 8.x compatibility views & schema auto-healing verified (exams, theory_classes, etc.)');
 }
 
 module.exports = {

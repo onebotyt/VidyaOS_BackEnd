@@ -93,6 +93,113 @@ class TimetableController {
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
   }
+
+  /**
+   * Retrieves uploaded PDF timetables by year or department.
+   * Auto-detects student's year when accessed by student.
+   * @route GET /api/v1/timetable/pdf
+   */
+  async getPdfTimetables(req, res) {
+    try {
+      let year = req.query.year ? parseInt(req.query.year, 10) : null;
+      let departmentId = req.query.department_id ? parseInt(req.query.department_id, 10) : null;
+
+      // Auto-detect student year & department if student is requesting
+      const isStudent = Boolean(
+        req.user &&
+        ((Array.isArray(req.user.roles) && req.user.roles.includes('STUDENT')) || req.user.role === 'STUDENT')
+      );
+
+      if (isStudent) {
+        const studentId = req.user.student_id || req.user.id;
+        const cohort = await timetableModel.getStudentCohort(studentId);
+        if (cohort) {
+          if (!year) year = cohort.year;
+          if (!departmentId) departmentId = cohort.department_id;
+        }
+      }
+
+      const rows = await timetableModel.getPdfTimetables({ year, departmentId });
+      return res.json({
+        success: true,
+        data: rows,
+        student_year: isStudent ? year : null
+      });
+    } catch (err) {
+      logger.error('[TimetableController] getPdfTimetables error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  /**
+   * Uploads a Timetable PDF according to Year.
+   * @route POST /api/v1/timetable/pdf
+   */
+  async uploadPdfTimetable(req, res) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: { message: 'PDF file is required' } });
+      }
+
+      const year = parseInt(req.body.year, 10);
+      if (!year || isNaN(year) || year < 1 || year > 6) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Please select a valid academic year (1, 2, 3, or 4)' }
+        });
+      }
+
+      const yearLabels = { 1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year' };
+      const defaultTitle = `${yearLabels[year] || year + 'th Year'} Academic Timetable`;
+      const title = (req.body.title || '').trim() || defaultTitle;
+      const departmentId = req.body.department_id ? parseInt(req.body.department_id, 10) : (req.user.department_id || null);
+      const filePath = `/uploads/timetable/${req.file.filename}`;
+      const fileName = req.file.originalname;
+      const fileSize = req.file.size;
+      const uploadedBy = req.user.id;
+      const uploaderName = req.user.full_name || req.user.username || 'Faculty Member';
+
+      const saved = await timetableModel.createPdfTimetable({
+        departmentId,
+        year,
+        semester: req.body.semester ? parseInt(req.body.semester, 10) : null,
+        academicYearId: req.body.academic_year_id ? parseInt(req.body.academic_year_id, 10) : null,
+        title,
+        filePath,
+        fileName,
+        fileSize,
+        uploadedBy,
+        uploaderName
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: `${yearLabels[year] || 'Year ' + year} Timetable PDF uploaded successfully`,
+        data: saved
+      });
+    } catch (err) {
+      logger.error('[TimetableController] uploadPdfTimetable error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  /**
+   * Deletes an uploaded PDF timetable.
+   * @route DELETE /api/v1/timetable/pdf/:id
+   */
+  async deletePdfTimetable(req, res) {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const deleted = await timetableModel.deletePdfTimetable(id);
+      if (!deleted) {
+        return res.status(404).json({ success: false, error: { message: 'Timetable PDF not found' } });
+      }
+      return res.json({ success: true, message: 'Timetable PDF deleted successfully' });
+    } catch (err) {
+      logger.error('[TimetableController] deletePdfTimetable error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
 }
 
 module.exports = new TimetableController();
