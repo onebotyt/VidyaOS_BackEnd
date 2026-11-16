@@ -910,7 +910,7 @@ class AuthController {
         }
       } else {
         if (!targetDeptId) {
-          approvalType = 'COMMON_FACULTY_MANAGER';
+          approvalType = 'ADMIN';
           targetDeptId = null;
 
           const isCommonOpen = (await AuthModel.getSetting('admin_reg_common_faculty_open')) === '1';
@@ -989,9 +989,9 @@ class AuthController {
 
       let reviewMsg = 'Your registration request has been submitted successfully.';
       if (approvalType === 'ADMIN') {
-        reviewMsg = 'Your HOD appointment request has been submitted and is pending review by the System Administrator.';
-      } else if (approvalType === 'COMMON_FACULTY_MANAGER') {
-        reviewMsg = 'Your common faculty registration has been submitted and is pending review by the Common Faculty Manager.';
+        reviewMsg = account_type === 'HOD'
+          ? 'Your HOD appointment request has been submitted and is pending review by the System Administrator.'
+          : 'Your common faculty registration has been submitted and is pending review by the Institutional Administrator.';
       } else {
         reviewMsg = 'Your faculty registration has been submitted and is pending review by your Department HOD.';
       }

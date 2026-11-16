@@ -242,6 +242,11 @@ function getSqliteDb() {
       try { sqliteDb.exec('ALTER TABLE students ADD COLUMN gender TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE students ADD COLUMN category TEXT;'); } catch (_) {}
       try { sqliteDb.exec('ALTER TABLE students ADD COLUMN profile_completed INTEGER DEFAULT 0;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE teachers ADD COLUMN deleted_at DATETIME;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE users ADD COLUMN deleted_at DATETIME;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE common_faculty_manager_assignments ADD COLUMN appointed_by INTEGER REFERENCES users(id);'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE common_faculty_manager_assignments ADD COLUMN appointed_at DATETIME;'); } catch (_) {}
+      try { sqliteDb.exec('ALTER TABLE common_faculty_manager_assignments ADD COLUMN revoked_at DATETIME;'); } catch (_) {}
 
       // Synchronize action <-> event_type, user_id <-> actor_id, entity_type <-> target_type
       sqliteDb.exec(`
@@ -288,10 +293,13 @@ function getSqliteDb() {
         CREATE TABLE IF NOT EXISTS common_faculty_manager_assignments (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           teacher_id INTEGER NOT NULL REFERENCES teachers(id),
+          appointed_by INTEGER REFERENCES users(id),
           assigned_by INTEGER NOT NULL REFERENCES users(id),
           is_active INTEGER NOT NULL DEFAULT 1,
+          appointed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          deactivated_at DATETIME
+          deactivated_at DATETIME,
+          revoked_at DATETIME
         );
 
         CREATE INDEX IF NOT EXISTS idx_frr_status ON faculty_registration_requests(status);
@@ -662,6 +670,15 @@ function translateSqlForSqlite(sql) {
     return `datetime(${expr}, '+${num} ${unit.toLowerCase()}s')`;
   });
 
+  // Handle direct NOW() - INTERVAL num unit
+  trans = trans.replace(/NOW\s*\(\s*\)\s*-\s*INTERVAL\s+(\d+)\s+(MINUTE|DAY|HOUR|SECOND)S?/gi, (m, num, unit) => {
+    return `datetime('now', '-${num} ${unit.toLowerCase()}s')`;
+  });
+  trans = trans.replace(/NOW\s*\(\s*\)\s*\+\s*INTERVAL\s+(\d+)\s+(MINUTE|DAY|HOUR|SECOND)S?/gi, (m, num, unit) => {
+    return `datetime('now', '+${num} ${unit.toLowerCase()}s')`;
+  });
+  trans = trans.replace(/\bNOW\s*\(\s*\)/gi, "datetime('now')");
+
   // Handle MySQL CURDATE() -> SQLite CURRENT_DATE
   trans = trans.replace(/CURDATE\s*\(\s*\)/gi, "CURRENT_DATE");
 
@@ -671,6 +688,10 @@ function translateSqlForSqlite(sql) {
 
   // Handle MySQL INSERT IGNORE INTO -> SQLite INSERT OR IGNORE INTO
   trans = trans.replace(/\bINSERT\s+IGNORE\s+INTO\b/gi, 'INSERT OR IGNORE INTO');
+
+  // Handle MySQL GROUP_CONCAT with SEPARATOR
+  trans = trans.replace(/GROUP_CONCAT\s*\(\s*DISTINCT\s+([^)]+?)\s+SEPARATOR\s+['"][^'"]*['"]\s*\)/gi, 'GROUP_CONCAT(DISTINCT $1)');
+  trans = trans.replace(/GROUP_CONCAT\s*\(\s*([^)]+?)\s+SEPARATOR\s+(['"][^'"]*['"])\s*\)/gi, 'GROUP_CONCAT($1, $2)');
 
   return trans;
 }
@@ -1288,6 +1309,13 @@ async function ensureCompatibilityViews() {
       } catch (colErr) {
         // Table might not exist yet or already altered
       }
+
+      try {
+        await p.execute("ALTER TABLE teachers ADD COLUMN deleted_at DATETIME NULL");
+      } catch (_) {}
+      try {
+        await p.execute("ALTER TABLE users ADD COLUMN deleted_at DATETIME NULL");
+      } catch (_) {}
 
       logger.info('MySQL compatibility views (exams, exam_scores, assignments, etc.) verified successfully.');
     } catch (err) {

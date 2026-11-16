@@ -56,6 +56,11 @@ async function auth(req, res, next) {
           if (isIdleExpired && sess.is_revoked === 0) {
             query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
           }
+          try {
+            res.clearCookie('accessToken', { path: '/' });
+            res.clearCookie('token', { path: '/' });
+            res.clearCookie('refreshToken', { path: '/' });
+          } catch (_) {}
           return res.status(401).json({
             success: false,
             error: {

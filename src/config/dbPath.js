@@ -23,11 +23,21 @@ function getResolvedDatabasePath(overridePath = null) {
       : path.resolve(__dirname, '../../', process.env.SQLITE_FILE);
   }
 
-  // 2. Render / Cloud Persistent Disks
-  if (fs.existsSync('/var/data')) {
+  function isWritableDir(dir) {
+    try {
+      if (!fs.existsSync(dir)) return false;
+      fs.accessSync(dir, fs.constants.W_OK);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // 2. Render / Cloud Persistent Disks (only if directory is writable)
+  if (isWritableDir('/var/data')) {
     return '/var/data/college_attendance.sqlite';
   }
-  if (fs.existsSync('/data')) {
+  if (isWritableDir('/data')) {
     return '/data/college_attendance.sqlite';
   }
 

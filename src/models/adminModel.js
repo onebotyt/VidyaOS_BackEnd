@@ -1167,7 +1167,7 @@ class AdminModel {
               frr.account_type, frr.approval_type, frr.created_at
        FROM faculty_registration_requests frr
        LEFT JOIN departments d ON frr.department_id = d.id
-       WHERE frr.approval_type = 'ADMIN' AND frr.status = 'PENDING'
+       WHERE frr.approval_type IN ('ADMIN', 'COMMON_FACULTY_MANAGER') AND frr.status = 'PENDING'
        ORDER BY frr.created_at DESC`
     );
   }
@@ -1183,7 +1183,7 @@ class AdminModel {
    */
   static async approveHODRegistration(reqId, reviewerId, ayId) {
     const reqRows = await query(
-      `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type = 'ADMIN' AND status = 'PENDING'`,
+      `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type IN ('ADMIN', 'COMMON_FACULTY_MANAGER') AND status = 'PENDING'`,
       [reqId]
     );
     if (!reqRows.length) return null;
@@ -1253,7 +1253,7 @@ class AdminModel {
    */
   static async rejectHODRegistration(reqId, reviewerId, reason) {
     const reqRows = await query(
-      `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type = 'ADMIN' AND status = 'PENDING'`,
+      `SELECT * FROM faculty_registration_requests WHERE id = ? AND approval_type IN ('ADMIN', 'COMMON_FACULTY_MANAGER') AND status = 'PENDING'`,
       [reqId]
     );
     if (!reqRows.length) return false;
@@ -1399,7 +1399,7 @@ class AdminModel {
               u.id as user_id, u.email as gmail, u.status,
               CASE WHEN ta_hod.id IS NOT NULL THEN 1 ELSE 0 END as is_hod,
               d_hod.name as hod_department_name,
-              CASE WHEN cfm.id IS NOT NULL THEN 1 ELSE 0 END as is_common_faculty_manager,
+              0 as is_common_faculty_manager,
               COALESCE((
                 SELECT GROUP_CONCAT(DISTINCT role SEPARATOR ',') 
                 FROM user_roles 
@@ -1415,8 +1415,11 @@ class AdminModel {
        LEFT JOIN departments d ON t.department_id = d.id
        LEFT JOIN teacher_assignments ta_hod ON ta_hod.teacher_id = t.id AND ta_hod.assignment_type = 'HOD' AND ta_hod.is_active = 1
        LEFT JOIN departments d_hod ON ta_hod.department_id = d_hod.id
-       LEFT JOIN common_faculty_manager_assignments cfm ON cfm.teacher_id = t.id AND cfm.is_active = 1
        WHERE t.deleted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM user_roles ur_adm 
+           WHERE ur_adm.user_id = u.id AND ur_adm.role = 'SYSTEM_ADMIN'
+         )
        ORDER BY t.full_name ASC`
     );
   }
@@ -1651,7 +1654,7 @@ class AdminModel {
     // 1. Automatic purge for records older than 30 days
     try {
       const expired = await query(
-        `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - INTERVAL 30 DAY`
+        `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
       );
       for (const exp of expired) {
         await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});

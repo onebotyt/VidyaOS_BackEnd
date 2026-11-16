@@ -23,7 +23,7 @@ const bcrypt = require('bcrypt');
 const path = require('path');
 const fs = require('fs');
 
-const UNIVERSAL_PASSWORD = 'Admin@123';
+const UNIVERSAL_PASSWORD = 'Password@123';
 
 function runPresentationSeed(targetDbPath) {
   console.log(`\n=================================================================`);
@@ -149,7 +149,7 @@ function runPresentationSeed(targetDbPath) {
     ['default_attendance_threshold_percent', '75', 'Minimum attendance required for exam eligibility'],
     ['self_attendance_default_timer_minutes', '15', 'Default expiration timer for PIN and QR soft self-attendance'],
     ['allow_student_self_registration', 'true', 'Student self-registration gate toggle'],
-    ['seed_version', 'v30-presentation-nainital', 'Active seed version']
+    ['seed_version', 'v32-clean-it-2026', 'Active seed version']
   ];
 
   for (const [k, v, desc] of settings) {
@@ -178,27 +178,18 @@ function runPresentationSeed(targetDbPath) {
   }
 
   // 4. Seed User Accounts, Roles, Faculty Profiles & HOD Assignments
-  console.log('[4/8] Seeding System Admin, 6 Department HODs, and 3 IT Faculty...');
+  console.log('[4/8] Seeding System Admin, IT Department HOD, and IT Faculty...');
 
-  // User 1: System Admin
+  // User 1: System Admin (Admin only — not a faculty teacher)
   db.prepare(`
     INSERT INTO users (id, username, email, password_hash, must_change_password, status)
     VALUES (1, 'admin', 'admin@gmail.com', ?, 0, 'ACTIVE')
   `).run(passwordHash);
   db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (1, 'SYSTEM_ADMIN')`).run();
-  db.prepare(`
-    INSERT INTO teachers (id, user_id, employee_id, department_id, full_name, phone, is_phone_verified)
-    VALUES (1, 1, 'ADMIN-01', 4, 'System Administrator', '9897000001', 1)
-  `).run();
 
-  // 6 HODs (Users 2 - 7, Teachers 2 - 7)
+  // IT HOD (User 2, Teacher 2)
   const hods = [
-    { userId: 2, teacherId: 2, deptId: 4, username: 'hod_it', email: 'hod.it@polytechnic.edu', name: 'Dr. Ramesh Chandra', empId: 'HOD-IT-01', phone: '9897000002' },
-    { userId: 3, teacherId: 3, deptId: 2, username: 'hod_ece', email: 'hod.ece@polytechnic.edu', name: 'Prof. Sunita Sharma', empId: 'HOD-ECE-01', phone: '9897000003' },
-    { userId: 4, teacherId: 4, deptId: 3, username: 'hod_ee', email: 'hod.ee@polytechnic.edu', name: 'Er. Deepak Joshi', empId: 'HOD-EE-01', phone: '9897000004' },
-    { userId: 5, teacherId: 5, deptId: 5, username: 'hod_me', email: 'hod.me@polytechnic.edu', name: 'Dr. Anand Pant', empId: 'HOD-ME-01', phone: '9897000005' },
-    { userId: 6, teacherId: 6, deptId: 6, username: 'hod_ce', email: 'hod.ce@polytechnic.edu', name: 'Prof. Priya Negi', empId: 'HOD-CE-01', phone: '9897000006' },
-    { userId: 7, teacherId: 7, deptId: 7, username: 'hod_pharm', email: 'hod.pharm@polytechnic.edu', name: 'Dr. Rajesh Rawat', empId: 'HOD-PHARM-01', phone: '9897000007' }
+    { userId: 2, teacherId: 2, deptId: 4, username: 'hod', email: 'hod@gmail.com', name: 'Dr. Ramesh Chandra', empId: 'HOD-IT-01', phone: '9897000002' }
   ];
 
   for (const h of hods) {
@@ -227,9 +218,9 @@ function runPresentationSeed(targetDbPath) {
 
   // 3 IT Faculty (Users 8 - 10, Teachers 8 - 10)
   const faculty = [
-    { userId: 8, teacherId: 8, deptId: 4, username: 'teacher1', email: 'teacher.amit@polytechnic.edu', name: 'Er. Amit Verma', empId: 'FAC-IT-01', phone: '9897000008' },
-    { userId: 9, teacherId: 9, deptId: 4, username: 'teacher2', email: 'teacher.neha@polytechnic.edu', name: 'Ms. Neha Bisht', empId: 'FAC-IT-02', phone: '9897000009' },
-    { userId: 10, teacherId: 10, deptId: 4, username: 'teacher3', email: 'teacher.rahul@polytechnic.edu', name: 'Er. Rahul Tiwari', empId: 'FAC-IT-03', phone: '9897000010' }
+    { userId: 8, teacherId: 8, deptId: 4, username: 'teacher1', email: 'teacher1@gmail.com', name: 'Er. Amit Verma', empId: 'FAC-IT-01', phone: '9897000008' },
+    { userId: 9, teacherId: 9, deptId: 4, username: 'teacher2', email: 'teacher2@gmail.com', name: 'Ms. Neha Bisht', empId: 'FAC-IT-02', phone: '9897000009' },
+    { userId: 10, teacherId: 10, deptId: 4, username: 'teacher3', email: 'teacher3@gmail.com', name: 'Er. Rahul Tiwari', empId: 'FAC-IT-03', phone: '9897000010' }
   ];
 
   for (const f of faculty) {
@@ -245,6 +236,27 @@ function runPresentationSeed(targetDbPath) {
       VALUES (?, ?, ?, ?, ?, ?, 1)
     `).run(f.teacherId, f.userId, f.empId, f.deptId, f.name, f.phone);
   }
+
+  // 1 Common Faculty (Dr. Kavita Kapoor - Cross-department teacher)
+  const commonFaculty = {
+    userId: 36,
+    teacherId: 11,
+    deptId: null,
+    username: 'common',
+    email: 'common@gmail.com',
+    name: 'Dr. Kavita Kapoor',
+    empId: 'FAC-COM-01',
+    phone: '9897000011'
+  };
+  db.prepare(`
+    INSERT INTO users (id, username, email, password_hash, must_change_password, status)
+    VALUES (?, ?, ?, ?, 0, 'ACTIVE')
+  `).run(commonFaculty.userId, commonFaculty.username, commonFaculty.email, passwordHash);
+  db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, 'TEACHER')`).run(commonFaculty.userId);
+  db.prepare(`
+    INSERT INTO teachers (id, user_id, employee_id, department_id, full_name, phone, is_phone_verified)
+    VALUES (?, ?, ?, ?, ?, ?, 1)
+  `).run(commonFaculty.teacherId, commonFaculty.userId, commonFaculty.empId, commonFaculty.deptId, commonFaculty.name, commonFaculty.phone);
 
   // 5. Subjects & Curriculum
   console.log('[5/8] Seeding Department Curriculum & Subjects...');
@@ -288,24 +300,24 @@ function runPresentationSeed(targetDbPath) {
     VALUES (2, 'SUBJECT_TEACHER', 4, 'THEORY', 4, 3, 5, 1, 1)
   `).run().lastInsertRowid;
 
-  // 6. Enrolled Students (15 IT 3rd Year, 5 ECE 2nd Year, 5 EE 2nd Year)
-  console.log('[6/8] Seeding 25 Enrolled Students across Cohorts...');
+  // 6. Enrolled Students (15 IT 3rd Year)
+  console.log('[6/8] Seeding 15 IT Enrolled Students (student1@gmail.com - student15@gmail.com)...');
   const itStudents = [
-    { roll: 1, name: 'Aarav Mehta', reg: 'UBTER2024IT001', username: 'student1', email: 'aarav.mehta@student.polytechnic.edu', phone: '9897100001', parent: 'Sanjay Mehta', gender: 'MALE', targetPct: 0.90 },
-    { roll: 2, name: 'Pooja Joshi', reg: 'UBTER2024IT002', username: 'student2', email: 'pooja.joshi@student.polytechnic.edu', phone: '9897100002', parent: 'Kailash Joshi', gender: 'FEMALE', targetPct: 0.95 },
-    { roll: 3, name: 'Rohan Karki', reg: 'UBTER2024IT003', username: 'student3', email: 'rohan.karki@student.polytechnic.edu', phone: '9897100003', parent: 'Mohan Karki', gender: 'MALE', targetPct: 0.75 },
-    { roll: 4, name: 'Ananya Pandey', reg: 'UBTER2024IT004', username: 'student4', email: 'ananya.pandey@student.polytechnic.edu', phone: '9897100004', parent: 'Rajesh Pandey', gender: 'FEMALE', targetPct: 0.88 },
-    { roll: 5, name: 'Vikram Singh', reg: 'UBTER2024IT005', username: 'student5', email: 'vikram.singh@student.polytechnic.edu', phone: '9897100005', parent: 'Harish Singh', gender: 'MALE', targetPct: 0.72 },
-    { roll: 6, name: 'Priya Rawat', reg: 'UBTER2024IT006', username: 'priya_it', email: 'priya.rawat@student.polytechnic.edu', phone: '9897100006', parent: 'Sunil Rawat', gender: 'FEMALE', targetPct: 0.85 },
-    { roll: 7, name: 'Gaurav Bhatt', reg: 'UBTER2024IT007', username: 'gaurav_it', email: 'gaurav.bhatt@student.polytechnic.edu', phone: '9897100007', parent: 'Bhuwan Bhatt', gender: 'MALE', targetPct: 0.80 },
-    { roll: 8, name: 'Divya Bisht', reg: 'UBTER2024IT008', username: 'divya_it', email: 'divya.bisht@student.polytechnic.edu', phone: '9897100008', parent: 'Naveen Bisht', gender: 'FEMALE', targetPct: 0.92 },
-    { roll: 9, name: 'Manish Arya', reg: 'UBTER2024IT009', username: 'manish_it', email: 'manish.arya@student.polytechnic.edu', phone: '9897100009', parent: 'Kamal Arya', gender: 'MALE', targetPct: 0.78 },
-    { roll: 10, name: 'Sneha Negi', reg: 'UBTER2024IT010', username: 'sneha_it', email: 'sneha.negi@student.polytechnic.edu', phone: '9897100010', parent: 'Devendra Negi', gender: 'FEMALE', targetPct: 0.84 },
-    { roll: 11, name: 'Ayush Shah', reg: 'UBTER2024IT011', username: 'ayush_it', email: 'ayush.shah@student.polytechnic.edu', phone: '9897100011', parent: 'Pradeep Shah', gender: 'MALE', targetPct: 0.82 },
-    { roll: 12, name: 'Kavita Danu', reg: 'UBTER2024IT012', username: 'kavita_it', email: 'kavita.danu@student.polytechnic.edu', phone: '9897100012', parent: 'Sher Singh Danu', gender: 'FEMALE', targetPct: 0.88 },
-    { roll: 13, name: 'Mohit Pande', reg: 'UBTER2024IT013', username: 'mohit_it', email: 'mohit.pande@student.polytechnic.edu', phone: '9897100013', parent: 'Girish Pande', gender: 'MALE', targetPct: 0.74 },
-    { roll: 14, name: 'Simran Kaur', reg: 'UBTER2024IT014', username: 'simran_it', email: 'simran.kaur@student.polytechnic.edu', phone: '9897100014', parent: 'Gurpreet Kaur', gender: 'FEMALE', targetPct: 0.94 },
-    { roll: 15, name: 'Harish Adhikari', reg: 'UBTER2024IT015', username: 'harish_it', email: 'harish.adhikari@student.polytechnic.edu', phone: '9897100015', parent: 'Jagat Adhikari', gender: 'MALE', targetPct: 0.80 }
+    { roll: 1, name: 'Aarav Mehta', reg: 'UBTER2024IT001', username: 'student1', email: 'student1@gmail.com', phone: '9897100001', parent: 'Sanjay Mehta', gender: 'MALE', targetPct: 0.90 },
+    { roll: 2, name: 'Pooja Joshi', reg: 'UBTER2024IT002', username: 'student2', email: 'student2@gmail.com', phone: '9897100002', parent: 'Kailash Joshi', gender: 'FEMALE', targetPct: 0.95 },
+    { roll: 3, name: 'Rohan Karki', reg: 'UBTER2024IT003', username: 'student3', email: 'student3@gmail.com', phone: '9897100003', parent: 'Mohan Karki', gender: 'MALE', targetPct: 0.75 },
+    { roll: 4, name: 'Ananya Pandey', reg: 'UBTER2024IT004', username: 'student4', email: 'student4@gmail.com', phone: '9897100004', parent: 'Rajesh Pandey', gender: 'FEMALE', targetPct: 0.88 },
+    { roll: 5, name: 'Vikram Singh', reg: 'UBTER2024IT005', username: 'student5', email: 'student5@gmail.com', phone: '9897100005', parent: 'Harish Singh', gender: 'MALE', targetPct: 0.72 },
+    { roll: 6, name: 'Priya Rawat', reg: 'UBTER2024IT006', username: 'student6', email: 'student6@gmail.com', phone: '9897100006', parent: 'Sunil Rawat', gender: 'FEMALE', targetPct: 0.85 },
+    { roll: 7, name: 'Gaurav Bhatt', reg: 'UBTER2024IT007', username: 'student7', email: 'student7@gmail.com', phone: '9897100007', parent: 'Bhuwan Bhatt', gender: 'MALE', targetPct: 0.80 },
+    { roll: 8, name: 'Divya Bisht', reg: 'UBTER2024IT008', username: 'student8', email: 'student8@gmail.com', phone: '9897100008', parent: 'Naveen Bisht', gender: 'FEMALE', targetPct: 0.92 },
+    { roll: 9, name: 'Manish Arya', reg: 'UBTER2024IT009', username: 'student9', email: 'student9@gmail.com', phone: '9897100009', parent: 'Kamal Arya', gender: 'MALE', targetPct: 0.78 },
+    { roll: 10, name: 'Sneha Negi', reg: 'UBTER2024IT010', username: 'student10', email: 'student10@gmail.com', phone: '9897100010', parent: 'Devendra Negi', gender: 'FEMALE', targetPct: 0.84 },
+    { roll: 11, name: 'Ayush Shah', reg: 'UBTER2024IT011', username: 'student11', email: 'student11@gmail.com', phone: '9897100011', parent: 'Pradeep Shah', gender: 'MALE', targetPct: 0.82 },
+    { roll: 12, name: 'Kavita Danu', reg: 'UBTER2024IT012', username: 'student12', email: 'student12@gmail.com', phone: '9897100012', parent: 'Sher Singh Danu', gender: 'FEMALE', targetPct: 0.88 },
+    { roll: 13, name: 'Mohit Pande', reg: 'UBTER2024IT013', username: 'student13', email: 'student13@gmail.com', phone: '9897100013', parent: 'Girish Pande', gender: 'MALE', targetPct: 0.74 },
+    { roll: 14, name: 'Simran Kaur', reg: 'UBTER2024IT014', username: 'student14', email: 'student14@gmail.com', phone: '9897100014', parent: 'Gurpreet Kaur', gender: 'FEMALE', targetPct: 0.94 },
+    { roll: 15, name: 'Harish Adhikari', reg: 'UBTER2024IT015', username: 'student15', email: 'student15@gmail.com', phone: '9897100015', parent: 'Jagat Adhikari', gender: 'MALE', targetPct: 0.80 }
   ];
 
   let currentUserId = 11;
@@ -339,86 +351,6 @@ function runPresentationSeed(targetDbPath) {
     `).run(currentStudentId, s.roll);
 
     itStudentIds.push({ id: currentStudentId, userId: currentUserId, name: s.name, targetPct: s.targetPct, roll: s.roll });
-    currentUserId++;
-    currentStudentId++;
-  }
-
-  // 5 ECE Students
-  const eceStudents = [
-    { name: 'Kunal Joshi', reg: 'UBTER2025ECE001', roll: 1 },
-    { name: 'Megha Pant', reg: 'UBTER2025ECE002', roll: 2 },
-    { name: 'Tanuj Arya', reg: 'UBTER2025ECE003', roll: 3 },
-    { name: 'Ritika Tiwari', reg: 'UBTER2025ECE004', roll: 4 },
-    { name: 'Saurabh Negi', reg: 'UBTER2025ECE005', roll: 5 }
-  ];
-
-  for (const s of eceStudents) {
-    const uName = `ece_student_${s.roll}`;
-    const email = `${uName}@student.polytechnic.edu`;
-    db.prepare(`
-      INSERT INTO users (id, username, email, password_hash, must_change_password, status)
-      VALUES (?, ?, ?, ?, 0, 'ACTIVE')
-    `).run(currentUserId, uName, email, passwordHash);
-
-    db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`).run(currentUserId);
-
-    db.prepare(`
-      INSERT INTO students (
-        id, user_id, official_enrollment_no, registration_no, full_name, class_roll_no,
-        admission_year, is_lateral_entry, graduation_year, phone, profile_completed
-      ) VALUES (?, ?, ?, ?, ?, ?, 2025, 0, 2028, '9897200000', 1)
-    `).run(currentStudentId, currentUserId, s.reg, s.reg, s.name, s.roll);
-
-    db.prepare(`
-      INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
-      VALUES (?, 2, 2, 3, 1, ?, 'ENROLLED')
-    `).run(currentStudentId, s.roll);
-
-    db.prepare(`
-      INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-      VALUES (?, 2, 1, 2, 3, ?, '2026-07-01', 'ACTIVE')
-    `).run(currentStudentId, s.roll);
-
-    currentUserId++;
-    currentStudentId++;
-  }
-
-  // 5 EE Students
-  const eeStudents = [
-    { name: 'Abhishek Upadhyay', reg: 'UBTER2025EE001', roll: 1 },
-    { name: 'Chitra Pandey', reg: 'UBTER2025EE002', roll: 2 },
-    { name: 'Deepak Bora', reg: 'UBTER2025EE003', roll: 3 },
-    { name: 'Monika Kaira', reg: 'UBTER2025EE004', roll: 4 },
-    { name: 'Suraj Mehta', reg: 'UBTER2025EE005', roll: 5 }
-  ];
-
-  for (const s of eeStudents) {
-    const uName = `ee_student_${s.roll}`;
-    const email = `${uName}@student.polytechnic.edu`;
-    db.prepare(`
-      INSERT INTO users (id, username, email, password_hash, must_change_password, status)
-      VALUES (?, ?, ?, ?, 0, 'ACTIVE')
-    `).run(currentUserId, uName, email, passwordHash);
-
-    db.prepare(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`).run(currentUserId);
-
-    db.prepare(`
-      INSERT INTO students (
-        id, user_id, official_enrollment_no, registration_no, full_name, class_roll_no,
-        admission_year, is_lateral_entry, graduation_year, phone, profile_completed
-      ) VALUES (?, ?, ?, ?, ?, ?, 2025, 0, 2028, '9897300000', 1)
-    `).run(currentStudentId, currentUserId, s.reg, s.reg, s.name, s.roll);
-
-    db.prepare(`
-      INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
-      VALUES (?, 3, 2, 3, 1, ?, 'ENROLLED')
-    `).run(currentStudentId, s.roll);
-
-    db.prepare(`
-      INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-      VALUES (?, 3, 1, 2, 3, ?, '2026-07-01', 'ACTIVE')
-    `).run(currentStudentId, s.roll);
-
     currentUserId++;
     currentStudentId++;
   }

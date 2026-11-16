@@ -40,7 +40,7 @@ class HodModel {
     const [devicesSummary] = await query(
       `SELECT 
          COUNT(*) as total,
-         SUM(CASE WHEN is_active = 1 AND last_heartbeat_at >= NOW() - INTERVAL 10 MINUTE THEN 1 ELSE 0 END) as online
+         SUM(CASE WHEN is_active = 1 AND last_heartbeat_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE) THEN 1 ELSE 0 END) as online
        FROM devices WHERE department_id = ?`, [deptId]
     );
 
