@@ -20,7 +20,6 @@ const departmentService = require('./src/services/departmentService');
 const curriculumService = require('./src/services/curriculumService');
 const studentMigrationService = require('./src/services/studentMigrationService');
 const iotMigrationService = require('./src/services/iotMigrationService');
-const dbSyncService = require('./src/services/dbSyncService');
 const promotionEngineService = require('./src/services/promotionEngineService');
 const adminBootstrapService = require('./src/services/adminBootstrapService');
 const { generalLimiter } = require('./src/middleware/rateLimiter');
@@ -163,7 +162,11 @@ const staticOptions = {
 // Resolve Frontend directory (Default: ../frontend, Configurable for Collab Preview: process.env.FRONTEND_DIR)
 const frontendBase = process.env.FRONTEND_DIR
   ? (path.isAbsolute(process.env.FRONTEND_DIR) ? process.env.FRONTEND_DIR : path.resolve(__dirname, process.env.FRONTEND_DIR))
-  : path.join(__dirname, '../frontend');
+  : [
+      path.join(__dirname, '../frontend'),
+      path.resolve(__dirname, '../../../Attendance-System-Simplified/frontend'),
+      path.resolve(__dirname, '../../VidyaOS-Frontend-patched/VidyaOS-main')
+    ].find(p => fs.existsSync(p)) || path.join(__dirname, '../frontend');
 
 // Serve Shared Assets (Single Source of Truth with backward compatibility)
 const sharedDir = path.join(frontendBase, 'shared');
@@ -195,16 +198,7 @@ app.get(['/js/exceljs.min.js', '/shared/js/exceljs.min.js'], (req, res, next) =>
 });
 
 
-// Universal Single-Engine Google Classroom Workspace:
-// Route student classroom to the unified Google Classroom workspace engine
-app.get(['/student/group-detail.html', '/student/group-detail', '/student/group-detail/'], (req, res) => {
-  const namedGroupDetail = path.join(frontendBase, 'faculty/group-detail/group-detail.html');
-  if (fs.existsSync(namedGroupDetail)) {
-    return res.sendFile(namedGroupDetail);
-  }
-  res.sendFile(path.join(frontendBase, 'faculty/group-detail/index.html'));
-});
-app.use('/student/group-detail', express.static(path.join(frontendBase, 'faculty/group-detail')));
+// Strict Role Isolation: /student/group-detail serves student/group-detail/index.html via standard section route
 
 // Universal rewrite for legacy and clean .html requests to modular folder named html or index.html
 app.get('/:section/:page.html', (req, res, next) => {
@@ -287,7 +281,16 @@ const uploadsDir = process.env.UPLOADS_DIR
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir, staticOptions));
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox");
+  const ext = path.extname(req.path).toLowerCase();
+  const inlineSafe = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm'];
+  if (!inlineSafe.includes(ext)) {
+    res.setHeader('Content-Disposition', 'attachment');
+  }
+  next();
+}, express.static(uploadsDir, staticOptions));
 
 // Health Check & Cloud Wake-Up Ping
 app.get(['/health', '/ping', '/api/v1/health', '/api/v1/ping'], (req, res) => {
@@ -331,7 +334,7 @@ app.get(['/api/v1/settings/institution', '/api/v1/auth/institution-profile', '/a
         institution_code: map.institution_code || 'GP-UBTER-101',
         institution_tagline: map.institution_tagline || 'Uttarakhand | Completely Adhered to NBA Guidelines',
         institution_logo_url: map.institution_logo_url || '/images/college-logo.svg',
-        institution_banner_url: map.institution_banner_url || '/admin/dashboard/campus-nainital.jpg',
+        institution_banner_url: map.institution_banner_url || '/images/campus-nainital.jpg',
         institution_affiliation: map.institution_affiliation || 'Uttarakhand Board of Technical Education, Roorkee (UBTER)',
         campus_location: map.campus_location || 'Uttarakhand, India'
       }
@@ -344,6 +347,7 @@ app.get(['/api/v1/settings/institution', '/api/v1/auth/institution-profile', '/a
 // Mount /api/v1 REST API Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/students', studentRoutes);
+app.use('/api/v1/student', studentRoutes); // Backward-compatible singular alias
 app.use('/api/v1/faculty', facultyRoutes);
 app.use('/api/v1/hod', hodRoutes);          // HOD department administration
 app.use('/api/v1/attendance', attendanceRoutes);
@@ -412,10 +416,9 @@ setInterval(() => {
 
 // Initialize Server & Database Test
 async function startServer() {
-  await dbSyncService.initDatabasePersistence();
   await testConnection();
 
-  // Ensure compatibility views (exams, exam_scores, assignments, etc.) exist across MySQL / SQLite
+  // Ensure compatibility views (exams, exam_scores, assignments, etc.) exist across MySQL 8.x
   try {
     const { ensureCompatibilityViews } = require('./src/config/db');
     if (typeof ensureCompatibilityViews === 'function') {
@@ -518,10 +521,7 @@ async function startServer() {
 
   // Graceful shutdown handling for Docker / Kubernetes / systemd / PM2 / Render
   const gracefulShutdown = async (signal) => {
-    logger.info(`Received ${signal}. Capturing pre-shutdown snapshot and synchronizing cloud persistence...`);
-    try {
-      await dbSyncService.capturePreShutdownSnapshot();
-    } catch (_) {}
+    logger.info(`Received ${signal}. Closing MySQL pool and HTTP server gracefully...`);
     serverInstance.close(() => {
       logger.info('HTTP server closed. Exiting process.');
       process.exit(0);

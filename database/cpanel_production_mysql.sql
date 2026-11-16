@@ -100,6 +100,8 @@ CREATE TABLE user_sessions (
   refresh_token_hash VARCHAR(255) NOT NULL UNIQUE,
   user_agent TEXT NULL,
   ip_address VARCHAR(45) NULL,
+  device_id VARCHAR(100) NULL,
+  last_active_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME NOT NULL,
   is_revoked TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -130,6 +132,7 @@ CREATE TABLE departments (
   degree_duration_years INT NOT NULL DEFAULT 3,
   active_term VARCHAR(50) NOT NULL DEFAULT '2026-27 (Winter)',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
   is_archived TINYINT(1) NOT NULL DEFAULT 0,
   archived_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -174,6 +177,7 @@ CREATE TABLE common_faculty_manager_assignments (
   teacher_id INT NOT NULL,
   appointed_by INT NOT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
   appointed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   revoked_at DATETIME NULL,
   INDEX idx_cf_manager_teacher (teacher_id),
@@ -221,6 +225,14 @@ CREATE TABLE students (
   is_lateral_entry TINYINT(1) NOT NULL DEFAULT 0,
   graduation_year INT NULL,
   fingerprint_template TEXT NULL,
+  address TEXT NULL,
+  aadhar_number VARCHAR(20) NULL,
+  father_name VARCHAR(150) NULL,
+  mother_name VARCHAR(150) NULL,
+  dob DATE NULL,
+  gender VARCHAR(20) NULL,
+  category VARCHAR(50) NULL,
+  profile_completed TINYINT(1) NOT NULL DEFAULT 0,
   entry_mode VARCHAR(50) NOT NULL DEFAULT 'teacher_provisioned',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -282,6 +294,7 @@ CREATE TABLE subjects (
   code VARCHAR(50) NOT NULL,
   has_practical TINYINT(1) NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
   syllabus_scheme VARCHAR(50) NOT NULL DEFAULT '2026-27',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -302,6 +315,7 @@ CREATE TABLE teacher_assignments (
   academic_year_id INT NOT NULL,
   assigned_by INT NOT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_ta_teacher (teacher_id),
@@ -321,9 +335,13 @@ CREATE TABLE teaching_groups (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(150) NOT NULL,
   subject_name VARCHAR(150) NOT NULL,
+  subject_code VARCHAR(50) NULL,
   component VARCHAR(50) NOT NULL DEFAULT 'THEORY', -- 'THEORY' | 'PRACTICAL'
+  total_units INT NOT NULL DEFAULT 5,
+  syllabus_units LONGTEXT NULL,
   teacher_id INT NOT NULL,
   academic_year_id INT NOT NULL,
+  department_id INT NULL,
   semester INT NOT NULL,
   invite_code VARCHAR(20) NOT NULL UNIQUE,
   status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE' | 'ARCHIVED'
@@ -432,6 +450,7 @@ CREATE TABLE attendance_registers (
   academic_year_id INT NULL,
   session_type VARCHAR(50) NOT NULL DEFAULT 'THEORY', -- 'THEORY' | 'PRACTICAL'
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_ar_teacher (teacher_id),
@@ -453,6 +472,7 @@ CREATE TABLE attendance_sessions (
   end_time DATETIME NULL,
   session_type VARCHAR(50) NOT NULL DEFAULT 'THEORY',
   state VARCHAR(50) NOT NULL DEFAULT 'DRAFT', -- 'DRAFT' | 'OPEN' | 'CLOSED' | 'FINALIZED'
+  auto_close_at DATETIME NULL,
   label VARCHAR(200) NULL,
   qr_token VARCHAR(255) NULL,
   pin_code VARCHAR(10) NULL,
@@ -472,7 +492,10 @@ CREATE TABLE attendance_session_students (
   id INT AUTO_INCREMENT PRIMARY KEY,
   session_id INT NOT NULL,
   student_id INT NOT NULL,
+  enrollment_id INT NULL,
+  class_roll_no INT NULL,
   attendance_status VARCHAR(50) NULL, -- 'PRESENT' | 'ABSENT' | 'LATE'
+  included TINYINT(1) NOT NULL DEFAULT 1,
   marked_at DATETIME NULL,
   marked_by INT NULL,
   source VARCHAR(50) NOT NULL DEFAULT 'MANUAL',
@@ -548,7 +571,11 @@ CREATE TABLE devices (
   device_type VARCHAR(50) NOT NULL DEFAULT 'ESP32_FINGERPRINT',
   api_key_hash VARCHAR(255) NOT NULL,
   status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   last_heartbeat DATETIME NULL,
+  last_heartbeat_at DATETIME GENERATED ALWAYS AS (last_heartbeat) VIRTUAL,
+  device_uid VARCHAR(100) GENERATED ALWAYS AS (device_uuid) VIRTUAL,
+  name VARCHAR(150) GENERATED ALWAYS AS (device_name) VIRTUAL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_devices_dept (department_id),
@@ -562,6 +589,7 @@ CREATE TABLE fingerprint_slots (
   slot_number INT NOT NULL,
   student_id INT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
   enrolled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   enrolled_by INT NULL,
   UNIQUE KEY uq_device_slot (device_id, slot_number),
@@ -593,8 +621,11 @@ CREATE TABLE iot_attendance_events (
 
 CREATE TABLE esp32_presence (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  event_id VARCHAR(100) NULL,
   student_id INT NOT NULL,
   device_id INT NOT NULL,
+  scan_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  payload_json LONGTEXT NULL,
   scan_timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   scan_date DATE NOT NULL,
   status VARCHAR(50) NOT NULL DEFAULT 'LOGGED',
@@ -742,3 +773,64 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- 5. ZERO demo teachers, ZERO demo students, ZERO demo attendance sessions.
 -- Ready for 1-click import into cPanel phpMyAdmin!
 -- =============================================================================
+
+
+-- =============================================================================
+-- Migration 006: Encrypted ESP32 Biometric Templates, Telemetry & Command Queue
+-- Target DBMS: MySQL 8.x / MariaDB (InnoDB)
+-- Architecture:
+--   1. Slot-Agnostic Cloud Template Vault (student_biometric_templates):
+--      Stores portable 512-byte AS608 fingerprint templates directly under
+--      student_id so replacing an ESP32 hardware unit requires ZERO student
+--      re-registration. Sensor slot numbers are managed exclusively by ESP32
+--      in its local W25Q32 SPI Flash.
+--   2. Remote Command Queue (esp32_command_queue):
+--      Queues remote enrollment, template sync, and buzzer/reboot commands
+--      dispatched from the HOD ESP32 Management Portal.
+--   3. Hardware Telemetry Columns on devices:
+--      Tracks 2S 3.7V battery voltage/percentage, W25Q32 offline queue depth,
+--      AS608 local template count, Wi-Fi RSSI, and AES-256 secret key.
+-- =============================================================================
+
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS student_biometric_templates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NOT NULL,
+  department_id INT NULL,
+  finger_index TINYINT NOT NULL DEFAULT 1,
+  template_base64 LONGTEXT NOT NULL,
+  template_sha256 VARCHAR(64) NOT NULL,
+  quality_score INT NOT NULL DEFAULT 95,
+  captured_by_device_uid VARCHAR(100) NULL,
+  enrolled_by INT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  is_official TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_student_finger_template (student_id, finger_index),
+  INDEX idx_sbt_student (student_id),
+  INDEX idx_sbt_dept (department_id),
+  CONSTRAINT fk_sbt_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS esp32_command_queue (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  device_id INT NOT NULL,
+  department_id INT NOT NULL,
+  command_type VARCHAR(50) NOT NULL,
+  student_id INT NULL,
+  payload_json LONGTEXT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  result_message VARCHAR(255) NULL,
+  created_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  completed_at DATETIME NULL,
+  INDEX idx_esp32_cmd_device_status (device_id, status),
+  INDEX idx_esp32_cmd_dept (department_id),
+  CONSTRAINT fk_esp32_cmd_device FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

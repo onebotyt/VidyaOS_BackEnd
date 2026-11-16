@@ -176,13 +176,13 @@ async function checkAndRunAutomatedSemesterPromotion(targetDate = new Date(), fo
       await conn.execute(
         `INSERT INTO system_settings (setting_key, setting_value, description) 
          VALUES ('last_auto_promoted_term', ?, 'Last academic semester where automated promotion executed')
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP`,
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP`,
         [activeLabel]
       );
       await conn.execute(
         `INSERT INTO system_settings (setting_key, setting_value, description) 
          VALUES ('last_auto_promoted_at', CURRENT_TIMESTAMP, 'Timestamp of last automated semester promotion')
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP`
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP`
       );
     });
 

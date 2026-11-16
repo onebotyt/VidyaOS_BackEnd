@@ -1,6 +1,6 @@
 /**
  * Attendance Model
- * Encapsulates SQLite queries for attendance sessions, registers, roster snapshots, and ESP32 sync.
+ * Encapsulates MySQL 8.x queries for attendance sessions, registers, roster snapshots, and ESP32 sync.
  */
 
 const { query } = require('../config/db');
@@ -194,7 +194,7 @@ class AttendanceModel {
        JOIN students s ON ass.student_id = s.id
        LEFT JOIN register_attendance ra ON ra.session_id = ass.session_id AND ra.student_id = ass.student_id
        LEFT JOIN esp32_presence ep ON ep.student_id = ass.student_id 
-            AND ep.scan_time BETWEEN datetime(?, '-15 minute') AND datetime(COALESCE(?, ?), '+15 minute')
+            AND ep.scan_time BETWEEN DATE_SUB(?, INTERVAL 15 MINUTE) AND DATE_ADD(COALESCE(?, ?), INTERVAL 15 MINUTE)
        WHERE ass.session_id = ?
        ORDER BY ass.class_roll_no ASC`,
       [session.start_time, session.end_time, session.auto_close_at, sessionId]
@@ -386,7 +386,7 @@ class AttendanceModel {
   static async snapshotRoster(sessionId, students) {
     for (const st of students) {
       await query(
-        `INSERT OR IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no, included) VALUES (?, ?, ?, ?, 1)`,
+        `INSERT IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no, included) VALUES (?, ?, ?, ?, 1)`,
         [sessionId, st.student_id, st.enrollment_id || 0, st.class_roll_no || 0]
       );
     }
@@ -412,11 +412,11 @@ class AttendanceModel {
       await query(
         `INSERT INTO register_attendance (session_id, student_id, attendance_status, source, marked_by, teacher_notes)
          VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(session_id, student_id) DO UPDATE SET
-           attendance_status = excluded.attendance_status,
-           source = excluded.source,
-           marked_by = excluded.marked_by,
-           teacher_notes = excluded.teacher_notes`,
+         ON DUPLICATE KEY UPDATE
+           attendance_status = VALUES(attendance_status),
+           source = VALUES(source),
+           marked_by = VALUES(marked_by),
+           teacher_notes = VALUES(teacher_notes)`,
         [sessionId, st.student_id, status, src, userId, isConfirmed ? 'ESP32 Biometric Verified' : 'Marked Absent']
       );
     }

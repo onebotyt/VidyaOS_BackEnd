@@ -142,7 +142,7 @@ async function enforceSingleActiveSession(userId, clientInfo = {}) {
      WHERE user_id = ? 
        AND is_revoked = 0 
        AND expires_at > CURRENT_TIMESTAMP
-       AND datetime(last_active_at, '+24 hours') > datetime('now')
+       AND DATE_ADD(last_active_at, INTERVAL 24 HOUR) > NOW()
      ORDER BY id DESC`,
     [userId]
   );

@@ -1,6 +1,6 @@
 /**
  * Faculty Model
- * Encapsulates SQLite queries and transactions for faculty dashboard, registers,
+ * Encapsulates MySQL 8.x queries and transactions for faculty dashboard, registers,
  * digital pen marking, internal evaluation sheets, cohorts, and common faculty requests.
  *
  * Architecture Role: Model (Data Access Layer)
@@ -287,7 +287,7 @@ class FacultyModel {
       for (const student of enrolled) {
         try {
           await query(
-            `INSERT OR IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no) VALUES (?, ?, ?, ?)`,
+            `INSERT IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no) VALUES (?, ?, ?, ?)`,
             [newSession.id, student.student_id, student.enrollment_id, student.class_roll_no]
           );
         } catch { /* skip duplicates */ }
@@ -365,7 +365,7 @@ class FacultyModel {
       for (const student of (enrolled || [])) {
         try {
           await query(
-            `INSERT OR IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no) VALUES (?, ?, ?, ?)`,
+            `INSERT IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no) VALUES (?, ?, ?, ?)`,
             [newSessionId, student.student_id, student.enrollment_id, student.class_roll_no]
           );
         } catch { /* skip duplicates */ }
@@ -569,7 +569,7 @@ class FacultyModel {
         }
         for (const st of enrolled) {
           await query(
-            `INSERT OR IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no, included) VALUES (?, ?, ?, ?, 1)`,
+            `INSERT IGNORE INTO attendance_session_students (session_id, student_id, enrollment_id, class_roll_no, included) VALUES (?, ?, ?, ?, 1)`,
             [sess.id, st.student_id, st.enrollment_id, st.class_roll_no]
           );
         }
@@ -593,11 +593,11 @@ class FacultyModel {
       await query(
         `INSERT INTO register_attendance (session_id, student_id, attendance_status, source, marked_by, teacher_notes)
          VALUES (?, ?, ?, 'MANUAL', ?, 'Direct Pen Edit')
-         ON CONFLICT(session_id, student_id) DO UPDATE SET
-           attendance_status = excluded.attendance_status,
-           source = excluded.source,
-           marked_by = excluded.marked_by,
-           teacher_notes = excluded.teacher_notes,
+         ON DUPLICATE KEY UPDATE
+           attendance_status = VALUES(attendance_status),
+           source = VALUES(source),
+           marked_by = VALUES(marked_by),
+           teacher_notes = VALUES(teacher_notes),
            updated_at = CURRENT_TIMESTAMP`,
         [sessionId, studentId, status, userId]
       );
@@ -776,7 +776,7 @@ class FacultyModel {
     await query(
       `INSERT INTO system_settings (setting_key, setting_value, updated_at)
        VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP`,
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP`,
       [key, String(val)]
     );
   }

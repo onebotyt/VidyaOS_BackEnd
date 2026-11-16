@@ -846,7 +846,7 @@ class AuthController {
         }
       });
     } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY' || err.code === 'SQLITE_CONSTRAINT') {
+      if (err.code === 'ER_DUP_ENTRY') {
         return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Enrollment number or email already exists.' } });
       }
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });

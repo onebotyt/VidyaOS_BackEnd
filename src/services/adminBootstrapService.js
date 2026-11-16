@@ -16,7 +16,7 @@ const logger = require('../utils/logger');
 class AdminBootstrapService {
   /**
    * Run administrator bootstrapping sequence
-   * Dual-mode compatible (SQLite & MySQL)
+   * Dual-mode compatible (MySQL 8.x)
    */
   static async bootstrap() {
     const envEmail = (process.env.ADMIN_EMAIL || process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();

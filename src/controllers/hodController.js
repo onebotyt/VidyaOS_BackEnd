@@ -605,15 +605,17 @@ class HodController {
         ayId = ayRow.id;
       }
 
-      const secretHash = await bcrypt.hash(secret, 10);
+      const rawSecret = secret && String(secret).trim().length >= 8 ? String(secret).trim() : require('../utils/esp32Crypto').generateDeviceSecretKey();
+      const secretHash = await bcrypt.hash(rawSecret, 10);
       const devId = await HodModel.createDevice({
         deviceUid: device_uid,
         name: name || `ESP32-${device_uid.slice(-4)}`,
         departmentId: deptId,
-        year: year || null,
-        semester: semester || null,
+        year: year || 1,
+        semester: semester || 1,
         ayId,
-        secretHash
+        secretHash,
+        secretKey: rawSecret
       });
 
       res.status(201).json({

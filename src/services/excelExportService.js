@@ -1,3 +1,4 @@
+const fs = require('fs');
 /**
  * Institutional Excel Export Service
  * 
@@ -1325,7 +1326,9 @@ async function getOrGenerateChartImages(data) {
   // Fallback to python chartRenderer
   try {
     const pyScript = path.join(__dirname, '../utils/chartRenderer.py');
-    const py = spawn('python', [pyScript]);
+    if (!fs.existsSync(pyScript)) return { chartTrend, chartCohort };
+    const py = spawn('python3', [pyScript]);
+    py.stdin.on('error', () => {});
 
     let stdout = '';
     let stderr = '';
@@ -1372,7 +1375,9 @@ async function getOrGenerateChartImages(data) {
 
 async function generateNativeExcelWithPython(data) {
   const pyScript = path.join(__dirname, '../utils/generateNativeExcelReport.py');
-  const py = spawn('python', [pyScript]);
+  if (!fs.existsSync(pyScript)) throw new Error('generateNativeExcelReport.py not found');
+  const py = spawn('python3', [pyScript]);
+  py.stdin.on('error', () => {});
 
   const chunks = [];
   let stderr = '';

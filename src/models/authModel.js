@@ -1,6 +1,6 @@
 /**
  * Auth Model
- * Encapsulates SQLite queries and transactions for authentication, registration gates, and account self-registration.
+ * Encapsulates MySQL 8.x queries and transactions for authentication, registration gates, and account self-registration.
  *
  * Architecture Role: Model (Data Access Layer)
  * Interacts With:

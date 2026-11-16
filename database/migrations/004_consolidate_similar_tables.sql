@@ -1,59 +1,59 @@
--- =========================================================
--- Migration 004: Database Schema Consolidation & Simplification
--- Consolidates redundant tables:
--- 1. attendance_session_pins & attendance_session_qr -> attendance_sessions columns
--- 2. assignments & exams -> assessments
--- 3. assignment_submissions & exam_scores -> assessment_submissions
--- 4. register_attendance_corrections -> audit_logs
--- 5. Drops dead/redundant tables: device_events, cohort_registration_settings
--- 6. Adds backward-compatibility VIEWs for legacy readers
--- =========================================================
+-- =============================================================================
+-- Migration 004: Database Schema Consolidation & Simplification (MySQL 8.x)
+-- Consolidates assessments and assessment_submissions in InnoDB format.
+-- =============================================================================
 
--- 1. Add session verification tokens directly to attendance_sessions
--- (Handled conditionally in runner script if columns already exist)
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
 
--- 2. Create Unified Assessments Table
 CREATE TABLE IF NOT EXISTS assessments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  teacher_id INTEGER NOT NULL REFERENCES teachers(id),
-  subject_id INTEGER REFERENCES subjects(id),
-  department_id INTEGER NOT NULL REFERENCES departments(id),
-  branch_id INTEGER NOT NULL REFERENCES branches(id),
-  year INTEGER NOT NULL,
-  semester INTEGER NOT NULL,
-  academic_year_id INTEGER NOT NULL REFERENCES academic_years(id),
-  type TEXT NOT NULL DEFAULT 'ASSIGNMENT',  -- 'ASSIGNMENT' | 'EXAM' | 'TEST' | 'QUIZ'
-  title TEXT NOT NULL,
-  description TEXT,
-  attachment_path TEXT,
-  attachment_name TEXT,
-  due_date DATETIME,                       -- due_date for assignments, exam_date for tests/exams
-  max_marks REAL NOT NULL DEFAULT 100,
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  teacher_id INT NOT NULL,
+  subject_id INT NULL,
+  department_id INT NOT NULL,
+  branch_id INT NOT NULL,
+  year INT NOT NULL,
+  semester INT NOT NULL,
+  academic_year_id INT NOT NULL,
+  type VARCHAR(30) NOT NULL DEFAULT 'ASSIGNMENT',
+  title VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  attachment_path VARCHAR(500) NULL,
+  attachment_name VARCHAR(255) NULL,
+  due_date DATETIME NULL,
+  max_marks DECIMAL(10,2) NOT NULL DEFAULT 100.00,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_assess_teacher FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
+  CONSTRAINT fk_assess_subject FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE SET NULL,
+  CONSTRAINT fk_assess_dept FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+  CONSTRAINT fk_assess_branch FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE,
+  CONSTRAINT fk_assess_ay FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
+  INDEX idx_assessments_cohort (department_id, branch_id, year, semester, academic_year_id),
+  INDEX idx_assessments_teacher (teacher_id),
+  INDEX idx_assessments_type (type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX IF NOT EXISTS idx_assessments_cohort ON assessments(department_id, branch_id, year, semester, academic_year_id);
-CREATE INDEX IF NOT EXISTS idx_assessments_teacher ON assessments(teacher_id);
-CREATE INDEX IF NOT EXISTS idx_assessments_type ON assessments(type);
-
--- 3. Create Unified Assessment Submissions Table
 CREATE TABLE IF NOT EXISTS assessment_submissions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
-  student_id INTEGER NOT NULL REFERENCES students(id),
-  file_path TEXT,
-  original_filename TEXT,
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  assessment_id INT NOT NULL,
+  student_id INT NOT NULL,
+  file_path VARCHAR(500) NULL,
+  original_filename VARCHAR(255) NULL,
   submitted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  status TEXT NOT NULL DEFAULT 'SUBMITTED', -- 'SUBMITTED' | 'LATE' | 'GRADED'
-  marks_obtained REAL,
-  feedback TEXT,                           -- feedback or exam remarks
-  graded_at DATETIME,
-  graded_by INTEGER REFERENCES users(id),
+  status VARCHAR(30) NOT NULL DEFAULT 'SUBMITTED',
+  marks_obtained DECIMAL(10,2) NULL,
+  feedback TEXT NULL,
+  graded_at DATETIME NULL,
+  graded_by INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(assessment_id, student_id)
-);
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_assessment_submission (assessment_id, student_id),
+  CONSTRAINT fk_asub_assessment FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE,
+  CONSTRAINT fk_asub_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+  CONSTRAINT fk_asub_grader FOREIGN KEY (graded_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_assessment_submissions_assessment (assessment_id),
+  INDEX idx_assessment_submissions_student (student_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX IF NOT EXISTS idx_assessment_submissions_assessment ON assessment_submissions(assessment_id);
-CREATE INDEX IF NOT EXISTS idx_assessment_submissions_student ON assessment_submissions(student_id);
+SET FOREIGN_KEY_CHECKS = 1;

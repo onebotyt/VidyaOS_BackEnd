@@ -11,34 +11,10 @@ services:
         value: production
       - key: PORT
         value: 10000
-
       - key: NODE_VERSION
         value: 22
-
-      # ─── DATABASE CONFIGURATION ────────────────────────────────────────────
-      # 🛡️ HOW TO PREVENT DATA LOSS WHEN PUSHING CODE / RESTARTING ON RENDER:
-      #
-      # Render's free tier uses ephemeral containers that recreate their filesystem on every git push.
-      # To preserve all your teachers, students, coursework, and attendance across redeploys,
-      # use Aiven Cloud MySQL (or TiDB / AWS RDS / any remote MySQL host):
-      #
-      # ───────────────────────────────────────────────────────────────────────
-      # METHOD 1 (Recommended — Aiven Cloud MySQL with SSL):
-      # Set the following environment variables in your Render Dashboard:
-      #    - DB_CLIENT: mysql
-      #    - DB_HOST: mysql-25075aad-gdhami115-b393.k.aivencloud.com (or your Aiven host)
-      #    - DB_PORT: 26368
-      #    - DB_USER: avnadmin
-      #    - DB_PASSWORD: <your-aiven-password>
-      #    - DB_NAME: defaultdb
-      #    - DB_SSL: true
-      # ───────────────────────────────────────────────────────────────────────
-      - key: DB_CLIENT
-        value: mysql
-
-      # MySQL / Cloud DB Settings (Used when DB_CLIENT=mysql):
       - key: DB_HOST
-        sync: false          # Fill in Render dashboard
+        sync: false
       - key: DB_PORT
         value: 26368
       - key: DB_USER
@@ -51,32 +27,18 @@ services:
         value: true
       - key: DB_CONNECTION_LIMIT
         value: 10
-
-      # Autonomous Cloud Snapshot Sync (Used when running SQLite on Free Tier):
-      - key: GITHUB_BACKUP_TOKEN
-        sync: false          # Fill with GitHub PAT to auto-persist SQLite without a paid disk
-      - key: GITHUB_BACKUP_GIST
-        sync: false          # Auto-created on first sync if left blank
-
-      # ─── MASTER ADMINISTRATOR BOOTSTRAP ──────────────────────────────────
-      # Keep ADMIN_EMAIL and ADMIN_PASSWORD permanently configured in your Render
-      # dashboard so that your administrator credentials are preserved across any restart.
       - key: ADMIN_EMAIL
-        sync: false          # Fill in Render dashboard (e.g. admin@yourcollege.edu.in)
+        sync: false
       - key: ADMIN_PASSWORD
-        sync: false          # Fill in Render dashboard (e.g. SecurePassword2026!)
-
-      # ─── SECURITY ──────────────────────────────────────────────────────────
+        sync: false
       - key: JWT_ACCESS_SECRET
-        generateValue: true  # Render auto-generates a secure random value
+        generateValue: true
       - key: JWT_REFRESH_SECRET
-        generateValue: true  # Render auto-generates a secure random value
+        generateValue: true
       - key: JWT_ACCESS_EXPIRY
         value: 15m
       - key: JWT_REFRESH_EXPIRY
         value: 7d
-
-      # ─── OPERATIONAL ───────────────────────────────────────────────────────
       - key: DEFAULT_ATTENDANCE_THRESHOLD
         value: 75
       - key: AUTO_CLOSE_CHECK_INTERVAL_SECONDS

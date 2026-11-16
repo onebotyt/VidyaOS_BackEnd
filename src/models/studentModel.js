@@ -1,6 +1,6 @@
 /**
  * Student Model
- * Encapsulates SQLite queries and transactions for student accounts, enrollments, registrations, and dossiers.
+ * Encapsulates MySQL 8.x queries and transactions for student accounts, enrollments, registrations, and dossiers.
  *
  * Architecture Role: Model (Data Access Layer)
  * Interacts With:
@@ -122,7 +122,7 @@ class StudentModel {
    */
   static async getBiometricSlot(studentId) {
     const rows = await query(
-      `SELECT fs.slot_id, fs.enrolled_at, d.device_uid, d.name as device_name
+      `SELECT fs.slot_number as slot_id, fs.enrolled_at, d.device_uuid as device_uid, d.device_name
        FROM fingerprint_slots fs
        JOIN devices d ON fs.device_id = d.id
        WHERE fs.student_id = ? AND fs.is_active = 1`,

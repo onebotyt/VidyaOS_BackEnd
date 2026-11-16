@@ -1,6 +1,6 @@
 /**
  * Admin Model
- * Encapsulates SQLite queries and transactions for institutional master data administration:
+ * Encapsulates MySQL 8.x queries and transactions for institutional master data administration:
  * departments, academic years, HODs, hardware terminals, system settings,
  * attendance corrections, hierarchy, student rosters, and registration anti-spam gates.
  * Provides bidirectional code traceability upward to AdminController and routes/admin.js.
@@ -65,11 +65,13 @@ class AdminModel {
         (SELECT COUNT(CASE WHEN ar.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) 
          FROM register_attendance ar
          JOIN attendance_sessions s ON ar.session_id = s.id
-         WHERE s.department_id = d.id AND s.session_date = CURDATE()) as dept_present,
+         LEFT JOIN attendance_registers reg ON s.register_id = reg.id
+         WHERE COALESCE(s.department_id, reg.department_id) = d.id AND s.session_date = CURDATE()) as dept_present,
         (SELECT COUNT(ar.id) 
          FROM register_attendance ar
          JOIN attendance_sessions s ON ar.session_id = s.id
-         WHERE s.department_id = d.id AND s.session_date = CURDATE()) as dept_total
+         LEFT JOIN attendance_registers reg ON s.register_id = reg.id
+         WHERE COALESCE(s.department_id, reg.department_id) = d.id AND s.session_date = CURDATE()) as dept_total
       FROM departments d
       WHERE d.is_active = 1
       ORDER BY d.id ASC
@@ -553,7 +555,7 @@ class AdminModel {
     for (const [key, value] of entries) {
       await query(
         `INSERT INTO system_settings (setting_key, setting_value, updated_by) VALUES (?, ?, ?)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`,
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
         [key, String(value), userId || 1]
       );
     }
@@ -596,9 +598,9 @@ class AdminModel {
     if (date_preset === 'today') {
       whereClauses.push(`DATE(ep.scan_time) = CURRENT_DATE`);
     } else if (date_preset === '7days') {
-      whereClauses.push(`DATE(ep.scan_time) >= DATE(datetime('now', '-7 days'))`);
+      whereClauses.push(`DATE(ep.scan_time) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`);
     } else if (date_preset === '30days') {
-      whereClauses.push(`DATE(ep.scan_time) >= DATE(datetime('now', '-30 days'))`);
+      whereClauses.push(`DATE(ep.scan_time) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`);
     } else if (date_from && date_to) {
       whereClauses.push(`DATE(ep.scan_time) BETWEEN ? AND ?`);
       params.push(date_from, date_to);

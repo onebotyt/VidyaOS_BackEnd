@@ -232,4 +232,27 @@ router.post('/common/:id/reject', requireCommonFacultyManager(), [
 // @handler FacultyController.getCommonMembers() -> FacultyModel.getCommonMembers()
 router.get('/common/members', requireCommonFacultyManager(), FacultyController.getCommonMembers);
 
+
+// @route   PUT /api/v1/faculty/session-header
+// @desc    Persist custom institution marksheet header for active academic session
+router.put('/session-header', async (req, res) => {
+  try {
+    const { query } = require('../config/db');
+    const header = String(req.body.header || '').trim();
+    const ayId = String(req.body.academic_year_id || 'default').trim();
+    if (!header) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Header text is required' } });
+    }
+    const key = `institution_marks_header_${ayId}`;
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP`,
+      [key, header]
+    );
+    return res.json({ success: true, data: { key, header } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+  }
+});
+
 module.exports = router;

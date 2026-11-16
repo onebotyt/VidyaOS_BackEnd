@@ -86,7 +86,13 @@ router.post(
 // @desc    Retrieve all teaching groups the student is enrolled in
 // @access  Protected (STUDENT)
 // @handler TeachingGroupController.getStudentGroups() -> TeachingGroupModel.getStudentEnrolledGroups()
-router.get('/student/my-groups', auth, requireRole('STUDENT'), TeachingGroupController.getStudentGroups);
+router.get(['/student/my-groups', '/student/my-classes'], auth, requireRole('STUDENT'), TeachingGroupController.getStudentGroups);
+router.get('/my-classes', auth, (req, res, next) => {
+  if (req.user && req.user.roles && req.user.roles.includes('STUDENT')) {
+    return TeachingGroupController.getStudentGroups(req, res, next);
+  }
+  return TeachingGroupController.listGroups(req, res, next);
+});
 
 // ==========================================
 // Group Details & Members Management

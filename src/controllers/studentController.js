@@ -295,7 +295,7 @@ class StudentController {
 
       res.status(201).json({ success: true, data: provisioned });
     } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY' || err.code === 'SQLITE_CONSTRAINT') {
+      if (err.code === 'ER_DUP_ENTRY') {
         return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Enrollment number already exists' } });
       }
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -408,7 +408,7 @@ class StudentController {
         } catch (subErr) {
           results.errors.push({
             enrollment_no: cleanEnroll,
-            reason: (subErr.code === 'ER_DUP_ENTRY' || subErr.code === 'SQLITE_CONSTRAINT') ? 'Enrollment number already exists' : subErr.message
+            reason: (subErr.code === 'ER_DUP_ENTRY') ? 'Enrollment number already exists' : subErr.message
           });
         }
       }

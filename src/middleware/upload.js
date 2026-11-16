@@ -19,9 +19,9 @@ function ensureDir(dir) {
 const ALLOWED_EXTENSIONS = [
   '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv',
   '.txt', '.rtf', '.zip', '.rar', '.7z', '.tar', '.gz',
-  '.jpg', '.jpeg', '.png', '.webp', '.svg', '.gif',
+  '.jpg', '.jpeg', '.png', '.webp', '.gif',
   '.mp4', '.webm', '.mov', '.mkv', '.avi',
-  '.json', '.md', '.py', '.java', '.cpp', '.c', '.html', '.css', '.js', '.ts'
+  '.json', '.md', '.py', '.java', '.cpp', '.c'
 ];
 
 function makeUploader(subfolder, maxFileSizeMb = 100) {

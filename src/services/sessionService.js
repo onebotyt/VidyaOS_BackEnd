@@ -145,7 +145,7 @@ async function getSessionSettings() {
 }
 
 /**
- * Automatically synchronizes academic_years and departments in SQLite.
+ * Automatically synchronizes academic_years and departments in MySQL.
  * Ensures the active session record exists, has is_current = 1, and synchronizes departments.
  */
 async function syncAcademicSession(targetDate = new Date()) {
@@ -158,7 +158,7 @@ async function syncAcademicSession(targetDate = new Date()) {
     // 1. Check if an academic_years record covers targetDate or matches session label/year
     const dateStr = (targetDate instanceof Date ? targetDate : new Date(targetDate)).toISOString().split('T')[0];
     
-    let existing = await conn.query(
+    let [existing] = await conn.query(
       `SELECT id, label, start_date, end_date, is_current 
        FROM academic_years 
        WHERE (? BETWEEN start_date AND end_date) 
@@ -191,12 +191,12 @@ async function syncAcademicSession(targetDate = new Date()) {
       resolved.session_label = targetLabel;
     } else {
       // Auto-create new academic session record
-      const result = await conn.query(
+      const [result] = await conn.query(
         `INSERT INTO academic_years (label, start_date, end_date, is_current) 
          VALUES (?, ?, ?, 1)`,
         [resolved.session_label, resolved.start_date, resolved.end_date]
       );
-      currentAyId = result?.insertId ?? result[0]?.insertId ?? result?.lastInsertRowid ?? 1;
+      currentAyId = result?.insertId ?? result?.lastInsertRowid ?? 1;
       await conn.execute(`UPDATE academic_years SET is_current = 0 WHERE id != ?`, [currentAyId]);
     }
 

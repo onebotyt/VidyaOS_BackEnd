@@ -91,12 +91,14 @@ class AttendanceService {
         for (const s of enrolledStudents) {
           try {
             await conn.execute(
-              `INSERT OR IGNORE INTO attendance_session_students 
+              `INSERT IGNORE INTO attendance_session_students 
                (session_id, student_id, enrollment_id, class_roll_no, included)
                VALUES (?, ?, ?, ?, 1)`,
               [sessionId, s.student_id, s.enrollment_id, s.class_roll_no]
             );
-          } catch { /* skip on conflict */ }
+          } catch (insertErr) {
+            logger.warn(`Failed to insert session student ${s.student_id} into session ${sessionId}: ${insertErr.message}`);
+          }
         }
       }
 
@@ -203,9 +205,9 @@ class AttendanceService {
 
     await query(
       `UPDATE attendance_sessions 
-       SET verification_pin = ?, verification_expires_at = ? 
+       SET pin_code = ?, verification_pin = ?, token_expires_at = ?, verification_expires_at = ? 
        WHERE id = ?`,
-      [pin, expiresAt, sessionId]
+      [pin, pin, expiresAt, expiresAt, sessionId]
     );
 
     return { pin, expires_at: expiresAt };
@@ -219,9 +221,9 @@ class AttendanceService {
 
     await query(
       `UPDATE attendance_sessions 
-       SET verification_qr_hash = ?, verification_expires_at = ? 
+       SET qr_token = ?, verification_qr_hash = ?, token_expires_at = ?, verification_expires_at = ? 
        WHERE id = ?`,
-      [tokenHash, expiresAt, sessionId]
+      [tokenHash, tokenHash, expiresAt, expiresAt, sessionId]
     );
 
     return { token_hash: tokenHash, expires_at: expiresAt, payload: qrPayload };
@@ -254,8 +256,8 @@ class AttendanceService {
       if (!pin) throw { status: 400, code: 'VALIDATION_ERROR', message: 'PIN code is required' };
       const validPins = await query(
         `SELECT id FROM attendance_sessions 
-         WHERE id = ? AND verification_pin = ? AND verification_expires_at > NOW()`,
-        [sessionId, pin]
+         WHERE id = ? AND (verification_pin = ? OR pin_code = ?) AND (verification_expires_at > NOW() OR token_expires_at > NOW())`,
+        [sessionId, pin, pin]
       );
       if (!validPins || validPins.length === 0) {
         throw { status: 400, code: 'VALIDATION_ERROR', message: 'Invalid or expired session PIN' };
@@ -264,8 +266,8 @@ class AttendanceService {
       if (!qr_token) throw { status: 400, code: 'VALIDATION_ERROR', message: 'QR token is required' };
       const validQr = await query(
         `SELECT id FROM attendance_sessions 
-         WHERE id = ? AND verification_qr_hash = ? AND verification_expires_at > NOW()`,
-        [sessionId, qr_token]
+         WHERE id = ? AND (verification_qr_hash = ? OR qr_token = ?) AND (verification_expires_at > NOW() OR token_expires_at > NOW())`,
+        [sessionId, qr_token, qr_token]
       );
       if (!validQr || validQr.length === 0) {
         throw { status: 400, code: 'VALIDATION_ERROR', message: 'Invalid or expired QR token' };
@@ -276,8 +278,8 @@ class AttendanceService {
     await query(
       `INSERT INTO student_self_attendance (session_id, student_id, verification_method, request_status)
        VALUES (?, ?, ?, 'PENDING')
-       ON CONFLICT(session_id, student_id) DO UPDATE SET 
-         verification_method = excluded.verification_method,
+       ON DUPLICATE KEY UPDATE 
+         verification_method = VALUES(verification_method),
          request_status = 'PENDING',
          submitted_at = CURRENT_TIMESTAMP`,
       [sessionId, studentId, method]
@@ -341,10 +343,10 @@ class AttendanceService {
         await conn.execute(
           `INSERT INTO register_attendance (session_id, student_id, attendance_status, source, marked_by)
            VALUES (?, ?, 'PRESENT', 'SELF_REQUEST', ?)
-           ON CONFLICT(session_id, student_id) DO UPDATE SET 
+           ON DUPLICATE KEY UPDATE 
              attendance_status = 'PRESENT',
              source = 'SELF_REQUEST',
-             marked_by = excluded.marked_by,
+             marked_by = VALUES(marked_by),
              updated_at = CURRENT_TIMESTAMP`,
           [sessionId, req.student_id, teacherId]
         );
@@ -389,10 +391,10 @@ class AttendanceService {
           await conn.execute(
             `INSERT INTO register_attendance (session_id, student_id, attendance_status, source, marked_by)
              VALUES (?, ?, 'PRESENT', 'ESP32_SYNC', ?)
-             ON CONFLICT(session_id, student_id) DO UPDATE SET 
+             ON DUPLICATE KEY UPDATE 
                attendance_status = 'PRESENT',
                source = 'ESP32_SYNC',
-               marked_by = excluded.marked_by,
+               marked_by = VALUES(marked_by),
                updated_at = CURRENT_TIMESTAMP`,
             [sessionId, scan.student_id, teacherId]
           );
@@ -438,11 +440,11 @@ class AttendanceService {
         await conn.execute(
           `INSERT INTO register_attendance (session_id, student_id, attendance_status, source, teacher_notes, marked_by)
            VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(session_id, student_id) DO UPDATE SET 
-             attendance_status = excluded.attendance_status,
-             source = excluded.source,
-             teacher_notes = excluded.teacher_notes,
-             marked_by = excluded.marked_by,
+           ON DUPLICATE KEY UPDATE 
+             attendance_status = VALUES(attendance_status),
+             source = VALUES(source),
+             teacher_notes = VALUES(teacher_notes),
+             marked_by = VALUES(marked_by),
              updated_at = CURRENT_TIMESTAMP`,
           [sessionId, rec.student_id, rec.attendance_status, rec.source || 'MANUAL', rec.teacher_notes || null, teacherId]
         );
@@ -493,11 +495,11 @@ class AttendanceService {
       await conn.execute(
         `INSERT INTO register_attendance (session_id, student_id, attendance_status, source, teacher_notes, marked_by)
          VALUES (?, ?, ?, 'CORRECTION', ?, ?)
-         ON CONFLICT(session_id, student_id) DO UPDATE SET 
-           attendance_status = excluded.attendance_status,
+         ON DUPLICATE KEY UPDATE 
+           attendance_status = VALUES(attendance_status),
            source = 'CORRECTION',
-           teacher_notes = excluded.teacher_notes,
-           marked_by = excluded.marked_by,
+           teacher_notes = VALUES(teacher_notes),
+           marked_by = VALUES(marked_by),
            updated_at = CURRENT_TIMESTAMP`,
         [sessionId, studentId, newStatus, reason.trim(), changedByUserId]
       );

@@ -8,8 +8,11 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 require('dotenv').config();
 
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'super_secret_access_jwt_key_2026';
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'super_secret_refresh_jwt_key_2026';
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_ACCESS_SECRET || !process.env.JWT_REFRESH_SECRET)) {
+  console.warn('[SECURITY WARNING] JWT_ACCESS_SECRET or JWT_REFRESH_SECRET is not set in production environment! Generating ephemeral runtime secret.');
+}
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || (process.env.NODE_ENV === 'production' ? crypto.randomBytes(48).toString('hex') : 'dev_only_access_jwt_key_2026');
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || (process.env.NODE_ENV === 'production' ? crypto.randomBytes(48).toString('hex') : 'dev_only_refresh_jwt_key_2026');
 const ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || '15m';
 const REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
 

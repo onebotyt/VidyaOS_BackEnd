@@ -1,9 +1,27 @@
 /**
- * JWT Authentication Middleware
+ * JWT Authentication Middleware (with 15s TTL Profile Cache & Throttled Session Heartbeat)
  */
 
 const { verifyAccessToken } = require('../utils/tokenHelper');
 const { query } = require('../config/db');
+
+// Short-lived in-memory cache to avoid running 6 SQL queries on every concurrent API request
+const _userAuthCache = new Map();
+const _lastHeartbeatWrite = new Map();
+const AUTH_CACHE_TTL_MS = 15 * 1000; // 15 seconds
+const HEARTBEAT_WRITE_INTERVAL_MS = 60 * 1000; // 60 seconds
+
+function invalidateUserAuthCache(userId) {
+  if (!userId) {
+    _userAuthCache.clear();
+    return;
+  }
+  for (const key of _userAuthCache.keys()) {
+    if (key.startsWith(`${userId}:`)) {
+      _userAuthCache.delete(key);
+    }
+  }
+}
 
 async function auth(req, res, next) {
   try {
@@ -39,6 +57,14 @@ async function auth(req, res, next) {
       });
     }
 
+    const cacheKey = `${decoded.user_id}:${decoded.session_id || 'nosess'}:${decoded.purpose || ''}`;
+    const now = Date.now();
+    const cached = _userAuthCache.get(cacheKey);
+    if (cached && (now - cached.ts) < AUTH_CACHE_TTL_MS) {
+      req.user = { ...cached.user };
+      return next();
+    }
+
     // Verify session state if bound to user_sessions
     if (decoded.session_id) {
       const sessionRows = await query(
@@ -49,10 +75,11 @@ async function auth(req, res, next) {
         const sess = sessionRows[0];
         const lastActiveTime = sess.last_active_at instanceof Date
           ? sess.last_active_at.getTime()
-          : (sess.last_active_at ? new Date(typeof sess.last_active_at === 'string' && sess.last_active_at.includes('Z') ? sess.last_active_at : String(sess.last_active_at).replace(' ', 'T') + 'Z').getTime() : Date.now());
-        const isIdleExpired = (Date.now() - lastActiveTime) > (24 * 60 * 60 * 1000);
+          : (sess.last_active_at ? new Date(typeof sess.last_active_at === 'string' && sess.last_active_at.includes('Z') ? sess.last_active_at : String(sess.last_active_at).replace(' ', 'T') + 'Z').getTime() : now);
+        const isIdleExpired = (now - lastActiveTime) > (24 * 60 * 60 * 1000);
 
         if (sess.is_revoked === 1 || isIdleExpired) {
+          _userAuthCache.delete(cacheKey);
           if (isIdleExpired && sess.is_revoked === 0) {
             query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
           }
@@ -71,8 +98,12 @@ async function auth(req, res, next) {
             }
           });
         }
-        // Update heartbeat / last_active_at asynchronously
-        query(`UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
+        // Throttle last_active_at DB writes to once per 60s per session
+        const lastWrite = _lastHeartbeatWrite.get(decoded.session_id) || 0;
+        if ((now - lastWrite) > HEARTBEAT_WRITE_INTERVAL_MS) {
+          _lastHeartbeatWrite.set(decoded.session_id, now);
+          query(`UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
+        }
       }
     }
 
@@ -96,7 +127,6 @@ async function auth(req, res, next) {
 
     const user = users[0];
     if (user.status !== 'ACTIVE') {
-      // Allow PROVISIONED users strictly for account activation / password change
       if (user.status === 'PROVISIONED' && decoded.purpose === 'PASSWORD_ACTIVATION') {
         // Allowed to proceed for password activation
       } else {
@@ -125,7 +155,6 @@ async function auth(req, res, next) {
       if (!user.full_name) user.full_name = teachers[0].full_name;
       if (!user.department_id) user.department_id = teachers[0].department_id;
     } else if (user.roles.includes('SYSTEM_ADMIN') || user.roles.includes('TEACHER')) {
-      // Fallback for SYSTEM_ADMIN/TEACHER to the primary institutional teacher account for operational actions
       const firstTeacher = await query(`SELECT id, employee_id, full_name, department_id FROM teachers ORDER BY id ASC LIMIT 1`);
       if (firstTeacher.length > 0) {
         user.teacher_id = firstTeacher[0].id;
@@ -166,6 +195,7 @@ async function auth(req, res, next) {
     }
 
     user.session_id = decoded.session_id || null;
+    _userAuthCache.set(cacheKey, { ts: now, user: { ...user } });
     req.user = user;
     next();
   } catch (err) {
@@ -180,4 +210,5 @@ async function auth(req, res, next) {
   }
 }
 
+auth.invalidateUserAuthCache = invalidateUserAuthCache;
 module.exports = auth;

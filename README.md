@@ -5,10 +5,19 @@
     <img src="https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js" />
     <img src="https://img.shields.io/badge/Express-4.x-000000?style=flat-square&logo=express" />
     <img src="https://img.shields.io/badge/MySQL-8.x-4479A1?style=flat-square&logo=mysql" />
-    <img src="https://img.shields.io/badge/SQLite-local_dev-003B57?style=flat-square&logo=sqlite" />
+    <img src="https://img.shields.io/badge/Database-Pure_MySQL_8.x-4479A1?style=flat-square&logo=mysql" />
     <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker" />
   </p>
 </div>
+
+---
+
+
+## 📚 Exhaustive Technical Documentation (`/docs`)
+
+- **[`docs/BACKEND_ARCHITECTURE_AND_FILE_MAP.md`](docs/BACKEND_ARCHITECTURE_AND_FILE_MAP.md)** — File-by-file breakdown of every middleware, service, route, controller, model, script, and SQL migration with exact line counts and exported functions.
+- **[`docs/COMPLETE_API_REFERENCE.md`](docs/COMPLETE_API_REFERENCE.md)** — Complete catalogue of all **308+ REST API endpoints** across all 24 Express routers (`/api/v1/*`) with RBAC guards and controller handlers.
+- **[`docs/MYSQL_DATABASE_DICTIONARY.md`](docs/MYSQL_DATABASE_DICTIONARY.md)** — Complete **Pure MySQL 8.x / MariaDB** database schema dictionary covering all tables, columns, compatibility views, connection pooling, SSL configuration, and SQL dialect normalization.
 
 ---
 
@@ -57,7 +66,7 @@
 │                         │                                            │
 │  HTML / CSS / JS        │  Node.js 20 + Express 4                    │
 │  dev-server.js proxy    │  MySQL 8.x (Production)                    │
-│  No build step needed   │  SQLite (Local Dev, zero-setup)            │
+│  No build step needed   │  MySQL 8.x / MariaDB (InnoDB)              │
 │                         │  JWT Auth (Access + Refresh tokens)        │
 │                         │  WhatsApp Web Bot (whatsapp-web.js)        │
 │                         │  ESP32 IoT Biometric Terminal Integration  │
@@ -94,9 +103,9 @@ npm install
 cp .env.example .env
 ```
 
-For local development, the defaults work out of the box — **no MySQL needed**. SQLite is used automatically:
+Configure your MySQL 8.x / MariaDB database connection in `.env`:
 ```env
-DB_CLIENT=sqlite
+DB_CLIENT=mysql
 ```
 
 ### 4. Start the Server
@@ -115,7 +124,7 @@ The frontend is served from `../frontend/` automatically when co-located.
 
 ```
 ✓ VidyaOS Institutional REST API — ONLINE
-✓ SQLite Local Database connected and ready
+✓ MySQL 8.x Database Pool connected
 ✓ Academic Session automated & active: [2026-27 (Winter)]
 ✓ Listening on port 3000
 ```
@@ -189,14 +198,13 @@ NODE_ENV=production npm start
 | :--- | :--- | :--- | :--- |
 | `PORT` | `3000` | No | HTTP server port |
 | `NODE_ENV` | `development` | No | `development` or `production` |
-| `DB_CLIENT` | `sqlite` | **Yes** | `sqlite` (local dev) or `mysql` (production) |
+| `DB_CLIENT` | `mysql` | **Yes** | `mysql` (MySQL 8.x / MariaDB InnoDB engine) |
 | `DB_HOST` | `localhost` | MySQL only | MySQL server hostname |
 | `DB_PORT` | `3306` | MySQL only | MySQL port |
 | `DB_USER` | `root` | MySQL only | MySQL username |
 | `DB_PASSWORD` | _(empty)_ | MySQL only | MySQL password |
 | `DB_NAME` | `college_attendance` | MySQL only | MySQL database name |
 | `DB_CONNECTION_LIMIT` | `10` | No | MySQL connection pool size |
-| `SQLITE_FILE` | `college_attendance.sqlite` | SQLite only | Relative or absolute path to SQLite file |
 | `JWT_ACCESS_SECRET` | _(none)_ | **Yes** | JWT signing secret for access tokens |
 | `JWT_REFRESH_SECRET` | _(none)_ | **Yes** | JWT signing secret for refresh tokens |
 | `JWT_ACCESS_EXPIRY` | `15m` | No | Access token lifetime |
@@ -396,7 +404,6 @@ docker exec -i $(docker ps -qf "name=vidyaos") mysql -u vidyaos_user -p college_
 #### What Persists (Never Lost on Container Rebuild)
 
 ```
-./server-data/db/          ← SQLite database file (if using SQLite mode)
 ./server-data/uploads/     ← Assignment & submission file uploads
 ./server-data/whatsapp-session/  ← WhatsApp Web Bot linked phone credentials
 ```
@@ -490,8 +497,6 @@ UPDATE users SET password_hash = '<output from above>' WHERE username = 'admin';
 | File | Purpose |
 | :--- | :--- |
 | `database/cpanel_production_mysql.sql` | **Production MySQL** — Full schema + seed (use this for deployment) |
-| `database/sqlite/schema.sql` | SQLite schema for local dev (auto-loaded on first boot) |
-| `database/sqlite/seed.sql` | Local development seed data |
 
 ### Running Migrations
 
@@ -576,7 +581,7 @@ node backend/scripts/test-term-automation.js         # 52/52 (Academic session e
 | Runtime | Node.js 20+ |
 | Web Framework | Express 4.x |
 | Production DB | MySQL 8.x (mysql2/promise) |
-| Local Dev DB | SQLite (node:sqlite — built-in, zero install) |
+| Database Engine | MySQL 8.x / MariaDB 10.6+ (`mysql2/promise` pool) |
 | Authentication | JWT (Access + Refresh token rotation) |
 | File Uploads | Multer (20 MB limit, document/image types) |
 | WhatsApp Bot | whatsapp-web.js + LocalAuth + Chromium |

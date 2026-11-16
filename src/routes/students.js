@@ -16,6 +16,7 @@ const requireRole = require('../middleware/requireRole');
 const { requireDepartmentFaculty } = require('../middleware/requireScope');
 const validate = require('../middleware/validate');
 const StudentController = require('../controllers/studentController');
+const TeachingGroupController = require('../controllers/teachingGroupController');
 
 // ==========================================
 // Department Roster & Students Management
@@ -36,6 +37,12 @@ router.get('/', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), StudentController.
 // @access  Protected (STUDENT)
 // @handler StudentController.getProfile() -> StudentModel.getProfile(), StudentModel.getBiometricSlot()
 router.get('/me', auth, requireRole('STUDENT'), StudentController.getProfile);
+
+// @route   GET /api/v1/students/teaching-groups | /courses | /classes
+// @desc    Retrieve enrolled teaching groups/courses for logged-in student
+// @access  Protected (STUDENT)
+router.get(['/teaching-groups', '/courses', '/classes'], auth, requireRole('STUDENT'), TeachingGroupController.getStudentGroups);
+
 
 // @route   PUT /api/v1/students/me
 // @desc    Update student profile email and/or password

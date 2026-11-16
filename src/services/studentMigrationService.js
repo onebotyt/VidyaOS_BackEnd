@@ -1,114 +1,85 @@
 /**
- * Student Schema Migration & UBTER Identifier Synchronization Service
- * Ensures:
- * 1. registration_no (UBTER Official Registration Number) exists on students table
- * 2. class_roll_no (Classroom Roll Number) exists directly on students table
- * 3. Existing students have class_roll_no backfilled from enrollments
- * 4. Indexes are created for fast lookups
+ * Student & Auth Schema Migration Service (MySQL 8.x)
+ * Ensures required columns and tables exist on MySQL startup:
+ * 1. registration_no (UBTER Roll Number) on students table
+ * 2. class_roll_no (Classroom Roll Number) on students table
+ * 3. Backfills class_roll_no from enrollments if missing
+ * 4. Ensures phone & OTP verification schema on users, students, teachers, and otp_verifications
  */
 
 const { query } = require('../config/db');
 const logger = require('../utils/logger');
 
+async function getTableColumnNames(tableName) {
+  const rows = await query(
+    `SELECT COLUMN_NAME AS name
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ?`,
+    [tableName]
+  );
+  return Array.isArray(rows) ? rows.map((r) => r.name || r.COLUMN_NAME) : [];
+}
+
 async function ensureStudentColumns() {
   try {
-    const cols = await query("PRAGMA table_info('students')");
-    const colNames = Array.isArray(cols) ? cols.map(c => c.name || c.COLUMN_NAME) : [];
+    const colNames = await getTableColumnNames('students');
 
-    // 1. Ensure registration_no exists
     if (!colNames.includes('registration_no')) {
       try {
         logger.info('Migrating schema: Adding registration_no column to students table...');
-        await query('ALTER TABLE students ADD COLUMN registration_no VARCHAR(100)');
+        await query('ALTER TABLE students ADD COLUMN registration_no VARCHAR(100) NULL');
         logger.info('✓ Column registration_no added successfully.');
       } catch (e) {
         if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
       }
     }
 
-    // 2. Ensure class_roll_no exists
     if (!colNames.includes('class_roll_no')) {
       try {
         logger.info('Migrating schema: Adding class_roll_no column to students table...');
-        await query('ALTER TABLE students ADD COLUMN class_roll_no INTEGER');
+        await query('ALTER TABLE students ADD COLUMN class_roll_no INT NULL');
         logger.info('✓ Column class_roll_no added successfully.');
       } catch (e) {
         if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
       }
     }
 
-    // 3. Create indexes
+    await query(`
+      UPDATE students s
+      JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+      SET s.class_roll_no = e.class_roll_no
+      WHERE s.class_roll_no IS NULL AND e.class_roll_no IS NOT NULL
+    `).catch(() => {});
+
     try {
-      await query('CREATE INDEX IF NOT EXISTS idx_students_reg_no ON students(registration_no)');
-      await query('CREATE INDEX IF NOT EXISTS idx_students_class_roll ON students(class_roll_no)');
+      await query('CREATE INDEX idx_students_registration_no ON students(registration_no)');
+    } catch (_) {}
+    try {
+      await query('CREATE INDEX idx_students_class_roll_no ON students(class_roll_no)');
     } catch (_) {}
 
-    // 4. Backfill class_roll_no from enrollments for any student where it is null
-    try {
-      await query(`
-        UPDATE students
-        SET class_roll_no = (
-          SELECT e.class_roll_no 
-          FROM enrollments e 
-          WHERE e.student_id = students.id 
-          ORDER BY e.id DESC 
-          LIMIT 1
-        )
-        WHERE class_roll_no IS NULL 
-          AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.class_roll_no IS NOT NULL)
-      `);
-    } catch (backfillErr) {
-      logger.warn('Backfill class_roll_no note: ' + backfillErr.message);
-    }
-
-    // 5. Backfill realistic UBTER registration numbers for demo students (2024IT001..2024IT010) if empty
-    try {
-      const demoStudents = await query(`
-        SELECT id, official_enrollment_no, class_roll_no 
-        FROM students 
-        WHERE registration_no IS NULL AND official_enrollment_no LIKE '2024IT%'
-      `);
-      for (const st of demoStudents) {
-        const numPart = (st.official_enrollment_no.match(/\d+$/) || ['001'])[0].padStart(3, '0');
-        const ubterReg = `24101054${numPart}`;
-        await query(`UPDATE students SET registration_no = ? WHERE id = ?`, [ubterReg, st.id]);
-      }
-    } catch (_) {}
-
-    logger.info('UBTER student identifiers schema & data verified.');
-    return true;
+    await ensureOtpAndPhoneColumns();
+    await ensureSessionAndAttendanceColumns();
   } catch (err) {
-    logger.error('Failed to ensure student schema columns: ' + err.message);
-    return false;
+    logger.warn('Student schema migration warning:', err.message);
   }
 }
 
-/**
- * Ensures phone columns and otp_verifications table exist for Unified Auth & OTP Security
- */
 async function ensureOtpAndPhoneColumns() {
   try {
-    const isMysql = (process.env.DB_CLIENT || '').toLowerCase() === 'mysql';
-
-    // 1. users.phone
-    const userCols = await query("PRAGMA table_info('users')");
-    const userColNames = Array.isArray(userCols) ? userCols.map(c => c.name || c.COLUMN_NAME) : [];
+    const userColNames = await getTableColumnNames('users');
     if (!userColNames.includes('phone')) {
       try {
-        logger.info('Migrating schema: Adding phone column to users table...');
-        await query(isMysql ? 'ALTER TABLE users ADD COLUMN phone VARCHAR(20)' : 'ALTER TABLE users ADD COLUMN phone TEXT');
+        await query('ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL');
         try {
-          await query('CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
+          await query('CREATE INDEX idx_users_phone ON users(phone)');
         } catch (_) {}
-        logger.info('✓ Column phone added to users.');
       } catch (e) {
         if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
       }
     }
 
-    // 2. students columns: phone, parent_phone, parent_name, is_phone_verified
-    const stdCols = await query("PRAGMA table_info('students')");
-    const stdColNames = Array.isArray(stdCols) ? stdCols.map(c => c.name || c.COLUMN_NAME) : [];
+    const stdColNames = await getTableColumnNames('students');
     const safeAddStudentCol = async (col, def) => {
       if (!stdColNames.includes(col)) {
         try {
@@ -119,82 +90,78 @@ async function ensureOtpAndPhoneColumns() {
       }
     };
 
-    await safeAddStudentCol('phone', isMysql ? 'VARCHAR(20)' : 'TEXT');
-    await safeAddStudentCol('parent_phone', isMysql ? 'VARCHAR(20)' : 'TEXT');
-    await safeAddStudentCol('parent_name', isMysql ? 'VARCHAR(150)' : 'TEXT');
-    await safeAddStudentCol('is_phone_verified', 'INTEGER DEFAULT 0');
+    await safeAddStudentCol('phone', 'VARCHAR(20) NULL');
+    await safeAddStudentCol('parent_phone', 'VARCHAR(20) NULL');
+    await safeAddStudentCol('parent_name', 'VARCHAR(150) NULL');
+    await safeAddStudentCol('is_phone_verified', 'TINYINT(1) DEFAULT 0');
+    await safeAddStudentCol('address', 'TEXT NULL');
+    await safeAddStudentCol('aadhar_number', 'VARCHAR(20) NULL');
+    await safeAddStudentCol('father_name', 'VARCHAR(150) NULL');
+    await safeAddStudentCol('mother_name', 'VARCHAR(150) NULL');
+    await safeAddStudentCol('dob', 'DATE NULL');
+    await safeAddStudentCol('gender', 'VARCHAR(20) NULL');
+    await safeAddStudentCol('category', 'VARCHAR(50) NULL');
+    await safeAddStudentCol('profile_completed', 'TINYINT(1) DEFAULT 0');
 
-    // 3. teachers columns: is_phone_verified
-    const teachCols = await query("PRAGMA table_info('teachers')");
-    const teachColNames = Array.isArray(teachCols) ? teachCols.map(c => c.name || c.COLUMN_NAME) : [];
+    const teachColNames = await getTableColumnNames('teachers');
     if (!teachColNames.includes('is_phone_verified')) {
       try {
-        await query('ALTER TABLE teachers ADD COLUMN is_phone_verified INTEGER DEFAULT 0');
+        await query('ALTER TABLE teachers ADD COLUMN is_phone_verified TINYINT(1) DEFAULT 0');
       } catch (e) {
         if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
       }
     }
 
-    // 4. Create otp_verifications table
-    if (isMysql) {
-      await query(`
-        CREATE TABLE IF NOT EXISTS otp_verifications (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          identifier VARCHAR(150) NOT NULL,
-          otp_code VARCHAR(20) NOT NULL,
-          purpose VARCHAR(50) NOT NULL,
-          user_id INT,
-          verification_token VARCHAR(255),
-          expires_at DATETIME NOT NULL,
-          attempts INT DEFAULT 0,
-          is_verified INT DEFAULT 0,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          INDEX idx_otp_identifier_purpose (identifier, purpose),
-          INDEX idx_otp_token (verification_token)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-      `);
-    } else {
-      await query(`
-        CREATE TABLE IF NOT EXISTS otp_verifications (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          identifier TEXT NOT NULL,
-          otp_code TEXT NOT NULL,
-          purpose TEXT NOT NULL,
-          user_id INTEGER,
-          verification_token TEXT,
-          expires_at DATETIME NOT NULL,
-          attempts INTEGER DEFAULT 0,
-          is_verified INTEGER DEFAULT 0,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      `);
-      try {
-        await query('CREATE INDEX IF NOT EXISTS idx_otp_identifier_purpose ON otp_verifications(identifier, purpose)');
-        await query('CREATE INDEX IF NOT EXISTS idx_otp_token ON otp_verifications(verification_token)');
-      } catch (_) {}
-    }
-
-    // 5. Backfill demo phones for test accounts if empty (enabling seamless phone login testing)
-    try {
-      // Give teacher@gmail.com phone 9876543210
-      await query(`UPDATE users SET phone = '9876543210' WHERE email = 'teacher@gmail.com' AND (phone IS NULL OR phone = '')`);
-      await query(`UPDATE teachers SET phone = '9876543210', is_phone_verified = 1 WHERE user_id = (SELECT id FROM users WHERE email = 'teacher@gmail.com')`);
-
-      // Give student 2024IT001 (student@gmail.com) phone 9876500001
-      await query(`UPDATE users SET phone = '9876500001' WHERE email = 'student@gmail.com' AND (phone IS NULL OR phone = '')`);
-      await query(`UPDATE students SET phone = '9876500001', is_phone_verified = 1 WHERE user_id = (SELECT id FROM users WHERE email = 'student@gmail.com')`);
-    } catch (_) {}
-
-    logger.info('OTP and phone schema migration verified.');
-    return true;
+    await query(`
+      CREATE TABLE IF NOT EXISTS otp_verifications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        identifier VARCHAR(150) NOT NULL,
+        otp_code VARCHAR(20) NOT NULL,
+        purpose VARCHAR(50) NOT NULL,
+        user_id INT NULL,
+        verification_token VARCHAR(255) NULL,
+        expires_at DATETIME NOT NULL,
+        attempts INT DEFAULT 0,
+        is_verified TINYINT(1) DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_otp_identifier_purpose (identifier, purpose),
+        INDEX idx_otp_token (verification_token)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
   } catch (err) {
-    logger.error('Failed to ensure OTP & phone schema columns: ' + err.message);
-    return false;
+    logger.warn('OTP/Phone schema migration warning:', err.message);
   }
 }
 
-module.exports = {
-  ensureStudentColumns,
-  ensureOtpAndPhoneColumns
-};
+async function ensureSessionAndAttendanceColumns() {
+  try {
+    const sessionCols = await getTableColumnNames('user_sessions');
+    if (!sessionCols.includes('device_id')) {
+      try {
+        await query('ALTER TABLE user_sessions ADD COLUMN device_id VARCHAR(100) NULL AFTER ip_address');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
+    }
+    if (!sessionCols.includes('last_active_at')) {
+      try {
+        await query('ALTER TABLE user_sessions ADD COLUMN last_active_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER device_id');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
+    }
 
+    const attendanceCols = await getTableColumnNames('attendance_sessions');
+    if (!attendanceCols.includes('auto_close_at')) {
+      try {
+        await query('ALTER TABLE attendance_sessions ADD COLUMN auto_close_at DATETIME NULL AFTER state');
+      } catch (e) {
+        if (!/duplicate column|already exists|ER_DUP_FIELDNAME/i.test(e.message)) throw e;
+      }
+    }
+  } catch (err) {
+    logger.warn('Session/Attendance schema migration warning:', err.message);
+  }
+}
+
+module.exports = { ensureStudentColumns, ensureOtpAndPhoneColumns, ensureSessionAndAttendanceColumns };

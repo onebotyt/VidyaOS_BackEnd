@@ -1,6 +1,6 @@
 /**
  * HOD Model
- * Encapsulates SQLite queries and transactions for department administration:
+ * Encapsulates MySQL 8.x queries and transactions for department administration:
  * teachers, subjects, course assignments, devices, student rosters, bulk imports,
  * semester promotions, department settings, faculty registrations, reports, and archives.
  * Provides bidirectional code traceability upward to HodController and routes/hod.js.
@@ -768,9 +768,9 @@ class HodModel {
     if (date_preset === 'today') {
       whereClauses.push(`DATE(ep.scan_time) = CURRENT_DATE`);
     } else if (date_preset === '7days') {
-      whereClauses.push(`DATE(ep.scan_time) >= DATE(datetime('now', '-7 days'))`);
+      whereClauses.push(`DATE(ep.scan_time) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`);
     } else if (date_preset === '30days') {
-      whereClauses.push(`DATE(ep.scan_time) >= DATE(datetime('now', '-30 days'))`);
+      whereClauses.push(`DATE(ep.scan_time) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`);
     } else if (date_from && date_to) {
       whereClauses.push(`DATE(ep.scan_time) BETWEEN ? AND ?`);
       params.push(date_from, date_to);
@@ -981,8 +981,15 @@ class HodModel {
   static async getDevices(deptId) {
     return await query(
       `SELECT d.id, d.device_uid, d.name, d.is_active, d.last_heartbeat_at,
-              d.year, d.semester, d.created_at,
-              ay.label as academic_year_label
+              d.year, d.semester, d.assigned_years, d.assigned_semesters,
+              d.secret_key, d.firmware_version, d.battery_voltage, d.battery_pct,
+              d.is_charging, d.offline_queue_count, d.w25q32_used_kb, d.as608_enrolled_count,
+              d.wifi_rssi, d.ip_address, d.created_at,
+              ay.label as academic_year_label,
+              (SELECT COUNT(DISTINCT sbt.student_id)
+               FROM student_biometric_templates sbt
+               JOIN enrollments e ON e.student_id = sbt.student_id AND e.status = 'ENROLLED'
+               WHERE e.department_id = d.department_id AND sbt.is_active = 1) as cloud_templates_count
        FROM devices d
        LEFT JOIN academic_years ay ON d.academic_year_id = ay.id
        WHERE d.department_id = ?
@@ -998,13 +1005,13 @@ class HodModel {
    * @param {Object} params Device parameters
    * @returns {Promise<number>} Inserted device ID
    */
-  static async createDevice({ deviceUid, name, departmentId, year, semester, ayId, secretHash }) {
+  static async createDevice({ deviceUid, name, departmentId, year, semester, ayId, secretHash, secretKey }) {
     const result = await query(
-      `INSERT INTO devices (device_uid, name, department_id, year, semester, academic_year_id, secret_hash)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [deviceUid, name, departmentId, year, semester, ayId, secretHash]
+      `INSERT INTO devices (device_uid, name, department_id, branch_id, year, semester, academic_year_id, secret_key, secret_hash, firmware_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'v3.0-AES256-GCM')`,
+      [deviceUid, name, departmentId, departmentId, year || 1, semester || 1, ayId, secretKey || secretHash, secretHash]
     );
-    return result[0]?.insertId ?? result.lastInsertRowid;
+    return result.insertId ?? result[0]?.insertId ?? result.lastID;
   }
 
   /**

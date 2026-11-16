@@ -1,6 +1,6 @@
 /**
  * Teaching Group Model
- * Encapsulates SQLite queries and transactions for classroom groups, memberships, stream posts, classwork, and tests.
+ * Encapsulates MySQL 8.x queries and transactions for classroom groups, memberships, stream posts, classwork, and tests.
  *
  * Architecture Role: Model (Data Access Layer)
  * Interacts With:
@@ -295,7 +295,7 @@ class TeachingGroupModel {
         );
         for (const st of cohortStudents) {
           await conn.query(
-            `INSERT OR IGNORE INTO teaching_group_members (group_id, student_id, joined_at, status)
+            `INSERT IGNORE INTO teaching_group_members (group_id, student_id, joined_at, status)
              VALUES (?, ?, CURRENT_TIMESTAMP, 'ENROLLED')`,
             [groupId, st.id]
           );
@@ -424,7 +424,7 @@ class TeachingGroupModel {
    */
   static async addMember(groupId, studentId) {
     await query(
-      `INSERT OR IGNORE INTO teaching_group_members (group_id, student_id, joined_at, status)
+      `INSERT IGNORE INTO teaching_group_members (group_id, student_id, joined_at, status)
        VALUES (?, ?, CURRENT_TIMESTAMP, 'ENROLLED')`,
       [groupId, studentId]
     );
@@ -1151,11 +1151,11 @@ class TeachingGroupModel {
         await conn.execute(
           `INSERT INTO assessment_submissions (assessment_id, student_id, marks_obtained, feedback, graded_by, status)
            VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(assessment_id, student_id) DO UPDATE SET
-             marks_obtained = excluded.marks_obtained,
-             feedback = excluded.feedback,
-             graded_by = excluded.graded_by,
-             status = excluded.status,
+           ON DUPLICATE KEY UPDATE
+             marks_obtained = VALUES(marks_obtained),
+             feedback = VALUES(feedback),
+             graded_by = VALUES(graded_by),
+             status = VALUES(status),
              updated_at = CURRENT_TIMESTAMP`,
           [testId, s.student_id, marks, feedbackPayload, userId, status]
         );
@@ -1185,11 +1185,11 @@ class TeachingGroupModel {
         await conn.execute(
           `INSERT INTO assessment_submissions (assessment_id, student_id, marks_obtained, feedback, graded_by, status)
            VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(assessment_id, student_id) DO UPDATE SET
-             marks_obtained = excluded.marks_obtained,
-             feedback = excluded.feedback,
-             graded_by = excluded.graded_by,
-             status = excluded.status,
+           ON DUPLICATE KEY UPDATE
+             marks_obtained = VALUES(marks_obtained),
+             feedback = VALUES(feedback),
+             graded_by = VALUES(graded_by),
+             status = VALUES(status),
              updated_at = CURRENT_TIMESTAMP`,
           [assignmentId, s.student_id, marks, feedback, userId, status]
         );

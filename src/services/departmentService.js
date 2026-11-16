@@ -3,7 +3,7 @@
  * 
  * Manages institutional academic departments and ensures standard hardcoded
  * college departments (Electronics, Electrical, IT, Mechanical, Civil, Pharmacy)
- * are always seeded and available in SQLite/MySQL.
+ * are always seeded and available in MySQL 8.x.
  */
 
 const { query } = require('../config/db');
