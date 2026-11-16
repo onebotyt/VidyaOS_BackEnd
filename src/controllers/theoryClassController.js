@@ -27,8 +27,8 @@ class TheoryClassController {
    */
   async getTheoryClass(req, res) {
     try {
-      const groupId = parseInt(req.query.group_id || req.query.teaching_group_id, 10);
-      const subjectId = req.query.subject_id ? parseInt(req.query.subject_id, 10) : null;
+      const groupId = parseInt(req.query.group_id || req.query.groupId || req.query.id || req.query.teaching_group_id, 10);
+      const subjectId = (req.query.subject_id || req.query.subjectId) ? parseInt(req.query.subject_id || req.query.subjectId, 10) : null;
 
       if (!groupId && !subjectId) {
         return res.status(400).json({
