@@ -503,10 +503,32 @@ class TeachingGroupController {
         return res.status(403).json({ success: false, error: { message: 'Forbidden' } });
       }
 
-      const { name = g.name, subject_name = g.subject_name, subject_code = g.subject_code, component = g.component, total_units = g.total_units, syllabus_units } = req.body;
+      const {
+        name = g.name,
+        subject_name = g.subject_name,
+        subject_short_name = g.subject_short_name,
+        subject_code = g.subject_code,
+        component = g.component,
+        academic_year_id = g.academic_year_id,
+        semester = g.semester,
+        year = g.year,
+        total_units = g.total_units,
+        syllabus_units
+      } = req.body;
       const finalName = (name && name.trim()) ? name.trim() : (subject_name ? subject_name.trim() : g.name);
       const finalUnits = total_units != null ? Math.min(20, Math.max(1, parseInt(total_units) || 5)) : (g.total_units || 5);
-      await TeachingGroupModel.updateGroup(groupId, { name: finalName, subject_name, subject_code, component, total_units: finalUnits, syllabus_units });
+      await TeachingGroupModel.updateGroup(groupId, {
+        name: finalName,
+        subject_name,
+        subject_short_name,
+        subject_code,
+        component,
+        academic_year_id,
+        semester,
+        year,
+        total_units: finalUnits,
+        syllabus_units
+      });
 
       res.status(200).json({
         success: true,
@@ -614,14 +636,14 @@ class TeachingGroupController {
         actorRole: req.user.roles ? req.user.roles[0] : 'TEACHER',
         targetType: 'teaching_groups',
         targetId: groupId,
-        details: { name: g.name, subject_name: g.subject_name, recoverable_days: 7 },
+        details: { name: g.name, subject_name: g.subject_name, recoverable_days: 30 },
         ipAddress: req.ip
       });
 
       res.status(200).json({
         success: true,
-        message: 'Class moved to Trash Bin. It can be safely restored anytime within 7 days.',
-        data: { id: groupId, status: 'TRASHED', recoverable_days: 7 }
+        message: 'Class moved to Trash Bin. It can be safely restored anytime within 30 days.',
+        data: { id: groupId, status: 'TRASHED', recoverable_days: 30 }
       });
     } catch (err) {
       res.status(500).json({ success: false, error: { message: err.message } });
@@ -787,17 +809,29 @@ class TeachingGroupController {
    */
   static async broadcastNotice(req, res) {
     const { title, content, target_semester, target_year, department_id } = req.body;
+    const finalTitle = (title && title.trim()) ? title.trim() : 'Class Announcement';
+    const finalContent = (content && content.trim()) ? content.trim() : (req.file ? req.file.originalname : '');
+
+    if (!finalContent) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Notice message or attachment is required' } });
+    }
+
     try {
-      const groups = await TeachingGroupModel.getMatchingGroupsForBroadcast(req.user.teacher_id, target_semester, target_year, department_id);
+      const isAdminOrHod = (req.user.roles && req.user.roles.includes('SYSTEM_ADMIN')) || req.user.is_hod;
+      const teacherId = isAdminOrHod ? null : (req.user.teacher_id || null);
+      const groups = await TeachingGroupModel.getMatchingGroupsForBroadcast(teacherId, target_semester, target_year, department_id);
       if (!groups || groups.length === 0) {
         return res.status(404).json({ success: false, error: { code: 'NO_MATCHING_GROUPS', message: 'No active teaching groups match the selected cohort criteria' } });
       }
 
-      const formattedContent = `📢 **${title}**\n\n${content}`;
+      const formattedContent = `📢 **${finalTitle}**\n\n${finalContent}`;
       const groupIds = groups.map(g => g.id);
 
+      const attachmentPath = req.file ? `/uploads/stream/${req.file.filename}` : (req.body.attachment_path || null);
+      const attachmentName = req.file ? req.file.originalname : (req.body.attachment_name || null);
+
       for (const gid of groupIds) {
-        await TeachingGroupModel.createStreamPost(gid, req.user.id, formattedContent, null, null);
+        await TeachingGroupModel.createStreamPost(gid, req.user.id, formattedContent, attachmentPath, attachmentName);
       }
 
       const students = await TeachingGroupModel.getDistinctEnrolledStudents(groupIds);
@@ -808,9 +842,9 @@ class TeachingGroupController {
           try {
             await notificationService.sendNotification({
               userId: st.user_id,
-              type: notificationService.NOTIFICATION_TYPES.ANNOUNCEMENT || 'GENERAL',
-              title: `📢 Notice: ${title}`,
-              message: content.length > 120 ? content.slice(0, 117) + '...' : content,
+              type: notificationService.NOTIFICATION_TYPES?.ANNOUNCEMENT || 'GENERAL',
+              title: `📢 Notice: ${finalTitle}`,
+              message: finalContent.length > 120 ? finalContent.slice(0, 117) + '...' : finalContent,
               linkUrl: `/student/groups.html`
             });
             notifiedCount++;
@@ -823,7 +857,9 @@ class TeachingGroupController {
         message: `Notice broadcast successfully to ${groupIds.length} teaching group(s) and notified ${notifiedCount} student(s)!`,
         data: {
           groups_count: groupIds.length,
-          students_notified: notifiedCount
+          students_notified: notifiedCount,
+          attachment_path: attachmentPath,
+          attachment_name: attachmentName
         }
       });
     } catch (err) {

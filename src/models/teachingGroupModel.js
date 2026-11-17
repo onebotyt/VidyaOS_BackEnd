@@ -133,7 +133,24 @@ class TeachingGroupModel {
    * @param {Object} options - User and status filter
    * @returns {Promise<Array>} List of teaching groups
    */
+    /**
+   * Automatically purges teaching groups that have been in Trash for more than 30 days.
+   */
+  static async purgeExpiredTrash() {
+    try {
+      const expired = await query(
+        `SELECT id FROM teaching_groups WHERE (status = 'TRASH' OR status = 'TRASHED') AND deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
+      );
+      if (Array.isArray(expired) && expired.length > 0) {
+        for (const row of expired) {
+          await this.permanentDeleteGroupTransaction(row.id);
+        }
+      }
+    } catch (_) {}
+  }
+
   static async listGroups({ user, statusFilter }) {
+    await this.purgeExpiredTrash();
     let sql = `
       SELECT tg.id, tg.name, tg.subject_name, tg.subject_short_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label,
@@ -152,7 +169,7 @@ class TeachingGroupModel {
               FROM assessments a
               WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY))
               ORDER BY a.due_date ASC LIMIT 1) as upcoming_work,
-             GREATEST(0, CAST(7 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())) AS SIGNED)) as days_remaining
+             GREATEST(0, CAST(30 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())) AS SIGNED)) as days_remaining
       FROM teaching_groups tg
       JOIN teachers t ON tg.teacher_id = t.id
       LEFT JOIN departments d ON t.department_id = d.id
@@ -173,9 +190,9 @@ class TeachingGroupModel {
     }
 
     if (statusFilter === 'TRASH' || statusFilter === 'TRASHED') {
-      conditions.push("(tg.status = 'TRASHED' OR tg.deleted_at IS NOT NULL)");
+      conditions.push("(tg.status = 'TRASH' OR tg.status = 'TRASHED' OR tg.deleted_at IS NOT NULL)");
     } else if (statusFilter === 'ALL') {
-      conditions.push("(tg.status != 'TRASHED' AND tg.deleted_at IS NULL)");
+      conditions.push("(tg.status != 'TRASH' AND tg.status != 'TRASHED' AND tg.deleted_at IS NULL)");
     } else if (statusFilter === 'ARCHIVED') {
       conditions.push("tg.status = 'ARCHIVED' AND tg.deleted_at IS NULL");
     } else {
@@ -235,7 +252,7 @@ class TeachingGroupModel {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
         [name, subjectName, finalShort, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, computedYear, inviteCode]
       );
-      const groupId = groupInsert.insertId || groupInsert.lastInsertRowid;
+      const groupId = (groupInsert.insertId || groupInsert[0]?.insertId) || groupInsert.lastInsertRowid;
 
       const year = computedYear;
       const isDual = (component === 'THEORY_PRACTICAL' || component === 'THEORY + PRACTICAL' || component === 'BOTH');
@@ -260,7 +277,7 @@ class TeachingGroupModel {
              VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
             [subjectName || name, finalCode || 'SUB101', effDeptId, year, semester]
           );
-          targetSubjectId = newSub.insertId || newSub.lastInsertRowid;
+          targetSubjectId = (newSub.insertId || newSub[0]?.insertId) || newSub.lastInsertRowid;
         }
       }
 
@@ -285,7 +302,7 @@ class TeachingGroupModel {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
           [effTeacherId, name, targetSubjectId, targetDeptId, year, semester, ayId, component, groupId]
         );
-        registerId = regInsert.insertId || regInsert.lastInsertRowid;
+        registerId = (regInsert.insertId || regInsert[0]?.insertId) || regInsert.lastInsertRowid;
       }
 
       let autoEnrolledCount = 0;
@@ -667,7 +684,7 @@ class TeachingGroupModel {
    * @returns {Promise<void>}
    */
   static async setTrashStatus(groupId, isTrashed) {
-    const status = isTrashed ? 'TRASHED' : 'ACTIVE';
+    const status = isTrashed ? 'TRASH' : 'ACTIVE';
     const deletedAt = isTrashed ? 'CURRENT_TIMESTAMP' : 'NULL';
     const regActive = isTrashed ? 0 : 1;
     await query(`UPDATE teaching_groups SET status = ?, deleted_at = ${deletedAt} WHERE id = ?`, [status, groupId]);
@@ -682,29 +699,38 @@ class TeachingGroupModel {
    * @param {Object} fields - Updated attributes
    * @returns {Promise<void>}
    */
-  static async updateGroup(groupId, { name, subject_name, subject_code, component, total_units, syllabus_units }) {
-    const unitsJson = syllabus_units !== undefined ? (typeof syllabus_units === 'string' ? syllabus_units : JSON.stringify(syllabus_units)) : undefined;
-    if (total_units !== undefined && unitsJson !== undefined) {
-      await query(
-        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, total_units = ?, syllabus_units = ? WHERE id = ?`,
-        [name, subject_name, subject_code, component, total_units, unitsJson, groupId]
-      );
-    } else if (total_units !== undefined) {
-      await query(
-        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, total_units = ? WHERE id = ?`,
-        [name, subject_name, subject_code, component, total_units, groupId]
-      );
-    } else if (unitsJson !== undefined) {
-      await query(
-        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ?, syllabus_units = ? WHERE id = ?`,
-        [name, subject_name, subject_code, component, unitsJson, groupId]
-      );
-    } else {
-      await query(
-        `UPDATE teaching_groups SET name = ?, subject_name = ?, subject_code = ?, component = ? WHERE id = ?`,
-        [name, subject_name, subject_code, component, groupId]
-      );
+  static async updateGroup(groupId, { name, subject_name, subject_short_name, subject_code, component, academic_year_id, semester, year, total_units, syllabus_units }) {
+    const updates = ['name = ?', 'subject_name = ?', 'subject_code = ?', 'component = ?'];
+    const params = [name, subject_name, subject_code, component];
+
+    if (subject_short_name !== undefined) {
+      updates.push('subject_short_name = ?');
+      params.push(subject_short_name);
     }
+    if (academic_year_id !== undefined && academic_year_id !== null && academic_year_id !== '') {
+      updates.push('academic_year_id = ?');
+      params.push(Number(academic_year_id));
+    }
+    if (semester !== undefined && semester !== null && semester !== '') {
+      const s = Number(semester);
+      updates.push('semester = ?');
+      params.push(s);
+      const computedYear = year ? Number(year) : Math.ceil(s / 2);
+      updates.push('year = ?');
+      params.push(computedYear);
+    }
+    if (total_units !== undefined) {
+      updates.push('total_units = ?');
+      params.push(Number(total_units));
+    }
+    if (syllabus_units !== undefined) {
+      const unitsJson = typeof syllabus_units === 'string' ? syllabus_units : JSON.stringify(syllabus_units);
+      updates.push('syllabus_units = ?');
+      params.push(unitsJson);
+    }
+    params.push(groupId);
+    await query(`UPDATE teaching_groups SET ${updates.join(', ')} WHERE id = ?`, params);
+
     const isDual = (component === 'THEORY_PRACTICAL' || component === 'THEORY + PRACTICAL' || component === 'BOTH');
     if (isDual) {
       const existing = await query(`SELECT id, session_type_scope FROM attendance_registers WHERE group_id = ?`, [groupId]);
@@ -834,7 +860,7 @@ class TeachingGroupModel {
          VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
         [newName, oldGroup.subject_name, oldGroup.component, oldGroup.teacher_id, ayId, newSemester, inviteCode]
       );
-      const newGroupId = grpRes.insertId || grpRes.lastInsertRowid;
+      const newGroupId = (grpRes.insertId || grpRes[0]?.insertId) || grpRes.lastInsertRowid;
 
       const newYear = Math.ceil(newSemester / 2);
       const regRes = await conn.query(
@@ -842,7 +868,7 @@ class TeachingGroupModel {
          VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [oldGroup.teacher_id, newName, deptId, newYear, newSemester, ayId, oldGroup.component, newGroupId]
       );
-      const newRegisterId = regRes.insertId || regRes.lastInsertRowid;
+      const newRegisterId = (regRes.insertId || regRes[0]?.insertId) || regRes.lastInsertRowid;
 
       let enrolledCount = 0;
       for (const sid of studentIds) {
@@ -892,21 +918,26 @@ class TeachingGroupModel {
    */
   static async getMatchingGroupsForBroadcast(teacherId, target_semester, target_year, department_id) {
     let sql = `
-      SELECT tg.id, tg.name, tg.semester, ar.department_id
+      SELECT DISTINCT tg.id, tg.name, tg.semester, tg.year, ar.department_id
       FROM teaching_groups tg
       LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
-      WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE'
+      WHERE (tg.status = 'ACTIVE' OR tg.status IS NULL) AND tg.deleted_at IS NULL
     `;
-    const params = [teacherId];
+    const params = [];
+    if (teacherId) {
+      sql += ` AND tg.teacher_id = ?`;
+      params.push(teacherId);
+    }
 
     if (target_semester && target_semester !== 'ALL') {
       sql += ` AND tg.semester = ?`;
       params.push(Number(target_semester));
     } else if (target_year && target_year !== 'ALL') {
-      const semStart = (Number(target_year) - 1) * 2 + 1;
+      const yr = Number(target_year);
+      const semStart = (yr - 1) * 2 + 1;
       const semEnd = semStart + 1;
-      sql += ` AND tg.semester IN (?, ?)`;
-      params.push(semStart, semEnd);
+      sql += ` AND (tg.year = ? OR tg.semester IN (?, ?))`;
+      params.push(yr, semStart, semEnd);
     }
 
     if (department_id && department_id !== 'ALL') {

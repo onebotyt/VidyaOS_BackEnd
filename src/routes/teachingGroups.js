@@ -52,7 +52,7 @@ router.post(
     body('name').optional().trim().isLength({ min: 2, max: 100 }),
     body('subject_name').trim().isLength({ min: 2, max: 100 }).withMessage('Subject name required (2-100 chars)'),
     body('subject_code').optional().trim(),
-    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL', 'THEORY + PRACTICAL']).withMessage('Component must be THEORY, PRACTICAL, or THEORY + PRACTICAL'),
+    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL', 'THEORY + PRACTICAL', 'THEORY+PRACTICAL']).withMessage('Component must be THEORY, PRACTICAL, or THEORY + PRACTICAL'),
     body('total_units').optional().isInt({ min: 1, max: 20 }),
     body('semester').isInt({ min: 1, max: 6 }).withMessage('Semester must be between 1 and 6'),
     body('enrollment_mode').optional().isIn(['INVITE_CODE', 'COHORT']).withMessage('Enrollment mode must be INVITE_CODE or COHORT'),
@@ -115,7 +115,7 @@ router.put(
   [
     body('name').optional().trim(),
     body('subject_name').optional().trim().isLength({ min: 2, max: 100 }),
-    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL', 'THEORY + PRACTICAL']),
+    body('component').optional().isIn(['THEORY', 'PRACTICAL', 'THEORY_PRACTICAL', 'THEORY + PRACTICAL', 'THEORY+PRACTICAL']),
     body('total_units').optional().isInt({ min: 1, max: 20 }),
     validate
   ],
@@ -217,9 +217,26 @@ router.post(
   '/broadcast-notice',
   auth,
   requireRole('TEACHER', 'SYSTEM_ADMIN'),
+  (req, res, next) => {
+    const ct = req.headers['content-type'] || '';
+    if (ct.includes('multipart/form-data')) {
+      uploadStream.single('media')(req, res, (err) => {
+        if (err) {
+          uploadStream.single('attachment')(req, res, (err2) => {
+            if (err2) return res.status(400).json({ success: false, error: { code: 'UPLOAD_ERROR', message: err2.message } });
+            next();
+          });
+          return;
+        }
+        next();
+      });
+    } else {
+      next();
+    }
+  },
   [
-    body('title').trim().isLength({ min: 2, max: 200 }).withMessage('Notice title required (2-200 chars)'),
-    body('content').trim().isLength({ min: 5, max: 3000 }).withMessage('Notice content required (5-3000 chars)'),
+    body('title').optional().trim(),
+    body('content').optional().trim(),
     validate
   ],
   TeachingGroupController.broadcastNotice

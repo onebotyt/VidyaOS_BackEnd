@@ -6,12 +6,11 @@
  * 1. Region A (Sectors 0..15, 64KB): Local Slot-to-Student Directory
  *    - Maps internal AS608 sensor slot (1..300) <-> { student_id, class_roll_no,
  *      official_enrollment_no, full_name, template_sha256 }.
- *    - Only the ESP32 knows which physical AS608 slot a student occupies!
- *    - Allows instant <150ms OLED display of Student Name + Roll Number even
- *      when the ESP32 is 100% offline!
+ *    - Instant <150ms OLED display of Student Name, Enrollment No & Roll Number
+ *      even when the ESP32 is 100% offline!
  * 2. Region B (Sectors 16..1023, ~4.1MB): Offline Attendance Ring Buffer
- *    - Stores up to 32,000+ offline attendance records when Wi-Fi is down.
- *    - Automatically drains and marks records synced when Wi-Fi reconnects.
+ *    - Stores up to 16,384+ offline attendance records with student_id & slot_id.
+ *    - Drains and marks records synced when Wi-Fi reconnects.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -40,7 +39,7 @@
 #pragma pack(push, 1)
 struct LocalStudentSlotEntry {
   uint16_t magic;                  // 0x5653 if occupied
-  uint16_t as608_slot;             // 1..300 (known ONLY to ESP32)
+  uint16_t as608_slot;             // 1..300 (known to ESP32 & server)
   uint32_t student_id;             // MySQL student.id
   uint16_t class_roll_no;          // Classroom roll number
   char     enrollment_no[22];      // Official Enrollment No (e.g. 2024IT005)
@@ -50,15 +49,16 @@ struct LocalStudentSlotEntry {
 
 struct OfflineAttendanceRecord {
   uint16_t magic;                  // 0x564F when written
-  uint8_t  synced;                 // 0xFF = Unsynced, 0x00 = Synced to Server (NOR flash 1->0 bit flip!)
+  uint8_t  synced;                 // 0xFF = Unsynced, 0x00 = Synced to Server
   uint8_t  confidence;             // AS608 match confidence
   uint32_t student_id;             // MySQL student.id
+  uint16_t as608_slot;             // AS608 slot id (1..300)
   uint16_t class_roll_no;          // Classroom Roll No
   uint32_t scanned_at_epoch;       // Unix timestamp
   char     event_id[34];           // Unique idempotency key
   char     full_name[44];          // Student Name
   char     enrollment_no[20];      // Enrollment No
-  uint8_t  reserved[16];           // Pad to 128 bytes
+  uint8_t  reserved[14];           // Pad to 128 bytes
 }; // 128 bytes per offline attendance record
 #pragma pack(pop)
 
@@ -176,6 +176,19 @@ public:
   }
 
   /**
+   * Queries the local RAM cache and returns the first free slot (1..300).
+   */
+  bool getNextFreeSlot(uint16_t& outSlot) {
+    for (uint16_t s = 1; s <= AS608_MAX_SLOTS; s++) {
+      if (ramRosterCache[s].magic != SLOT_RECORD_MAGIC) {
+        outSlot = s;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Finds an existing AS608 slot for a student_id, or allocates the next free local slot (1..300).
    */
   uint16_t findOrAllocateSlotForStudent(uint32_t studentId) {
@@ -184,10 +197,9 @@ public:
         return s;
       }
     }
-    for (uint16_t s = 1; s <= AS608_MAX_SLOTS; s++) {
-      if (ramRosterCache[s].magic != SLOT_RECORD_MAGIC) {
-        return s;
-      }
+    uint16_t freeSlot = 0;
+    if (getNextFreeSlot(freeSlot)) {
+      return freeSlot;
     }
     return 0;
   }
@@ -210,9 +222,25 @@ public:
     entry.student_id = studentId;
     entry.class_roll_no = rollNo;
     strncpy(entry.enrollment_no, enrollmentNo ? enrollmentNo : "", sizeof(entry.enrollment_no) - 1);
+    entry.enrollment_no[sizeof(entry.enrollment_no) - 1] = '\0';
     strncpy(entry.full_name, fullName ? fullName : "Student", sizeof(entry.full_name) - 1);
+    entry.full_name[sizeof(entry.full_name) - 1] = '\0';
     strncpy(entry.template_sha256, templateSha256 ? templateSha256 : "", sizeof(entry.template_sha256) - 1);
+    entry.template_sha256[sizeof(entry.template_sha256) - 1] = '\0';
     commitRosterToFlash();
+  }
+
+  /**
+   * Convenience assignment helper: records mapping and persists to flash.
+   */
+  void recordSlotAssignment(
+    uint16_t slot,
+    uint32_t studentId,
+    const char* enrollNo,
+    const char* name,
+    uint16_t rollNo
+  ) {
+    saveStudentSlotMapping(slot, studentId, rollNo, enrollNo, name, "");
   }
 
   /**
@@ -260,6 +288,7 @@ public:
    */
   bool appendOfflineAttendance(
     uint32_t studentId,
+    uint16_t slotId,
     uint16_t rollNo,
     const char* fullName,
     const char* enrollmentNo,
@@ -281,11 +310,15 @@ public:
     rec.synced = 0xFF; // Unsynced
     rec.confidence = confidence;
     rec.student_id = studentId;
+    rec.as608_slot = slotId;
     rec.class_roll_no = rollNo;
     rec.scanned_at_epoch = epochTime;
     strncpy(rec.event_id, eventId, sizeof(rec.event_id) - 1);
-    strncpy(rec.full_name, fullName, sizeof(rec.full_name) - 1);
-    strncpy(rec.enrollment_no, enrollmentNo, sizeof(rec.enrollment_no) - 1);
+    rec.event_id[sizeof(rec.event_id) - 1] = '\0';
+    strncpy(rec.full_name, fullName ? fullName : "Student", sizeof(rec.full_name) - 1);
+    rec.full_name[sizeof(rec.full_name) - 1] = '\0';
+    strncpy(rec.enrollment_no, enrollmentNo ? enrollmentNo : "", sizeof(rec.enrollment_no) - 1);
+    rec.enrollment_no[sizeof(rec.enrollment_no) - 1] = '\0';
 
     writePage(addr, (const uint8_t*)&rec, sizeof(OfflineAttendanceRecord));
     writeHeadIndex++;
