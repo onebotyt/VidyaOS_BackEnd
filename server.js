@@ -318,7 +318,7 @@ app.use((req, res, next) => {
 app.get(['/api/v1/departments', '/api/v1/auth/departments'], (req, res) => authController.getDepartments(req, res));
 
 // Public & Authenticated Institutional Branding / Settings Endpoint
-app.get(['/api/v1/settings/institution', '/api/v1/auth/institution-profile', '/api/v1/admin/settings/public'], async (req, res) => {
+app.get(['/api/v1/settings', '/api/v1/settings/institution', '/api/v1/auth/institution-profile', '/api/v1/admin/settings/public'], async (req, res) => {
   try {
     const { query } = require('./src/config/db');
     const rows = await query(`
