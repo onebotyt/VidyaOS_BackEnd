@@ -738,10 +738,15 @@ class DeviceService {
       }
     }
 
+    const netRows = await query(`SELECT id, ssid, is_default FROM device_wifi_networks WHERE device_id = ? AND ssid = ? LIMIT 1`, [deviceId, trimmedSsid]);
+    const wifiId = netRows && netRows.length > 0 ? netRows[0].id : null;
+
     return {
       success: true,
+      id: wifiId,
+      wifi_id: wifiId,
       ssid: trimmedSsid,
-      is_default: Boolean(isDef),
+      is_default: isDef,
       switch_now: Boolean(switch_now),
       message: `Wi-Fi network '${trimmedSsid}' saved and queued to ESP32.`
     };
@@ -777,12 +782,17 @@ class DeviceService {
       throw { status: 404, code: 'NOT_FOUND', message: 'ESP32 device not found' };
     }
     const dev = devices[0];
-    await query(
+    const qRes = await query(
       `INSERT INTO esp32_command_queue (device_id, department_id, command_type, payload_json, status, created_by)
        VALUES (?, ?, 'SCAN_WIFI', '{}', 'PENDING', ?)`,
       [dev.id, dev.department_id, userId]
     );
-    return { success: true, message: `Wi-Fi scan command queued to ESP32 '${dev.device_uid}'.` };
+    return {
+      success: true,
+      command_id: qRes.insertId,
+      command_type: 'SCAN_WIFI',
+      message: `Wi-Fi scan command queued to ESP32 '${dev.device_uid}'.`
+    };
   }
 
   async getLatestWifiScans(deviceId) {
@@ -796,9 +806,24 @@ class DeviceService {
     );
   }
 
-  async recordWifiScanReport(deviceUid, reqHeaders, rawBody) {
-    const { device, decryptedPayload } = await this.resolveAuthenticatedDevice(deviceUid, reqHeaders, rawBody);
-    const networks = decryptedPayload.networks || decryptedPayload.scanned_networks || [];
+  async recordWifiScanReport(deviceUid, reqHeadersOrPayload = {}, rawBody = null) {
+    let device = null;
+    let payload = rawBody;
+
+    if (rawBody && rawBody.encrypted) {
+      const resolved = await this.resolveAuthenticatedDevice(deviceUid, reqHeadersOrPayload, rawBody);
+      device = resolved.device;
+      payload = resolved.decryptedPayload;
+    } else {
+      const devices = await query(`SELECT id, device_uid FROM devices WHERE device_uid = ? LIMIT 1`, [deviceUid]);
+      if (!devices || devices.length === 0) {
+        throw { status: 404, code: 'NOT_FOUND', message: `Device '${deviceUid}' not found` };
+      }
+      device = devices[0];
+      payload = rawBody || reqHeadersOrPayload;
+    }
+
+    const networks = payload?.networks || payload?.scanned_networks || [];
     if (Array.isArray(networks) && networks.length > 0) {
       await query(`DELETE FROM device_wifi_scans WHERE device_id = ?`, [device.id]);
       for (const net of networks) {
@@ -806,23 +831,33 @@ class DeviceService {
           await query(
             `INSERT INTO device_wifi_scans (device_id, ssid, rssi, auth_mode, channel, scanned_at)
              VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-            [device.id, String(net.ssid), Number(net.rssi) || -70, net.auth_mode || 'WPA2_PSK', Number(net.channel) || 1]
+            [device.id, String(net.ssid), Number(net.rssi) || -70, net.auth_mode || net.encryption_type || 'WPA2_PSK', Number(net.channel) || 1]
           );
         }
       }
     }
-    return { success: true, recorded: networks.length };
+    return { success: true, networks_recorded: networks.length, count: networks.length };
   }
 
-  async switchDeviceWifi(deviceId, ssid, userId = null) {
+  async switchDeviceWifi(deviceId, options, userId = null) {
+    const ssid = typeof options === 'string' ? options : (options?.ssid || '');
+    const password = typeof options === 'object' ? (options?.password || '') : '';
+    const isDef = typeof options === 'object' ? Boolean(options?.is_default) : false;
+
     const devices = await query(`SELECT id, department_id FROM devices WHERE id = ? LIMIT 1`, [deviceId]);
     if (!devices.length) throw { status: 404, code: 'NOT_FOUND', message: 'Device not found' };
-    await query(
+    const qRes = await query(
       `INSERT INTO esp32_command_queue (device_id, department_id, command_type, payload_json, status, created_by)
        VALUES (?, ?, 'SWITCH_WIFI', ?, 'PENDING', ?)`,
-      [deviceId, devices[0].department_id, JSON.stringify({ ssid }), userId]
+      [deviceId, devices[0].department_id, JSON.stringify({ ssid, password, is_default: isDef }), userId]
     );
-    return { success: true, ssid, message: `Command to switch to '${ssid}' queued.` };
+    return {
+      success: true,
+      command_id: qRes.insertId,
+      command_type: 'SWITCH_WIFI',
+      payload: { ssid, password, is_default: isDef },
+      message: `Command to switch to '${ssid}' queued.`
+    };
   }
 
   async triggerWifiFallback(deviceId, userId = null) {
@@ -830,23 +865,34 @@ class DeviceService {
     if (!devices.length) throw { status: 404, code: 'NOT_FOUND', message: 'Device not found' };
     const defNet = await query(`SELECT ssid FROM device_wifi_networks WHERE device_id = ? AND is_default = 1 LIMIT 1`, [deviceId]);
     const fallbackSsid = defNet[0]?.ssid || 'DEFAULT_CAMPUS_WIFI';
-    await query(
+    const qRes = await query(
       `INSERT INTO esp32_command_queue (device_id, department_id, command_type, payload_json, status, created_by)
        VALUES (?, ?, 'FALLBACK_WIFI', ?, 'PENDING', ?)`,
       [deviceId, devices[0].department_id, JSON.stringify({ fallback_ssid: fallbackSsid }), userId]
     );
-    return { success: true, fallback_ssid: fallbackSsid, message: `Command to fallback to default Wi-Fi '${fallbackSsid}' queued.` };
+    return {
+      success: true,
+      command_id: qRes.insertId,
+      command_type: 'FALLBACK_WIFI',
+      fallback_ssid: fallbackSsid,
+      message: `Command to fallback to default Wi-Fi '${fallbackSsid}' queued.`
+    };
   }
 
   async triggerWifiReset(deviceId, userId = null) {
     const devices = await query(`SELECT id, department_id FROM devices WHERE id = ? LIMIT 1`, [deviceId]);
     if (!devices.length) throw { status: 404, code: 'NOT_FOUND', message: 'Device not found' };
-    await query(
+    const qRes = await query(
       `INSERT INTO esp32_command_queue (device_id, department_id, command_type, payload_json, status, created_by)
        VALUES (?, ?, 'RESET_WIFI', '{}', 'PENDING', ?)`,
       [deviceId, devices[0].department_id, userId]
     );
-    return { success: true, message: 'Wi-Fi reset command queued. ESP32 will clear secondary credentials and reconnect to default Wi-Fi.' };
+    return {
+      success: true,
+      command_id: qRes.insertId,
+      command_type: 'RESET_WIFI',
+      message: 'Wi-Fi reset command queued. ESP32 will clear secondary credentials and reconnect to default Wi-Fi.'
+    };
   }
 }
 

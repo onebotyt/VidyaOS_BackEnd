@@ -481,6 +481,14 @@ async function startServer() {
     logger.warn(`Failed to migrate IoT and correction tables: ${err.message}`);
   }
 
+  // Ensure teaching_groups columns (subject_short_name, deleted_at) exist and TRASH status supported
+  try {
+    const teachingGroupModel = require('./src/models/teachingGroupModel');
+    await teachingGroupModel.ensureColumns();
+  } catch (err) {
+    logger.warn(`Failed to auto-migrate teaching_groups columns: ${err.message}`);
+  }
+
   // Bootstrap or synchronize administrator from environment (Render/Cloud initial setup)
   try {
     await adminBootstrapService.bootstrap();

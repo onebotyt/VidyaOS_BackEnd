@@ -451,6 +451,10 @@ class HodModel {
    * @returns {Promise<Array<Object>>} Student roster with attendance stats
    */
   static async getStudentsRoster(deptId) {
+    const hasDept = deptId !== undefined && deptId !== null && deptId !== '' && deptId !== 'ALL';
+    const whereDept = hasDept ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : '';
+    const params = hasDept ? [deptId] : [];
+
     const students = await query(
       `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
@@ -458,15 +462,18 @@ class HodModel {
               d.name as department_name, d.code as department_code
        FROM students st
        JOIN users u ON st.user_id = u.id
-       JOIN enrollments e ON e.student_id = st.id
-       JOIN departments d ON e.department_id = d.id
-       WHERE e.department_id = ? AND st.deleted_at IS NULL
+       LEFT JOIN enrollments e ON e.student_id = st.id
+       LEFT JOIN departments d ON e.department_id = d.id
+       WHERE st.deleted_at IS NULL ${whereDept}
        ORDER BY e.year, e.semester, COALESCE(st.class_roll_no, e.class_roll_no) ASC`,
-      [deptId]
+      params
     );
 
     if (students.length) {
       const studentIds = students.map(s => s.student_id);
+      const whereAttDept = hasDept ? 'AND ar.department_id = ?' : '';
+      const attParams = hasDept ? [deptId, ...studentIds] : [...studentIds];
+
       const attStats = await query(
         `SELECT ra.student_id,
                 COUNT(ra.id) as total_sessions,
@@ -474,9 +481,9 @@ class HodModel {
          FROM register_attendance ra
          JOIN attendance_sessions asess ON asess.id = ra.session_id AND asess.state = 'FINALIZED'
          JOIN attendance_registers ar ON ar.id = asess.register_id
-         WHERE ar.department_id = ? AND ra.student_id IN (${studentIds.map(() => '?').join(',')})
+         WHERE 1=1 ${whereAttDept} AND ra.student_id IN (${studentIds.map(() => '?').join(',')})
          GROUP BY ra.student_id`,
-        [deptId, ...studentIds]
+        attParams
       );
       const statMap = new Map(attStats.map(s => [s.student_id, s]));
 

@@ -70,7 +70,7 @@ class TeachingGroupModel {
     const groups = await query(`
       SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.semester,
              ar.id as register_id,
-             (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as member_count,
+             (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND (tgm.status IN ('ENROLLED', 'ACTIVE') OR tgm.status IS NULL)) as member_count,
              (SELECT COUNT(DISTINCT s.id) FROM attendance_sessions s WHERE s.register_id = ar.id AND s.state != 'DRAFT') as session_count,
              (SELECT ROUND(COUNT(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) * 100.0 / NULLIF(COUNT(ra.id), 0), 1)
               FROM attendance_sessions s
@@ -133,14 +133,57 @@ class TeachingGroupModel {
    * @param {Object} options - User and status filter
    * @returns {Promise<Array>} List of teaching groups
    */
-    /**
+  /**
+   * Automated database schema auto-healing migration for teaching_groups.
+   * Ensures missing columns (subject_short_name, deleted_at) exist and status column supports TRASH.
+   */
+  static async ensureColumns() {
+    if (this._columnsChecked) return;
+    try {
+      let cols = [];
+      try {
+        const rows = await query("SELECT COLUMN_NAME AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'teaching_groups'");
+        cols = Array.isArray(rows) ? rows.map(r => (r.name || r.COLUMN_NAME || '').toLowerCase()) : [];
+      } catch (_) {
+        try {
+          const pragma = await query("PRAGMA table_info(teaching_groups)");
+          cols = Array.isArray(pragma) ? pragma.map(r => (r.name || '').toLowerCase()) : [];
+        } catch (_) {}
+      }
+
+      if (cols.length > 0) {
+        if (!cols.includes('subject_short_name')) {
+          await query("ALTER TABLE teaching_groups ADD COLUMN subject_short_name VARCHAR(100) NULL").catch(() => {});
+        }
+        if (!cols.includes('deleted_at')) {
+          await query("ALTER TABLE teaching_groups ADD COLUMN deleted_at DATETIME NULL").catch(() => {});
+        }
+        try {
+          await query("ALTER TABLE teaching_groups MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'");
+        } catch (_) {}
+      }
+      this._columnsChecked = true;
+    } catch (_) {}
+  }
+
+  /**
    * Automatically purges teaching groups that have been in Trash for more than 30 days.
    */
   static async purgeExpiredTrash() {
+    await this.ensureColumns();
     try {
-      const expired = await query(
-        `SELECT id FROM teaching_groups WHERE (status = 'TRASH' OR status = 'TRASHED') AND deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
-      );
+      let expired = [];
+      try {
+        expired = await query(
+          `SELECT id FROM teaching_groups WHERE (status = 'TRASH' OR status = 'TRASHED') AND deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
+        );
+      } catch (_) {
+        try {
+          expired = await query(
+            `SELECT id FROM teaching_groups WHERE (status = 'TRASH' OR status = 'TRASHED') AND deleted_at IS NOT NULL AND deleted_at < datetime('now', '-30 days')`
+          );
+        } catch (_) {}
+      }
       if (Array.isArray(expired) && expired.length > 0) {
         for (const row of expired) {
           await this.permanentDeleteGroupTransaction(row.id);
@@ -150,6 +193,7 @@ class TeachingGroupModel {
   }
 
   static async listGroups({ user, statusFilter }) {
+    await this.ensureColumns();
     await this.purgeExpiredTrash();
     let sql = `
       SELECT tg.id, tg.name, tg.subject_name, tg.subject_short_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
@@ -158,7 +202,7 @@ class TeachingGroupModel {
              t.full_name as teacher_name, t.department_id as teacher_department_id,
              d.name as department_name, d.code as department_code,
              ar.id as register_id,
-             (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as member_count,
+             (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND (tgm.status IN ('ENROLLED', 'ACTIVE') OR tgm.status IS NULL)) as member_count,
              (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'ASSIGNMENT') as assignment_count,
              (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'EXAM') as exam_count,
              (SELECT ROUND(COUNT(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) * 100.0 / NULLIF(COUNT(ra.id), 0), 1)
@@ -354,7 +398,7 @@ class TeachingGroupModel {
               tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
               t.full_name as teacher_name, t.department_id as teacher_department_id,
               d.name as department_name, d.code as department_code,
-              (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND tgm.status = 'ENROLLED') as member_count,
+              (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND (tgm.status IN ('ENROLLED', 'ACTIVE') OR tgm.status IS NULL)) as member_count,
               (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'ASSIGNMENT') as assignment_count,
               (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type = 'EXAM') as exam_count
        FROM teaching_groups tg
@@ -684,6 +728,7 @@ class TeachingGroupModel {
    * @returns {Promise<void>}
    */
   static async setTrashStatus(groupId, isTrashed) {
+    await this.ensureColumns();
     const status = isTrashed ? 'TRASH' : 'ACTIVE';
     const deletedAt = isTrashed ? 'CURRENT_TIMESTAMP' : 'NULL';
     const regActive = isTrashed ? 0 : 1;
