@@ -12,6 +12,8 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const StudentModel = require('../models/studentModel');
+const StudentRecordModel = require('../models/studentRecordModel');
+const { query } = require('../config/db');
 const reportService = require('../services/reportService');
 const auditService = require('../services/auditService');
 const notificationService = require('../services/notificationService');
@@ -72,6 +74,55 @@ class StudentController {
       res.status(200).json({ success: true, data: studentData });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Retrieves self student full academic dossier (Profile, Demographics, Tests, Attendance Matrix, Documents)
+   * @route GET /api/v1/students/me/dossier
+   * @access STUDENT
+   */
+  static async getMyDossier(req, res) {
+    try {
+      const studentId = req.user.student_id;
+      if (!studentId) {
+        return res.status(403).json({ success: false, error: { message: 'Student ID not resolved' } });
+      }
+      const studentProfile = await StudentModel.getProfile(studentId);
+      const deptId = studentProfile?.department_id || req.user.department_id || 2;
+      const dossier = await StudentRecordModel.getStudentFullDossier(studentId, deptId);
+      if (!dossier) {
+        return res.status(404).json({ success: false, error: { message: 'Academic dossier not found' } });
+      }
+      res.json({ success: true, data: dossier });
+    } catch (err) {
+      console.error('Error in getMyDossier:', err);
+      res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  /**
+   * Retrieves self official documents uploaded for this student
+   * @route GET /api/v1/students/me/documents
+   * @access STUDENT
+   */
+  static async getMyDocuments(req, res) {
+    try {
+      const studentId = req.user.student_id;
+      if (!studentId) {
+        return res.status(403).json({ success: false, error: { message: 'Student ID not resolved' } });
+      }
+      const docs = await query(
+        `SELECT id, title, document_type, file_path, file_name, file_size, mime_type, uploader_name, created_at
+         FROM student_documents
+         WHERE student_id = ?
+         ORDER BY created_at DESC`,
+        [studentId]
+      );
+      res.json({ success: true, data: docs });
+    } catch (err) {
+      console.error('Error in getMyDocuments:', err);
+      res.status(500).json({ success: false, error: { message: err.message } });
     }
   }
 

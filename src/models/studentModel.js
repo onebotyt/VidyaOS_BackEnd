@@ -24,6 +24,7 @@ class StudentModel {
       `SELECT s.id, s.official_enrollment_no, s.official_enrollment_no as enrollment_no, s.registration_no,
               s.full_name, s.entry_mode, s.admission_year, s.graduation_year, s.is_lateral_entry,
               COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no, e.year, e.semester, e.status as enrollment_status,
+              e.department_id as department_id,
               d.name as department_name, d.code as department_code,
               d.name as branch_name, d.code as branch_code,
               ay.label as academic_year_label,

@@ -135,9 +135,9 @@ class TeachingGroupModel {
    */
   static async listGroups({ user, statusFilter }) {
     let sql = `
-      SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
+      SELECT tg.id, tg.name, tg.subject_name, tg.subject_short_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label,
-             tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at, tg.deleted_at,
+             tg.semester, tg.year, tg.invite_code, tg.status, tg.created_at, tg.archived_at, tg.deleted_at,
              t.full_name as teacher_name, t.department_id as teacher_department_id,
              d.name as department_name, d.code as department_code,
              ar.id as register_id,
@@ -212,11 +212,13 @@ class TeachingGroupModel {
   static async createGroupTransaction({
     name,
     subjectName,
+    subjectShortName,
     subjectCode,
     component,
     effTeacherId,
     ayId,
     semester,
+    year: inputYear,
     inviteCode,
     targetDeptId,
     enrollmentMode,
@@ -225,15 +227,17 @@ class TeachingGroupModel {
   }) {
     return await withTransaction(async (conn) => {
       const finalCode = (subjectCode || '').trim() || (subjectName || '').split(/[\s-]+/).map(w => w[0]).join('').toUpperCase().slice(0, 8);
+      const computedYear = inputYear ? Number(inputYear) : Math.ceil(semester / 2);
+      const finalShort = (subjectShortName || '').trim() || finalCode;
       const groupInsert = await conn.query(
         `INSERT INTO teaching_groups 
-          (name, subject_name, subject_code, component, total_units, teacher_id, academic_year_id, semester, invite_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
-        [name, subjectName, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, inviteCode]
+          (name, subject_name, subject_short_name, subject_code, component, total_units, teacher_id, academic_year_id, semester, year, invite_code, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
+        [name, subjectName, finalShort, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, computedYear, inviteCode]
       );
       const groupId = groupInsert.insertId || groupInsert.lastInsertRowid;
 
-      const year = Math.ceil(semester / 2);
+      const year = computedYear;
       const isDual = (component === 'THEORY_PRACTICAL' || component === 'THEORY + PRACTICAL' || component === 'BOTH');
       let registerId;
 
@@ -345,12 +349,57 @@ class TeachingGroupModel {
     );
     if (!rows[0]) return null;
     const group = rows[0];
-    const linkedRegisters = await query(
+    let linkedRegisters = await query(
       `SELECT id, name, session_type_scope, is_official FROM attendance_registers WHERE group_id = ? ORDER BY id ASC`,
       [groupId]
     );
-    group.registers = linkedRegisters;
-    group.register_id = linkedRegisters[0]?.id || null;
+
+    // Self-healing: Auto-provision missing attendance_registers if not yet created for this group
+    if (!linkedRegisters || linkedRegisters.length === 0) {
+      try {
+        const isDual = (group.component === 'THEORY_PRACTICAL' || group.component === 'THEORY + PRACTICAL' || group.component === 'BOTH');
+        const year = group.year || Math.ceil(group.semester / 2) || 1;
+        const ayId = group.academic_year_id || 1;
+        const deptId = group.department_id || 4;
+        const teacherId = group.teacher_id || 2;
+        let subId = null;
+        if (group.subject_name) {
+          const subs = await query('SELECT id FROM subjects WHERE name = ? OR code = ? LIMIT 1', [group.subject_name, group.subject_code]);
+          if (subs && subs.length > 0) subId = subs[0].id;
+        }
+
+        if (isDual) {
+          await query(
+            `INSERT INTO attendance_registers 
+              (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'THEORY', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [teacherId, `${group.subject_name || group.name} (Theory)`, subId, deptId, year, group.semester, ayId, groupId]
+          );
+          await query(
+            `INSERT INTO attendance_registers 
+              (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'PRACTICAL', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [teacherId, `${group.subject_name || group.name} (Practical)`, subId, deptId, year, group.semester, ayId, groupId]
+          );
+        } else {
+          await query(
+            `INSERT INTO attendance_registers 
+              (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [teacherId, group.name, subId, deptId, year, group.semester, ayId, group.component || 'THEORY', groupId]
+          );
+        }
+        linkedRegisters = await query(
+          `SELECT id, name, session_type_scope, is_official FROM attendance_registers WHERE group_id = ? ORDER BY id ASC`,
+          [groupId]
+        );
+      } catch (err) {
+        logger.error(`Error auto-provisioning register for group ${groupId}:`, err);
+      }
+    }
+
+    group.registers = linkedRegisters || [];
+    group.register_id = linkedRegisters?.[0]?.id || null;
     return group;
   }
 
@@ -711,6 +760,7 @@ class TeachingGroupModel {
       await conn.execute(`DELETE FROM teaching_group_members WHERE group_id = ?`, [groupId]);
       await conn.execute(`DELETE FROM classroom_posts WHERE group_id = ?`, [groupId]);
       await conn.execute(`UPDATE attendance_registers SET group_id = NULL, is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE group_id = ?`, [groupId]);
+      await conn.execute(`UPDATE assessments SET group_id = NULL WHERE group_id = ?`, [groupId]);
       await conn.execute(`DELETE FROM teaching_groups WHERE id = ?`, [groupId]);
     });
   }

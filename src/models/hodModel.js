@@ -275,28 +275,129 @@ class HodModel {
    * @returns {Promise<boolean>}
    */
   static async deleteTeacher(id, deptId, userId) {
-    await withTransaction(async (conn) => {
-      // 1. Clean up registers and child attendance records
-      await conn.execute(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [id]);
-      await conn.execute(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [id]);
-      await conn.execute(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [id]);
-      await conn.execute(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [id]);
-      try { await conn.execute(`UPDATE teaching_groups SET teacher_id = NULL WHERE teacher_id = ?`, [id]); } catch (_) {}
-      try { await conn.execute(`UPDATE departments SET hod_user_id = NULL WHERE hod_user_id = ?`, [userId]); } catch (_) {}
+    const tRows = await query(`SELECT id, user_id, full_name FROM teachers WHERE id = ? AND deleted_at IS NULL`, [id]);
+    if (!tRows.length) return false;
+    const uid = userId || tRows[0].user_id;
 
-      // 2. Delete teacher row
-      await conn.execute(`DELETE FROM teachers WHERE id = ?`, [id]);
+    // 1. Deactivate active assignments
+    await query(`UPDATE teacher_assignments SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE teacher_id = ?`, [id]);
+    await query(`UPDATE common_faculty_manager_assignments SET is_active = 0, revoked_at = CURRENT_TIMESTAMP WHERE teacher_id = ?`, [id]);
+    try { await query(`UPDATE teaching_groups SET teacher_id = NULL WHERE teacher_id = ?`, [id]); } catch (_) {}
+    try { await query(`UPDATE departments SET hod_user_id = NULL WHERE hod_user_id = ?`, [uid]); } catch (_) {}
 
-      // 3. Clean up user credentials, sessions and roles
-      if (userId) {
-        await conn.execute(`DELETE FROM user_roles WHERE user_id = ?`, [userId]);
-        await conn.execute(`DELETE FROM user_sessions WHERE user_id = ?`, [userId]);
-        await conn.execute(`DELETE FROM notifications WHERE user_id = ?`, [userId]);
-        try { await conn.execute(`UPDATE audit_logs SET user_id = NULL WHERE user_id = ?`, [userId]); } catch (_) {}
-        await conn.execute(`DELETE FROM users WHERE id = ?`, [userId]);
+    // 2. Mark soft-deleted with timestamp into Trash Bin (30-day auto retention)
+    await query(`UPDATE teachers SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
+    if (uid) {
+      await query(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
+      await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => {});
+    }
+
+    // 3. Auto-purge records in trash older than 30 days
+    try {
+      const expired = await query(
+        `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
+      );
+      for (const exp of expired) {
+        await query(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM common_faculty_manager_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM teachers WHERE id = ?`, [exp.id]).catch(() => {});
+        if (exp.user_id) {
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM user_sessions WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM notifications WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+        }
       }
-    });
+    } catch (e) {
+      console.warn('Auto-purge check error:', e.message);
+    }
+
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'FACULTY_MOVED_TO_TRASH', 'teachers', ?, ?, CURRENT_TIMESTAMP)`,
+        [uid || 1, String(id), JSON.stringify({ name: tRows[0].full_name, purge_in_days: 30 })]
+      );
+    } catch (_) {}
+
     return true;
+  }
+
+  /**
+   * Retrieve soft-deleted faculty for HOD's department currently in Trash (auto-purges >30 days)
+   * @param {number} deptId Department ID
+   * @returns {Promise<Array<Object>>} List of trashed faculty with remaining retention days
+   */
+  static async getTrashFaculty(deptId) {
+    try {
+      const expired = await query(
+        `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
+      );
+      for (const exp of expired) {
+        await query(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM common_faculty_manager_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM teachers WHERE id = ?`, [exp.id]).catch(() => {});
+        if (exp.user_id) {
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM user_sessions WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Auto-purge check error:', e.message);
+    }
+
+    return await query(
+      `SELECT t.id, t.id as teacher_id, t.full_name, t.employee_id, t.phone, t.created_at, t.deleted_at,
+              t.department_id,
+              u.id as user_id, u.email, u.email as gmail, u.status,
+              GREATEST(0, 30 - DATEDIFF(NOW(), t.deleted_at)) as days_left
+       FROM teachers t
+       JOIN users u ON t.user_id = u.id
+       WHERE t.department_id = ? AND t.deleted_at IS NOT NULL
+       ORDER BY t.deleted_at DESC`,
+      [deptId]
+    );
+  }
+
+  /**
+   * Restore a soft-deleted faculty member from Trash for HOD's department
+   * @param {number} teacherId Teacher ID
+   * @param {number} deptId Department ID
+   * @param {number} userId Acting user ID
+   * @returns {Promise<{success: boolean, message: string}|null>}
+   */
+  static async restoreFaculty(teacherId, deptId, userId = 1) {
+    const tRows = await query(
+      `SELECT id, user_id, full_name FROM teachers WHERE id = ? AND department_id = ? AND deleted_at IS NOT NULL`,
+      [teacherId, deptId]
+    );
+    if (!tRows.length) return null;
+    const uid = tRows[0].user_id;
+
+    await query(`UPDATE teachers SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [teacherId]);
+    if (uid) {
+      await query(`UPDATE users SET deleted_at = NULL, status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
+    }
+
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'FACULTY_RESTORED', 'teachers', ?, ?, CURRENT_TIMESTAMP)`,
+        [userId, String(teacherId), JSON.stringify({ name: tRows[0].full_name })]
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `${tRows[0].full_name} has been restored successfully!`
+    };
   }
 
   /**
@@ -314,7 +415,7 @@ class HodModel {
               (SELECT COUNT(*) FROM teaching_groups tg WHERE tg.teacher_id = t.id AND tg.status = 'ACTIVE') as active_groups_count
        FROM teachers t
        JOIN users u ON t.user_id = u.id
-       WHERE t.department_id = ?
+       WHERE t.department_id = ? AND t.deleted_at IS NULL
        ORDER BY t.full_name ASC`,
       [deptId]
     );
@@ -351,15 +452,15 @@ class HodModel {
    */
   static async getStudentsRoster(deptId) {
     const students = await query(
-      `SELECT st.id as student_id, st.full_name, u.email, st.official_enrollment_no, st.registration_no,
+      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
-              e.year, e.semester, e.status as enrollment_status,
+              e.year, e.semester, COALESCE(e.status, 'ENROLLED') as enrollment_status,
               d.name as department_name, d.code as department_code
        FROM students st
        JOIN users u ON st.user_id = u.id
        JOIN enrollments e ON e.student_id = st.id
        JOIN departments d ON e.department_id = d.id
-       WHERE e.department_id = ? AND e.status != 'WITHDRAWN'
+       WHERE e.department_id = ? AND st.deleted_at IS NULL
        ORDER BY e.year, e.semester, COALESCE(st.class_roll_no, e.class_roll_no) ASC`,
       [deptId]
     );
@@ -1292,67 +1393,342 @@ class HodModel {
   }
 
   /**
-   * Delete student record, user account, attendance records, and reindex roll numbers in a transaction
+   * Soft-delete student record with 30-day Trash Bin retention
    * @calledBy HodController.deleteStudent() (controllers/hodController.js)
    * @route DELETE /api/v1/hod/students/:id (routes/hod.js)
    * @param {number} id Student ID
    * @param {number} deptId Department ID
+   * @param {number} userId Acting user ID
    * @returns {Promise<boolean>}
    */
-  static async deleteStudent(id, deptId) {
-    let sRows = await query(
-      `SELECT s.id, s.user_id, e.year, e.semester, e.academic_year_id, e.department_id FROM students s
+  static async deleteStudent(id, deptId, userId = 1) {
+    const sRows = await query(
+      `SELECT s.id, s.user_id, s.full_name, e.department_id FROM students s
        LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''}`,
+       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
       deptId ? [id, deptId] : [id]
     );
-    if (!sRows.length) {
-      sRows = await query(`SELECT id, user_id FROM students WHERE id = ?`, [id]);
-      if (!sRows.length) return false;
+    if (!sRows.length) return false;
+    const uid = sRows[0].user_id;
+
+    // 1. Soft-delete student record with timestamp into Trash Bin
+    await query(`UPDATE students SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
+    if (uid) {
+      await query(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
+      await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => {});
     }
-    const { user_id: userId, year, semester, academic_year_id: ayId } = sRows[0];
-    const actualDeptId = sRows[0].department_id || deptId;
 
-    await withTransaction(async (conn) => {
-      // 1. Clean up all child foreign key constraints on student_id
-      await conn.execute(`DELETE FROM assessment_submissions WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM register_attendance WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM attendance_session_students WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM student_self_attendance WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM esp32_presence WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM fingerprint_slots WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM iot_attendance_events WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM attendance_corrections WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM teaching_group_members WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM leave_applications WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM student_department_enrollments WHERE student_id = ?`, [id]);
-      await conn.execute(`DELETE FROM enrollments WHERE student_id = ?`, [id]);
+    // 2. Auto-purge students in trash older than 30 days
+    try {
+      const expired = await query(
+        `SELECT id, user_id FROM students WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
+      );
+      for (const exp of expired) {
+        await query(`DELETE FROM register_attendance WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM attendance_session_students WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM student_self_attendance WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM assessment_submissions WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM enrollments WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM students WHERE id = ?`, [exp.id]).catch(() => {});
+        if (exp.user_id) {
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Student auto-purge check error:', e.message);
+    }
 
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'STUDENT_MOVED_TO_TRASH', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+        [userId || 1, String(id), JSON.stringify({ name: sRows[0].full_name, purge_in_days: 30 })]
+      );
+    } catch (_) {}
+
+    return true;
+  }
+
+  /**
+   * Retrieve soft-deleted students for HOD department currently in Trash
+   * @param {number} deptId Department ID
+   * @returns {Promise<Array<Object>>} Trashed students with days left
+   */
+  static async getTrashStudents(deptId) {
+    try {
+      const expired = await query(
+        `SELECT id, user_id FROM students WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
+      );
+      for (const exp of expired) {
+        await query(`DELETE FROM register_attendance WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM enrollments WHERE student_id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM students WHERE id = ?`, [exp.id]).catch(() => {});
+        if (exp.user_id) {
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Student auto-purge check error:', e.message);
+    }
+
+    return await query(
+      `SELECT st.id, st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+              COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+              e.year, e.semester,
+              u.id as user_id, u.email,
+              st.deleted_at,
+              GREATEST(0, 30 - DATEDIFF(NOW(), st.deleted_at)) as days_left
+       FROM students st
+       JOIN users u ON st.user_id = u.id
+       LEFT JOIN enrollments e ON e.student_id = st.id
+       WHERE (e.department_id = ? OR e.department_id IS NULL) AND st.deleted_at IS NOT NULL
+       ORDER BY st.deleted_at DESC`,
+      [deptId]
+    );
+  }
+
+  /**
+   * Restore a soft-deleted student from Trash
+   * @param {number} studentId Student ID
+   * @param {number} deptId Department ID
+   * @param {number} userId Acting user ID
+   * @returns {Promise<{success: boolean, message: string}|null>}
+   */
+  static async restoreStudent(studentId, deptId, userId = 1) {
+    const sRows = await query(
+      `SELECT s.id, s.user_id, s.full_name FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NOT NULL`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+    if (!sRows.length) return null;
+    const uid = sRows[0].user_id;
+
+    await query(`UPDATE students SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [studentId]);
+    if (uid) {
+      await query(`UPDATE users SET deleted_at = NULL, status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
+    }
+
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'STUDENT_RESTORED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+        [userId || 1, String(studentId), JSON.stringify({ name: sRows[0].full_name })]
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `${sRows[0].full_name} has been restored successfully!`
+    };
+  }
+
+  /**
+   * Transfer student to another institution/branch.
+   * Student data is NEVER deleted; status is set to TRANSFERRED and account suspended.
+   * Academic records, attendance, and documents remain permanently accessible.
+   */
+  static async transferStudent(studentId, deptId, reason = '', userId = 1) {
+    const sRows = await query(
+      `SELECT s.id, s.user_id, s.full_name, e.department_id, e.status as enrollment_status
+       FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+    if (!sRows.length) return null;
+
+    const student = sRows[0];
+    const uid = student.user_id;
+
+    // 1. Mark enrollment as TRANSFERRED (records preserved)
+    await query(
+      `UPDATE enrollments SET status = 'TRANSFERRED', updated_at = CURRENT_TIMESTAMP WHERE student_id = ? ${deptId ? 'AND department_id = ?' : ''}`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+
+    // 2. Suspend user account and clear active sessions
+    if (uid) {
+      await query(`UPDATE users SET status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
       try {
-        await conn.execute(`UPDATE faculty_media_assets SET student_id = NULL WHERE student_id = ?`, [id]);
+        await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]);
       } catch (_) {}
+    }
 
-      // 2. Delete the student record
-      await conn.execute(`DELETE FROM students WHERE id = ?`, [id]);
+    // 3. Log audit event
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'STUDENT_TRANSFERRED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+        [userId || 1, String(studentId), JSON.stringify({ name: student.full_name, reason: reason || 'Institutional Transfer' })]
+      );
+    } catch (_) {}
 
-      // 3. Clean up user credentials, sessions, roles and activities
-      if (userId) {
-        await conn.execute(`DELETE FROM user_roles WHERE user_id = ?`, [userId]);
-        await conn.execute(`DELETE FROM user_sessions WHERE user_id = ?`, [userId]);
-        await conn.execute(`DELETE FROM notifications WHERE user_id = ?`, [userId]);
-        await conn.execute(`DELETE FROM classroom_post_comments WHERE author_id = ?`, [userId]);
-        await conn.execute(`DELETE FROM classroom_posts WHERE author_id = ?`, [userId]);
-        try {
-          await conn.execute(`UPDATE audit_logs SET user_id = NULL WHERE user_id = ?`, [userId]);
-        } catch (_) {}
-        await conn.execute(`DELETE FROM users WHERE id = ?`, [userId]);
-      }
+    return {
+      success: true,
+      message: `${student.full_name} has been transferred. Academic records and documents remain permanently accessible.`
+    };
+  }
 
-      // 4. Reindex cohort roll numbers without gaps
-      if (actualDeptId && year && semester && ayId) {
-        await HodModel.reindexCohortRollNumbers(actualDeptId, year, semester, ayId, conn);
-      }
-    });
+  /**
+   * Withdraw student permanently.
+   * Student data is NEVER deleted; status is set to WITHDRAWN and account suspended.
+   * Academic records, attendance, and documents remain permanently accessible.
+   */
+  static async withdrawStudent(studentId, deptId, reason = '', userId = 1) {
+    const sRows = await query(
+      `SELECT s.id, s.user_id, s.full_name, e.department_id, e.status as enrollment_status
+       FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+    if (!sRows.length) return null;
+
+    const student = sRows[0];
+    const uid = student.user_id;
+
+    // 1. Mark enrollment as WITHDRAWN (records preserved)
+    await query(
+      `UPDATE enrollments SET status = 'WITHDRAWN', updated_at = CURRENT_TIMESTAMP WHERE student_id = ? ${deptId ? 'AND department_id = ?' : ''}`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+
+    // 2. Suspend user account and clear active sessions
+    if (uid) {
+      await query(`UPDATE users SET status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
+      try {
+        await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]);
+      } catch (_) {}
+    }
+
+    // 3. Log audit event
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'STUDENT_WITHDRAWN', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+        [userId || 1, String(studentId), JSON.stringify({ name: student.full_name, reason: reason || 'Formal Withdrawal' })]
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `${student.full_name} has been marked as withdrawn. Academic records and documents remain permanently accessible.`
+    };
+  }
+
+  /**
+   * Re-activate a transferred or withdrawn student back into active enrollment.
+   */
+  static async reactivateStudent(studentId, deptId, userId = 1) {
+    const sRows = await query(
+      `SELECT s.id, s.user_id, s.full_name, e.department_id
+       FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+    if (!sRows.length) return null;
+
+    const student = sRows[0];
+    const uid = student.user_id;
+
+    // 1. Mark enrollment as ENROLLED
+    await query(
+      `UPDATE enrollments SET status = 'ENROLLED', updated_at = CURRENT_TIMESTAMP WHERE student_id = ? ${deptId ? 'AND department_id = ?' : ''}`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+
+    // 2. Re-activate user account
+    if (uid) {
+      await query(`UPDATE users SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
+    }
+
+    // 3. Log audit event
+    try {
+      await query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+         VALUES (?, 'STUDENT_REACTIVATED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+        [userId || 1, String(studentId), JSON.stringify({ name: student.full_name })]
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      message: `${student.full_name} has been re-activated into active enrollment.`
+    };
+  }
+
+  /**
+   * Get all archived documents & records for a student (accessible anytime)
+   */
+  static async getStudentDocuments(studentId, deptId) {
+    const sRows = await query(
+      `SELECT s.id, s.full_name, s.official_enrollment_no, s.registration_no, s.class_roll_no,
+              e.status as enrollment_status, e.year, e.semester, d.name as department_name
+       FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       LEFT JOIN departments d ON d.id = e.department_id
+       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''}`,
+      deptId ? [studentId, deptId] : [studentId]
+    );
+    if (!sRows.length) return null;
+
+    // 1. Custom uploaded student documents
+    const documents = await query(
+      `SELECT id, student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploader_name, notes, created_at
+       FROM student_documents
+       WHERE student_id = ?
+       ORDER BY created_at DESC`,
+      [studentId]
+    );
+
+    // 2. Academic assignment submissions & coursework files
+    const submissions = await query(
+      `SELECT asub.id, asub.assessment_id, asub.original_filename, asub.file_path, asub.marks_obtained, asub.status, asub.submitted_at,
+              a.title as assessment_title, a.type as assessment_type,
+              s.name as subject_name, s.code as subject_code
+       FROM assessment_submissions asub
+       JOIN assessments a ON a.id = asub.assessment_id
+       LEFT JOIN subjects s ON s.id = a.subject_id
+       WHERE asub.student_id = ?
+       ORDER BY asub.submitted_at DESC`,
+      [studentId]
+    );
+
+    // 3. Leave applications & records
+    const leaves = await query(
+      `SELECT id, start_date, end_date, reason, status, reviewed_at, review_notes, created_at
+       FROM leave_applications
+       WHERE student_id = ?
+       ORDER BY created_at DESC`,
+      [studentId]
+    );
+
+    return {
+      student: sRows[0],
+      documents,
+      submissions,
+      leaves
+    };
+  }
+
+  static async addStudentDocument({ student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploaded_by, uploader_name, notes }) {
+    const result = await query(
+      `INSERT INTO student_documents (student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploaded_by, uploader_name, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [student_id, department_id, title, document_type || 'ACADEMIC_RECORD', file_path, file_name, file_size, mime_type, uploaded_by, uploader_name, notes || null]
+    );
+    return { id: result.insertId, title, file_path };
+  }
+
+  static async deleteStudentDocument(docId, studentId, deptId) {
+    await query(
+      `DELETE FROM student_documents WHERE id = ? AND student_id = ? ${deptId ? 'AND (department_id = ? OR department_id IS NULL)' : ''}`,
+      deptId ? [docId, studentId, deptId] : [docId, studentId]
+    );
     return true;
   }
 

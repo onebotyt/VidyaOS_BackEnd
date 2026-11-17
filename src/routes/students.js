@@ -38,6 +38,16 @@ router.get('/', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), StudentController.
 // @handler StudentController.getProfile() -> StudentModel.getProfile(), StudentModel.getBiometricSlot()
 router.get('/me', auth, requireRole('STUDENT'), StudentController.getProfile);
 
+// @route   GET /api/v1/students/me/dossier
+// @desc    Retrieve logged-in student full academic dossier (Profile, Demographics, Tests, Attendance, Documents)
+// @access  Protected (STUDENT)
+router.get('/me/dossier', auth, requireRole('STUDENT'), StudentController.getMyDossier);
+
+// @route   GET /api/v1/students/me/documents
+// @desc    Retrieve official documents uploaded for this student
+// @access  Protected (STUDENT)
+router.get('/me/documents', auth, requireRole('STUDENT'), StudentController.getMyDocuments);
+
 // @route   GET /api/v1/students/teaching-groups | /courses | /classes
 // @desc    Retrieve enrolled teaching groups/courses for logged-in student
 // @access  Protected (STUDENT)

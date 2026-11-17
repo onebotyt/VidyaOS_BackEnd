@@ -830,7 +830,7 @@ class FacultyController {
       const setRows = await query(`SELECT setting_value FROM system_settings WHERE setting_key = 'institution_name'`);
       const institutionName = setRows[0]?.setting_value || 'Government Polytechnic Nainital';
       const currentAyRow = (await query(`SELECT label FROM academic_years WHERE is_current = 1 LIMIT 1`))[0];
-      const sessionLabelFromTable = currentAyRow?.label || register.academic_year_label || '2026-27 (Odd Semester)';
+      const sessionLabelFromTable = currentAyRow?.label || register.academic_year_label || '2026-27 (Winter Session)';
 
       const exportPayload = {
         institution_name: customData.institution_name || institutionName,

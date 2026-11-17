@@ -70,6 +70,8 @@ class LeaveModel {
 
     return await query(
       `SELECT la.*,
+              la.start_date as from_date,
+              la.end_date as to_date,
               COALESCE(la.leave_type, 'Medical') as leave_type,
               s.official_enrollment_no,
               s.full_name as student_name,

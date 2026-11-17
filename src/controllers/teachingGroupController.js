@@ -71,7 +71,7 @@ class TeachingGroupController {
    * @usesModel TeachingGroupModel.createGroupTransaction() (models/teachingGroupModel.js)
    */
   static async createGroup(req, res) {
-    const { name, subject_name, subject_code, component = 'THEORY', semester, enrollment_mode = 'INVITE_CODE', department_id, total_units } = req.body;
+    const { name, subject_name, subject_short_name, subject_code, component = 'THEORY', semester, year, enrollment_mode = 'INVITE_CODE', department_id, total_units } = req.body;
     try {
       let ayId = req.body.academic_year_id;
       if (!ayId) {
@@ -97,15 +97,18 @@ class TeachingGroupController {
       }
       const finalName = (name && name.trim()) ? name.trim() : subject_name.trim();
       const finalUnits = Math.min(20, Math.max(1, parseInt(total_units) || 5));
+      const computedYear = year ? Number(year) : Math.ceil(Number(semester || 1) / 2);
 
       const result = await TeachingGroupModel.createGroupTransaction({
         name: finalName,
         subjectName: subject_name,
+        subjectShortName: subject_short_name,
         subjectCode: subject_code,
         component,
         effTeacherId: teacher.id,
         ayId,
         semester,
+        year: computedYear,
         inviteCode,
         targetDeptId,
         enrollmentMode: enrollment_mode,
@@ -120,10 +123,12 @@ class TeachingGroupController {
           id: result.groupId,
           name: finalName,
           subject_name,
+          subject_short_name: subject_short_name || result.subjectCode,
           subject_code: result.subjectCode,
           component,
           total_units: finalUnits,
           semester,
+          year: computedYear,
           academic_year_id: ayId,
           invite_code: result.inviteCode,
           register_id: result.registerId,

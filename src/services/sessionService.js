@@ -8,8 +8,8 @@
 const { query, withTransaction } = require('../config/db');
 
 /**
- * Automatically computes institutional Academic Session label (e.g. "2026-27 (Odd Semester)" or "2026-27 (Even Semester)")
- * from session calendar bounds (July 1 - Dec 31 = Odd Semester, Jan 1 - June 30 = Even Semester).
+ * Automatically computes institutional Academic Session label (e.g. "2026-27 (Winter Session)" or "2026-27 (Summer Session)")
+ * from session calendar bounds (July 1 - Dec 31 = Winter Session, Jan 1 - June 30 = Summer Session).
  */
 function computeAutoSessionLabel(startStr, endStr, refDate = new Date()) {
   const ref = (refDate instanceof Date && !isNaN(refDate)) ? refDate : new Date();
@@ -23,11 +23,11 @@ function computeAutoSessionLabel(startStr, endStr, refDate = new Date()) {
   if (refMonth >= 7) {
     ayStartYear = refYear;
     ayEndYear = refYear + 1;
-    cycle = 'Odd Semester';
+    cycle = 'Winter Session';
   } else {
     ayStartYear = refYear - 1;
     ayEndYear = refYear;
-    cycle = 'Even Semester';
+    cycle = 'Summer Session';
   }
 
   const shortEnd = String(ayEndYear).slice(-2);
@@ -37,8 +37,8 @@ function computeAutoSessionLabel(startStr, endStr, refDate = new Date()) {
 /**
  * Resolves the academic semester details for a given date.
  * Strict Institutional 6-month cycles:
- * - Odd Semester: July 1 to December 31
- * - Even Semester: January 1 to June 30
+ * - Winter Session: July 1 to December 31
+ * - Summer Session: January 1 to June 30
  */
 function resolveSession(date = new Date()) {
   const d = new Date(date);
@@ -60,12 +60,12 @@ function resolveSession(date = new Date()) {
   let nextAyEndYear;
 
   if (currentMonth >= 7) {
-    // July 1 - December 31 (Odd Semester)
+    // July 1 - December 31 (Winter Session)
     sessionYear = currentYear;
     ayEndYear = currentYear + 1;
-    cycle = 'Odd Semester';
-    termType = 'ODD';
-    termName = 'Odd Semester (July - Dec)';
+    cycle = 'Winter Session';
+    termType = 'WINTER';
+    termName = 'Winter Session (July - Dec)';
 
     startDate = new Date(Date.UTC(sessionYear, 6, 1));
     endDate = new Date(Date.UTC(sessionYear, 11, 31, 23, 59, 59, 999));
@@ -73,16 +73,16 @@ function resolveSession(date = new Date()) {
 
     nextSessionYear = sessionYear;
     nextAyEndYear = sessionYear + 1;
-    nextCycle = 'Even Semester';
+    nextCycle = 'Summer Session';
     nextStart = new Date(Date.UTC(sessionYear + 1, 0, 1));
     nextEnd = new Date(Date.UTC(sessionYear + 1, 5, 30, 23, 59, 59, 999));
   } else {
-    // January 1 - June 30 (Even Semester)
+    // January 1 - June 30 (Summer Session)
     sessionYear = currentYear - 1;
     ayEndYear = currentYear;
-    cycle = 'Even Semester';
-    termType = 'EVEN';
-    termName = 'Even Semester (Jan - June)';
+    cycle = 'Summer Session';
+    termType = 'SUMMER';
+    termName = 'Summer Session (Jan - June)';
 
     startDate = new Date(Date.UTC(currentYear, 0, 1));
     endDate = new Date(Date.UTC(currentYear, 5, 30, 23, 59, 59, 999));
@@ -90,7 +90,7 @@ function resolveSession(date = new Date()) {
 
     nextSessionYear = currentYear;
     nextAyEndYear = currentYear + 1;
-    nextCycle = 'Odd Semester';
+    nextCycle = 'Winter Session';
     nextStart = new Date(Date.UTC(currentYear, 6, 1));
     nextEnd = new Date(Date.UTC(currentYear, 11, 31, 23, 59, 59, 999));
   }
@@ -176,12 +176,12 @@ async function syncAcademicSession(targetDate = new Date()) {
       currentAyId = activeRecord.id;
 
       const currentLabel = activeRecord.label;
-      // Upgrade legacy 'YYYY Session', bare 'YYYY-YY', or legacy '(Winter)' / '(Summer)' to canonical institutional label (e.g. 2026-27 (Odd Semester))
+      // Upgrade legacy 'YYYY Session', bare 'YYYY-YY', or legacy '(Odd Semester)' / '(Even Semester)' to canonical institutional label (e.g. 2026-27 (Winter Session))
       let targetLabel = resolved.session_label;
       if (currentLabel && 
           !/^\d{4}\s+Session$/i.test(currentLabel.trim()) && 
           !/^\d{4}-\d{2}$/.test(currentLabel.trim()) &&
-          !/Winter|Summer/i.test(currentLabel.trim())) {
+          !/Odd|Even/i.test(currentLabel.trim())) {
         targetLabel = currentLabel.trim();
       }
 

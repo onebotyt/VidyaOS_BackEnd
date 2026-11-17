@@ -11,7 +11,10 @@ const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
 const { requireHOD, requireHODOrClassTeacher } = require('../middleware/requireScope');
 const validate = require('../middleware/validate');
+const { makeUploader } = require('../middleware/upload');
 const HodController = require('../controllers/hodController');
+
+const uploadStudentDoc = makeUploader('student-documents', 50);
 
 // All HOD/Department routes require authenticated TEACHER or SYSTEM_ADMIN with HOD or Class Teacher assignment
 router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), requireHODOrClassTeacher());
@@ -74,6 +77,16 @@ router.post('/teachers/:id/reset-password', requireHOD(), [
 // @access  Protected (HOD, SYSTEM_ADMIN)
 // @handler HodController.deleteTeacher() -> HodModel.deleteTeacher()
 router.delete('/teachers/:id', requireHOD(), [param('id').isInt(), validate], HodController.deleteTeacher);
+
+// @route   GET /api/v1/hod/trash/faculty
+// @desc    Retrieve soft-deleted faculty for HOD department currently in Trash
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.get('/trash/faculty', requireHOD(), HodController.getTrashFaculty);
+
+// @route   POST /api/v1/hod/trash/faculty/:id/restore
+// @desc    Restore a soft-deleted faculty member from Trash
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.post('/trash/faculty/:id/restore', requireHOD(), [param('id').isInt(), validate], HodController.restoreFaculty);
 
 // @route   GET /api/v1/hod/faculty-roster
 // @desc    Retrieve department faculty roster with active teaching workloads and assigned subjects
@@ -256,6 +269,46 @@ router.post('/students/bulk', requireHOD(), [
 // @access  Protected (HOD, SYSTEM_ADMIN)
 // @handler HodController.deleteStudent() -> HodModel.deleteStudent()
 router.delete('/students/:id', requireHOD(), [param('id').isInt(), validate], HodController.deleteStudent);
+
+// @route   POST /api/v1/hod/students/:id/transfer
+// @desc    Transfer student to another institution/branch (student marked TRANSFERRED, data preserved)
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.post('/students/:id/transfer', requireHOD(), [param('id').isInt(), validate], HodController.transferStudent);
+
+// @route   POST /api/v1/hod/students/:id/withdraw
+// @desc    Mark student as withdrawn (student marked WITHDRAWN, data preserved)
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.post('/students/:id/withdraw', requireHOD(), [param('id').isInt(), validate], HodController.withdrawStudent);
+
+// @route   POST /api/v1/hod/students/:id/reactivate
+// @desc    Re-activate an inactive/transferred/withdrawn student back to active ENROLLED
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.post('/students/:id/reactivate', requireHOD(), [param('id').isInt(), validate], HodController.reactivateStudent);
+
+// @route   GET /api/v1/hod/students/:id/documents
+// @desc    Retrieve all archived academic records and uploaded documents for a student (accessible anytime)
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.get('/students/:id/documents', [param('id').isInt(), validate], HodController.getStudentDocuments);
+
+// @route   POST /api/v1/hod/students/:id/documents
+// @desc    Upload an archived document or official record for a student
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.post('/students/:id/documents', [param('id').isInt(), validate], uploadStudentDoc.single('file'), HodController.uploadStudentDocument);
+
+// @route   DELETE /api/v1/hod/students/:id/documents/:docId
+// @desc    Delete an archived student document
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.delete('/students/:id/documents/:docId', requireHOD(), [param('id').isInt(), param('docId').isInt(), validate], HodController.deleteStudentDocument);
+
+// @route   GET /api/v1/hod/trash/students
+// @desc    Retrieve soft-deleted students for HOD department currently in Trash
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.get('/trash/students', requireHOD(), HodController.getTrashStudents);
+
+// @route   POST /api/v1/hod/trash/students/:id/restore
+// @desc    Restore a soft-deleted student from Trash
+// @access  Protected (HOD, SYSTEM_ADMIN)
+router.post('/trash/students/:id/restore', requireHOD(), [param('id').isInt(), validate], HodController.restoreStudent);
 
 // @route   POST /api/v1/hod/students/:id/reset-password
 // @desc    Reset student account password

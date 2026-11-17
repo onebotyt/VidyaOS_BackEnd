@@ -78,6 +78,7 @@ CREATE TABLE users (
   phone VARCHAR(20) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_users_username (username),
   INDEX idx_users_email (email),
   INDEX idx_users_status (status)
@@ -106,6 +107,7 @@ CREATE TABLE user_sessions (
   is_revoked TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_sessions_user (user_id),
   CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -137,6 +139,7 @@ CREATE TABLE departments (
   archived_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_dept_code (code),
   INDEX idx_dept_hod (hod_user_id),
   CONSTRAINT fk_dept_hod FOREIGN KEY (hod_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -150,6 +153,7 @@ CREATE TABLE academic_years (
   is_current TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_ay_current (is_current)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -166,6 +170,7 @@ CREATE TABLE teachers (
   is_phone_verified TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_teachers_user (user_id),
   INDEX idx_teachers_dept (department_id),
   CONSTRAINT fk_teachers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -236,6 +241,7 @@ CREATE TABLE students (
   entry_mode VARCHAR(50) NOT NULL DEFAULT 'teacher_provisioned',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_students_user (user_id),
   INDEX idx_students_enrollment (official_enrollment_no),
   INDEX idx_students_roll (class_roll_no),
@@ -256,6 +262,7 @@ CREATE TABLE student_department_enrollments (
   status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE' | 'TRANSFERRED' | 'COMPLETED' | 'DETAINED' | 'GRADUATED'
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_sde_student (student_id),
   INDEX idx_sde_dept (department_id),
   INDEX idx_sde_status (status),
@@ -275,6 +282,7 @@ CREATE TABLE enrollments (
   status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE' | 'DETAINED' | 'COMPLETED'
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_enrollments_student (student_id),
   INDEX idx_enrollments_cohort (department_id, year, semester),
   CONSTRAINT fk_enrollments_student FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
@@ -298,6 +306,7 @@ CREATE TABLE subjects (
   syllabus_scheme VARCHAR(50) NOT NULL DEFAULT '2026-27',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   UNIQUE KEY uq_dept_subject (department_id, year, semester, code),
   INDEX idx_subjects_dept (department_id),
   CONSTRAINT fk_subjects_dept FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
@@ -318,6 +327,7 @@ CREATE TABLE teacher_assignments (
   is_official TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_ta_teacher (teacher_id),
   INDEX idx_ta_subject (subject_id),
   INDEX idx_ta_cohort (department_id, year, semester),
@@ -377,6 +387,7 @@ CREATE TABLE classroom_posts (
   post_type VARCHAR(50) NOT NULL DEFAULT 'ANNOUNCEMENT',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_cp_group (group_id),
   CONSTRAINT fk_cp_group FOREIGN KEY (group_id) REFERENCES teaching_groups(id) ON DELETE CASCADE,
   CONSTRAINT fk_cp_author FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE CASCADE
@@ -403,6 +414,7 @@ CREATE TABLE assessments (
   max_marks DECIMAL(6,2) NOT NULL DEFAULT 100.00,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_assessments_teacher (teacher_id),
   INDEX idx_assessments_group (group_id),
   INDEX idx_assessments_subject (subject_id),
@@ -427,6 +439,7 @@ CREATE TABLE assessment_submissions (
   graded_by INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   UNIQUE KEY uq_submission_student (assessment_id, student_id),
   INDEX idx_as_assessment (assessment_id),
   INDEX idx_as_student (student_id),
@@ -453,6 +466,7 @@ CREATE TABLE attendance_registers (
   is_official TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_ar_teacher (teacher_id),
   INDEX idx_ar_group (group_id),
   INDEX idx_ar_subject (subject_id),
@@ -481,6 +495,7 @@ CREATE TABLE attendance_sessions (
   finalized_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_sessions_reg (register_id),
   INDEX idx_sessions_date (session_date),
   INDEX idx_sessions_state (state),
@@ -578,6 +593,7 @@ CREATE TABLE devices (
   name VARCHAR(150) GENERATED ALWAYS AS (device_name) VIRTUAL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_devices_dept (department_id),
   INDEX idx_devices_uuid (device_uuid),
   CONSTRAINT fk_devices_dept FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
@@ -708,6 +724,7 @@ CREATE TABLE timetable_slots (
   created_by INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_tt_cohort (department_id, year, semester),
   INDEX idx_tt_teacher (teacher_id),
   CONSTRAINT fk_tt_dept FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
@@ -809,6 +826,7 @@ CREATE TABLE IF NOT EXISTS student_biometric_templates (
   is_official TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   UNIQUE KEY uq_student_finger_template (student_id, finger_index),
   INDEX idx_sbt_student (student_id),
   INDEX idx_sbt_dept (department_id),
@@ -827,6 +845,7 @@ CREATE TABLE IF NOT EXISTS esp32_command_queue (
   created_by INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL DEFAULT NULL,
   completed_at DATETIME NULL,
   INDEX idx_esp32_cmd_device_status (device_id, status),
   INDEX idx_esp32_cmd_dept (department_id),
@@ -1050,5 +1069,25 @@ CREATE TABLE IF NOT EXISTS classroom_post_comments (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   KEY idx_cpc_post (post_id),
   KEY idx_cpc_author (author_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS student_documents (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NOT NULL,
+  department_id INT NULL,
+  title VARCHAR(255) NOT NULL,
+  document_type VARCHAR(100) NOT NULL DEFAULT 'ACADEMIC_RECORD',
+  file_path VARCHAR(500) NOT NULL,
+  file_name VARCHAR(255) NULL,
+  file_size INT NULL,
+  mime_type VARCHAR(100) NULL,
+  uploaded_by INT NULL,
+  uploader_name VARCHAR(255) NULL,
+  notes TEXT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_sdoc_student (student_id),
+  KEY idx_sdoc_dept (department_id),
+  KEY idx_sdoc_type (document_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

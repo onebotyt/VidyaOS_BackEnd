@@ -229,7 +229,7 @@ class ExamController {
 
       const exportPayload = {
         institution_name: instName,
-        session_label: `Internal Evaluation Sheet ${ex.academic_year_label || '2026-27 (Odd Semester)'}`,
+        session_label: `Internal Evaluation Sheet ${ex.academic_year_label || '2026-27 (Winter Session)'}`,
         department_name: ex.department_name,
         department_code: ex.department_code,
         subject_name: ex.subject_name,
@@ -280,7 +280,7 @@ class ExamController {
 
       const exportPayload = {
         institution_name: customData.institution_name || instName,
-        session_label: customData.session_label || `Internal Evaluation Sheet ${ex.academic_year_label || '2026-27 (Odd Semester)'}`,
+        session_label: customData.session_label || `Internal Evaluation Sheet ${ex.academic_year_label || '2026-27 (Winter Session)'}`,
         department_name: customData.department_name || ex.department_name,
         department_code: customData.department_code || ex.department_code,
         subject_name: customData.subject_name || ex.subject_name,

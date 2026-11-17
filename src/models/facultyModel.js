@@ -1049,7 +1049,7 @@ class FacultyModel {
 
     return {
       institution_name: institutionName,
-      session_label: `Internal Evaluation Sheet ${register.academic_year_label || '2026-27 (Odd Semester)'}`,
+      session_label: `Internal Evaluation Sheet ${register.academic_year_label || '2026-27 (Winter Session)'}`,
       department_name: register.department_name,
       department_code: register.department_code,
       subject_name: register.subject_name,
