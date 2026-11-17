@@ -135,33 +135,28 @@ class TeachingGroupModel {
    */
   /**
    * Automated database schema auto-healing migration for teaching_groups.
-   * Ensures missing columns (subject_short_name, deleted_at) exist and status column supports TRASH.
+   * Ensures all columns exist and status column supports TRASH.
    */
   static async ensureColumns() {
     if (this._columnsChecked) return;
     try {
-      let cols = [];
-      try {
-        const rows = await query("SELECT COLUMN_NAME AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'teaching_groups'");
-        cols = Array.isArray(rows) ? rows.map(r => (r.name || r.COLUMN_NAME || '').toLowerCase()) : [];
-      } catch (_) {
-        try {
-          const pragma = await query("PRAGMA table_info(teaching_groups)");
-          cols = Array.isArray(pragma) ? pragma.map(r => (r.name || '').toLowerCase()) : [];
-        } catch (_) {}
+      const alters = [
+        "ALTER TABLE teaching_groups ADD COLUMN year INT NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN subject_short_name VARCHAR(100) NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN deleted_at DATETIME NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN department_id INT NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN syllabus_units LONGTEXT NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN total_units INT NULL DEFAULT 5",
+        "ALTER TABLE teaching_groups ADD COLUMN component VARCHAR(50) NULL DEFAULT 'THEORY'",
+        "ALTER TABLE teaching_groups ADD COLUMN archived_at DATETIME NULL",
+        "ALTER TABLE teaching_groups MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'"
+      ];
+
+      for (const sql of alters) {
+        await query(sql).catch(() => {});
       }
 
-      if (cols.length > 0) {
-        if (!cols.includes('subject_short_name')) {
-          await query("ALTER TABLE teaching_groups ADD COLUMN subject_short_name VARCHAR(100) NULL").catch(() => {});
-        }
-        if (!cols.includes('deleted_at')) {
-          await query("ALTER TABLE teaching_groups ADD COLUMN deleted_at DATETIME NULL").catch(() => {});
-        }
-        try {
-          await query("ALTER TABLE teaching_groups MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'");
-        } catch (_) {}
-      }
+      await query("UPDATE teaching_groups SET year = CASE WHEN semester IN (1, 2) THEN 1 WHEN semester IN (3, 4) THEN 2 ELSE 3 END WHERE year IS NULL").catch(() => {});
       this._columnsChecked = true;
     } catch (_) {}
   }
@@ -182,14 +177,14 @@ class TeachingGroupModel {
           expired = await query(
             `SELECT id FROM teaching_groups WHERE (status = 'TRASH' OR status = 'TRASHED') AND deleted_at IS NOT NULL AND deleted_at < datetime('now', '-30 days')`
           );
-        } catch (_) {}
+        } catch (_) { }
       }
       if (Array.isArray(expired) && expired.length > 0) {
         for (const row of expired) {
           await this.permanentDeleteGroupTransaction(row.id);
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   static async listGroups({ user, statusFilter }) {
@@ -228,9 +223,11 @@ class TeachingGroupModel {
     const params = [];
     const conditions = [];
 
-    if (!user.roles.includes('SYSTEM_ADMIN')) {
+    const roles = Array.isArray(user?.roles) ? user.roles : (user?.role ? [user.role] : []);
+    const isAdmin = roles.includes('SYSTEM_ADMIN');
+    if (!isAdmin) {
       conditions.push('tg.teacher_id = ?');
-      params.push(user.teacher_id || -1);
+      params.push(user?.teacher_id || -1);
     }
 
     if (statusFilter === 'TRASH' || statusFilter === 'TRASHED') {

@@ -282,14 +282,14 @@ class HodModel {
     // 1. Deactivate active assignments
     await query(`UPDATE teacher_assignments SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE teacher_id = ?`, [id]);
     await query(`UPDATE common_faculty_manager_assignments SET is_active = 0, revoked_at = CURRENT_TIMESTAMP WHERE teacher_id = ?`, [id]);
-    try { await query(`UPDATE teaching_groups SET teacher_id = NULL WHERE teacher_id = ?`, [id]); } catch (_) {}
-    try { await query(`UPDATE departments SET hod_user_id = NULL WHERE hod_user_id = ?`, [uid]); } catch (_) {}
+    try { await query(`UPDATE teaching_groups SET teacher_id = NULL WHERE teacher_id = ?`, [id]); } catch (_) { }
+    try { await query(`UPDATE departments SET hod_user_id = NULL WHERE hod_user_id = ?`, [uid]); } catch (_) { }
 
     // 2. Mark soft-deleted with timestamp into Trash Bin (30-day auto retention)
     await query(`UPDATE teachers SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
     if (uid) {
       await query(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
-      await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => {});
+      await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => { });
     }
 
     // 3. Auto-purge records in trash older than 30 days
@@ -298,17 +298,17 @@ class HodModel {
         `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
       );
       for (const exp of expired) {
-        await query(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM common_faculty_manager_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM teachers WHERE id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM common_faculty_manager_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM teachers WHERE id = ?`, [exp.id]).catch(() => { });
         if (exp.user_id) {
-          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM user_sessions WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM notifications WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM user_sessions WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM notifications WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => { });
         }
       }
     } catch (e) {
@@ -321,7 +321,7 @@ class HodModel {
          VALUES (?, 'FACULTY_MOVED_TO_TRASH', 'teachers', ?, ?, CURRENT_TIMESTAMP)`,
         [uid || 1, String(id), JSON.stringify({ name: tRows[0].full_name, purge_in_days: 30 })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return true;
   }
@@ -337,16 +337,16 @@ class HodModel {
         `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
       );
       for (const exp of expired) {
-        await query(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM common_faculty_manager_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM teachers WHERE id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM register_attendance WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM attendance_sessions WHERE register_id IN (SELECT id FROM attendance_registers WHERE teacher_id = ?)`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM attendance_registers WHERE teacher_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM teacher_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM common_faculty_manager_assignments WHERE teacher_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM teachers WHERE id = ?`, [exp.id]).catch(() => { });
         if (exp.user_id) {
-          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM user_sessions WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM user_sessions WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => { });
         }
       }
     } catch (e) {
@@ -392,7 +392,7 @@ class HodModel {
          VALUES (?, 'FACULTY_RESTORED', 'teachers', ?, ?, CURRENT_TIMESTAMP)`,
         [userId, String(teacherId), JSON.stringify({ name: tRows[0].full_name })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
       success: true,
@@ -1164,7 +1164,7 @@ class HodModel {
    */
   static async reindexCohortRollNumbers(deptId, year, semester, academicYearId, conn = null) {
     const q = conn ? (sql, params) => conn.execute(sql, params) : query;
-    
+
     const rows = await q(
       `SELECT e.id, s.id as student_id, s.full_name 
        FROM enrollments e
@@ -1173,7 +1173,7 @@ class HodModel {
        ORDER BY s.full_name COLLATE NOCASE ASC, s.official_enrollment_no ASC`,
       [deptId, year, semester, academicYearId]
     );
-    
+
     const enrollments = Array.isArray(rows[0]) && Array.isArray(rows) && rows[0].id === undefined ? rows[0] : rows;
     if (!enrollments || !enrollments.length) return 0;
 
@@ -1422,7 +1422,7 @@ class HodModel {
     await query(`UPDATE students SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [id]);
     if (uid) {
       await query(`UPDATE users SET deleted_at = CURRENT_TIMESTAMP, status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
-      await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => {});
+      await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => { });
     }
 
     // 2. Auto-purge students in trash older than 30 days
@@ -1431,15 +1431,15 @@ class HodModel {
         `SELECT id, user_id FROM students WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
       );
       for (const exp of expired) {
-        await query(`DELETE FROM register_attendance WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM attendance_session_students WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM student_self_attendance WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM assessment_submissions WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM enrollments WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM students WHERE id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM register_attendance WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM attendance_session_students WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM student_self_attendance WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM assessment_submissions WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM enrollments WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM students WHERE id = ?`, [exp.id]).catch(() => { });
         if (exp.user_id) {
-          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => { });
         }
       }
     } catch (e) {
@@ -1452,7 +1452,7 @@ class HodModel {
          VALUES (?, 'STUDENT_MOVED_TO_TRASH', 'students', ?, ?, CURRENT_TIMESTAMP)`,
         [userId || 1, String(id), JSON.stringify({ name: sRows[0].full_name, purge_in_days: 30 })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return true;
   }
@@ -1468,12 +1468,12 @@ class HodModel {
         `SELECT id, user_id FROM students WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
       );
       for (const exp of expired) {
-        await query(`DELETE FROM register_attendance WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM enrollments WHERE student_id = ?`, [exp.id]).catch(() => {});
-        await query(`DELETE FROM students WHERE id = ?`, [exp.id]).catch(() => {});
+        await query(`DELETE FROM register_attendance WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM enrollments WHERE student_id = ?`, [exp.id]).catch(() => { });
+        await query(`DELETE FROM students WHERE id = ?`, [exp.id]).catch(() => { });
         if (exp.user_id) {
-          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => {});
-          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => {});
+          await query(`DELETE FROM user_roles WHERE user_id = ?`, [exp.user_id]).catch(() => { });
+          await query(`DELETE FROM users WHERE id = ?`, [exp.user_id]).catch(() => { });
         }
       }
     } catch (e) {
@@ -1524,7 +1524,7 @@ class HodModel {
          VALUES (?, 'STUDENT_RESTORED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
         [userId || 1, String(studentId), JSON.stringify({ name: sRows[0].full_name })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
       success: true,
@@ -1561,7 +1561,7 @@ class HodModel {
       await query(`UPDATE users SET status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
       try {
         await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 3. Log audit event
@@ -1571,7 +1571,7 @@ class HodModel {
          VALUES (?, 'STUDENT_TRANSFERRED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
         [userId || 1, String(studentId), JSON.stringify({ name: student.full_name, reason: reason || 'Institutional Transfer' })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
       success: true,
@@ -1608,7 +1608,7 @@ class HodModel {
       await query(`UPDATE users SET status = 'SUSPENDED', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [uid]);
       try {
         await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 3. Log audit event
@@ -1618,7 +1618,7 @@ class HodModel {
          VALUES (?, 'STUDENT_WITHDRAWN', 'students', ?, ?, CURRENT_TIMESTAMP)`,
         [userId || 1, String(studentId), JSON.stringify({ name: student.full_name, reason: reason || 'Formal Withdrawal' })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
       success: true,
@@ -1660,7 +1660,7 @@ class HodModel {
          VALUES (?, 'STUDENT_REACTIVATED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
         [userId || 1, String(studentId), JSON.stringify({ name: student.full_name })]
       );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
       success: true,
@@ -2254,8 +2254,8 @@ class HodModel {
         ) att ON att.student_id = s.id
         WHERE ${filter}
         ORDER BY s.graduation_year DESC, s.full_name ASC`,
-       params
-     );
+      params
+    );
 
     const totalGraduated = students.length;
     const batches = [...new Set(students.map(s => s.graduation_year).filter(Boolean))];
@@ -2430,7 +2430,7 @@ class HodModel {
         if (Array.isArray(arr) && (arr.includes(deptCode) || arr.includes(Number(deptId)) || arr.includes(String(deptId)))) {
           return true;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     return false;
