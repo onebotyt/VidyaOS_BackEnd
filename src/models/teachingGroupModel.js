@@ -134,11 +134,29 @@ class TeachingGroupModel {
    * @returns {Promise<Array>} List of teaching groups
    */
   /**
+   * Helper to retrieve existing columns in teaching_groups table to prevent field list errors.
+   */
+  static async getExistingColumns() {
+    try {
+      const cols = await query("SHOW COLUMNS FROM teaching_groups");
+      if (Array.isArray(cols)) {
+        return new Set(cols.map(c => c.Field));
+      }
+    } catch (_) {}
+    try {
+      const cols = await query("PRAGMA table_info(teaching_groups)");
+      if (Array.isArray(cols)) {
+        return new Set(cols.map(c => c.name));
+      }
+    } catch (_) {}
+    return new Set();
+  }
+
+  /**
    * Automated database schema auto-healing migration for teaching_groups.
    * Ensures all columns exist and status column supports TRASH.
    */
   static async ensureColumns() {
-    if (this._columnsChecked) return;
     try {
       const alters = [
         "ALTER TABLE teaching_groups ADD COLUMN year INT NULL",
@@ -157,7 +175,6 @@ class TeachingGroupModel {
       }
 
       await query("UPDATE teaching_groups SET year = CASE WHEN semester IN (1, 2) THEN 1 WHEN semester IN (3, 4) THEN 2 ELSE 3 END WHERE year IS NULL").catch(() => {});
-      this._columnsChecked = true;
     } catch (_) {}
   }
 
@@ -190,10 +207,25 @@ class TeachingGroupModel {
   static async listGroups({ user, statusFilter }) {
     await this.ensureColumns();
     await this.purgeExpiredTrash();
+
+    const existingCols = await this.getExistingColumns();
+    const hasCol = col => existingCols.has(col);
+
+    const yearExpr = hasCol('year') ? 'tg.year' : 'CASE WHEN tg.semester IN (1, 2) THEN 1 WHEN tg.semester IN (3, 4) THEN 2 ELSE 3 END as year';
+    const shortNameExpr = hasCol('subject_short_name') ? 'tg.subject_short_name' : 'tg.subject_code as subject_short_name';
+    const totalUnitsExpr = hasCol('total_units') ? 'tg.total_units' : '5 as total_units';
+    const syllabusUnitsExpr = hasCol('syllabus_units') ? 'tg.syllabus_units' : 'NULL as syllabus_units';
+    const componentExpr = hasCol('component') ? 'tg.component' : "'THEORY' as component";
+    const deletedAtExpr = hasCol('deleted_at') ? 'tg.deleted_at' : 'NULL as deleted_at';
+    const archivedAtExpr = hasCol('archived_at') ? 'tg.archived_at' : 'NULL as archived_at';
+    const daysRemainingExpr = hasCol('deleted_at')
+      ? 'GREATEST(0, CAST(30 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())) AS SIGNED)) as days_remaining'
+      : '30 as days_remaining';
+
     let sql = `
-      SELECT tg.id, tg.name, tg.subject_name, tg.subject_short_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
+      SELECT tg.id, tg.name, tg.subject_name, ${shortNameExpr}, tg.subject_code, ${componentExpr}, ${totalUnitsExpr}, ${syllabusUnitsExpr}, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label,
-             tg.semester, tg.year, tg.invite_code, tg.status, tg.created_at, tg.archived_at, tg.deleted_at,
+             tg.semester, ${yearExpr}, tg.invite_code, tg.status, tg.created_at, ${archivedAtExpr}, ${deletedAtExpr},
              t.full_name as teacher_name, t.department_id as teacher_department_id,
              d.name as department_name, d.code as department_code,
              ar.id as register_id,
@@ -208,7 +240,7 @@ class TeachingGroupModel {
               FROM assessments a
               WHERE a.group_id = tg.id AND (a.due_date IS NULL OR a.due_date >= DATE_SUB(CURDATE(), INTERVAL 2 DAY))
               ORDER BY a.due_date ASC LIMIT 1) as upcoming_work,
-             GREATEST(0, CAST(30 - DATEDIFF(NOW(), COALESCE(tg.deleted_at, NOW())) AS SIGNED)) as days_remaining
+             ${daysRemainingExpr}
       FROM teaching_groups tg
       JOIN teachers t ON tg.teacher_id = t.id
       LEFT JOIN departments d ON t.department_id = d.id
@@ -959,11 +991,17 @@ class TeachingGroupModel {
    * @returns {Promise<Array>} List of matching groups
    */
   static async getMatchingGroupsForBroadcast(teacherId, target_semester, target_year, department_id) {
+    const existingCols = await this.getExistingColumns();
+    const hasCol = col => existingCols.has(col);
+    const yearSelect = hasCol('year') ? 'tg.year' : 'CASE WHEN tg.semester IN (1, 2) THEN 1 WHEN tg.semester IN (3, 4) THEN 2 ELSE 3 END as year';
+    const yearCond = hasCol('year') ? 'tg.year' : 'CASE WHEN tg.semester IN (1, 2) THEN 1 WHEN tg.semester IN (3, 4) THEN 2 ELSE 3 END';
+    const deletedCond = hasCol('deleted_at') ? 'AND tg.deleted_at IS NULL' : '';
+
     let sql = `
-      SELECT DISTINCT tg.id, tg.name, tg.semester, tg.year, ar.department_id
+      SELECT DISTINCT tg.id, tg.name, tg.semester, ${yearSelect}, ar.department_id
       FROM teaching_groups tg
       LEFT JOIN attendance_registers ar ON ar.group_id = tg.id
-      WHERE (tg.status = 'ACTIVE' OR tg.status IS NULL) AND tg.deleted_at IS NULL
+      WHERE (tg.status = 'ACTIVE' OR tg.status IS NULL) ${deletedCond}
     `;
     const params = [];
     if (teacherId) {
@@ -978,7 +1016,7 @@ class TeachingGroupModel {
       const yr = Number(target_year);
       const semStart = (yr - 1) * 2 + 1;
       const semEnd = semStart + 1;
-      sql += ` AND (tg.year = ? OR tg.semester IN (?, ?))`;
+      sql += ` AND (${yearCond} = ? OR tg.semester IN (?, ?))`;
       params.push(yr, semStart, semEnd);
     }
 
