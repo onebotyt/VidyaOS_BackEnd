@@ -425,6 +425,17 @@ router.post('/faculty-registration-toggle', requireHOD(), [
 // @desc    Retrieve pending student registration requests for HOD/faculty review
 router.get(['/registrations/pending-students', '/pending-students'], StudentController.listPendingRegistrations);
 
+// @route   POST /api/v1/hod/registrations/student/:id/approve
+// @route   POST /api/v1/hod/registrations/student/:id/reject
+// @route   POST /api/v1/hod/registrations/student/:id/adjudicate
+// @desc    Adjudicate (approve or reject) a pending student self-registration request
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.post([
+  '/registrations/student/:id/approve',
+  '/registrations/student/:id/reject',
+  '/registrations/student/:id/adjudicate'
+], StudentController.adjudicateRegistration);
+
 // @route   GET /api/v1/hod/student-registration-status
 // @desc    Check whether student self-registration gate is open for department
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
