@@ -464,8 +464,8 @@ class StudentModel {
    */
   static async lookupPendingStudentId(lookupVal) {
     const rows = await query(
-      `SELECT s.id FROM students s JOIN users u ON s.user_id = u.id WHERE (s.official_enrollment_no = ? OR s.registration_no = ?) AND u.status = 'PENDING' LIMIT 1`,
-      [lookupVal, lookupVal]
+      `SELECT s.id FROM students s JOIN users u ON s.user_id = u.id WHERE (s.official_enrollment_no = ? OR s.registration_no = ? OR u.email = ?) AND u.status = 'PENDING' LIMIT 1`,
+      [lookupVal, lookupVal, lookupVal]
     );
     return rows[0]?.id || null;
   }
@@ -479,7 +479,7 @@ class StudentModel {
    */
   static async getStudentDepartmentId(studentId) {
     const rows = await query(
-      `SELECT department_id FROM enrollments WHERE student_id = ? LIMIT 1`,
+      `SELECT department_id FROM enrollments WHERE student_id = ? ORDER BY id DESC LIMIT 1`,
       [studentId]
     );
     return rows[0]?.department_id || null;
@@ -498,7 +498,16 @@ class StudentModel {
       `SELECT id FROM departments WHERE id = ? AND hod_user_id = ?`,
       [deptId, userId]
     );
-    return rows.length > 0;
+    if (rows.length > 0) return true;
+
+    // Also check teacher_assignments
+    const assignRows = await query(
+      `SELECT ta.id FROM teacher_assignments ta
+       JOIN teachers t ON ta.teacher_id = t.id
+       WHERE ta.department_id = ? AND t.user_id = ? AND ta.assignment_type = 'HOD' AND ta.is_active = 1`,
+      [deptId, userId]
+    );
+    return assignRows && assignRows.length > 0;
   }
 
   /**
@@ -524,8 +533,8 @@ class StudentModel {
           `SELECT s.id as student_id, s.user_id, s.official_enrollment_no, s.full_name,
                   e.department_id, e.academic_year_id, e.year, e.semester, e.class_roll_no
            FROM students s
-           JOIN enrollments e ON s.id = e.student_id
-           WHERE s.id = ? LIMIT 1`,
+           LEFT JOIN enrollments e ON s.id = e.student_id
+           WHERE s.id = ? ORDER BY e.id DESC LIMIT 1`,
           [resolvedStudentId]
         );
         students = rows;
@@ -536,16 +545,17 @@ class StudentModel {
           `SELECT s.id as student_id, s.user_id, s.official_enrollment_no, s.full_name,
                   e.department_id, e.academic_year_id, e.year, e.semester, e.class_roll_no
            FROM students s
-           JOIN enrollments e ON s.id = e.student_id
-           WHERE (s.official_enrollment_no = ? OR s.registration_no = ?)
-           LIMIT 1`,
-          [lookupVal, lookupVal]
+           LEFT JOIN enrollments e ON s.id = e.student_id
+           LEFT JOIN users u ON s.user_id = u.id
+           WHERE (s.official_enrollment_no = ? OR s.registration_no = ? OR u.email = ?)
+           ORDER BY e.id DESC LIMIT 1`,
+          [lookupVal, lookupVal, lookupVal]
         );
         students = rows;
       }
 
       if (students.length === 0) {
-        throw { status: 404, code: 'NOT_FOUND', message: 'Student not found' };
+        throw { status: 404, code: 'NOT_FOUND', message: 'Student enrollment record not found' };
       }
 
       const student = students[0];
@@ -569,22 +579,51 @@ class StudentModel {
           throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${resolvedEnrollNo}" is already assigned to another student.` };
         }
 
+        const resolvedAyId = student.academic_year_id || (await StudentModel.getCurrentAcademicYearId()) || 1;
+        const studentDeptId = student.department_id || 4;
+        const studentYear = student.year || 1;
+        const studentSem = student.semester || 1;
+
         finalRollNo = classRollNo ? Number(classRollNo) : null;
         if (!finalRollNo || isNaN(finalRollNo) || finalRollNo <= 0) {
           const [maxRollRow] = await conn.execute(
             `SELECT COALESCE(MAX(class_roll_no), 0) + 1 AS next_roll
              FROM enrollments
-             WHERE department_id = ? AND year = ? AND semester = ? AND academic_year_id = ?`,
-            [student.department_id, student.year, student.semester, student.academic_year_id]
+             WHERE department_id = ? AND year = ? AND semester = ? AND (academic_year_id = ? OR academic_year_id IS NULL)`,
+            [studentDeptId, studentYear, studentSem, resolvedAyId]
           );
           finalRollNo = maxRollRow[0]?.next_roll || 1;
         }
 
-        await conn.execute(`UPDATE users SET status = 'ACTIVE', username = ? WHERE id = ?`, [resolvedEnrollNo, userId]);
-        await conn.execute(
-          `UPDATE enrollments SET class_roll_no = ?, status = 'ENROLLED' WHERE student_id = ?`,
-          [finalRollNo, actualStudentId]
+        // Check if username is already in use by another user
+        const [userConflict] = await conn.execute(
+          `SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1`,
+          [resolvedEnrollNo, userId]
         );
+        if (userConflict && userConflict.length > 0) {
+          await conn.execute(`UPDATE users SET status = 'ACTIVE' WHERE id = ?`, [userId]);
+        } else {
+          await conn.execute(`UPDATE users SET status = 'ACTIVE', username = ? WHERE id = ?`, [resolvedEnrollNo, userId]);
+        }
+
+        // Upsert or update enrollment record
+        const [enrollRows] = await conn.execute(
+          `SELECT id FROM enrollments WHERE student_id = ? LIMIT 1`,
+          [actualStudentId]
+        );
+        if (enrollRows && enrollRows.length > 0) {
+          await conn.execute(
+            `UPDATE enrollments SET class_roll_no = ?, status = 'ENROLLED', academic_year_id = COALESCE(academic_year_id, ?) WHERE student_id = ?`,
+            [finalRollNo, resolvedAyId, actualStudentId]
+          );
+        } else {
+          await conn.execute(
+            `INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'ENROLLED')`,
+            [actualStudentId, studentDeptId, studentYear, studentSem, resolvedAyId, finalRollNo]
+          );
+        }
+
         await conn.execute(
           `UPDATE students SET official_enrollment_no = ?, class_roll_no = ? WHERE id = ?`,
           [resolvedEnrollNo, finalRollNo, actualStudentId]
@@ -593,14 +632,19 @@ class StudentModel {
         try {
           await conn.execute(
             `INSERT INTO student_department_enrollments (student_id, department_id, academic_year_id, year, semester, class_roll_no, start_date, status)
-             VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')`,
-            [actualStudentId, student.department_id, student.academic_year_id, student.year, student.semester, finalRollNo]
+             VALUES (?, ?, ?, ?, ?, ?, CURDATE(), 'ACTIVE')
+             ON DUPLICATE KEY UPDATE class_roll_no = VALUES(class_roll_no), status = 'ACTIVE'`,
+            [actualStudentId, studentDeptId, resolvedAyId, studentYear, studentSem, finalRollNo]
           );
         } catch (_) {}
       } else {
         await conn.execute(
           `UPDATE users SET status = 'REJECTED', rejection_reason = ? WHERE id = ?`,
           [rejectionReason || 'Registration rejected by faculty', userId]
+        );
+        await conn.execute(
+          `UPDATE enrollments SET status = 'REJECTED' WHERE student_id = ?`,
+          [actualStudentId]
         );
       }
 

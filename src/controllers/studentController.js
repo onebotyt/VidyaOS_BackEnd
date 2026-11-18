@@ -480,9 +480,12 @@ class StudentController {
    */
   static async listPendingRegistrations(req, res) {
     try {
-      let deptId = req.query.department_id || req.teacher_department_id;
-      if (!deptId && !req.user.roles.includes('SYSTEM_ADMIN')) {
-        deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+      let deptId = req.query.department_id || req.query.branch_id;
+      if (!deptId && !req.user.roles.includes('SYSTEM_ADMIN') && !req.user.roles.includes('ADMIN')) {
+        deptId = req.hod_department_id || req.teacher_department_id || req.user.hod_department_id || req.user.department_id;
+        if (!deptId) {
+          deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+        }
       }
 
       const ayId = req.query.academic_year_id || (await StudentModel.getCurrentAcademicYearId());
@@ -508,9 +511,12 @@ class StudentController {
    */
   static async countPendingRegistrations(req, res) {
     try {
-      let deptId = req.query.department_id || req.teacher_department_id;
-      if (!deptId && !req.user.roles.includes('SYSTEM_ADMIN')) {
-        deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+      let deptId = req.query.department_id || req.query.branch_id;
+      if (!deptId && !req.user.roles.includes('SYSTEM_ADMIN') && !req.user.roles.includes('ADMIN')) {
+        deptId = req.hod_department_id || req.teacher_department_id || req.user.hod_department_id || req.user.department_id;
+        if (!deptId) {
+          deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+        }
       }
 
       const ayId = req.query.academic_year_id || (await StudentModel.getCurrentAcademicYearId());
@@ -551,18 +557,18 @@ class StudentController {
         resolvedStudentId = await StudentModel.lookupPendingStudentId(lookupVal);
       }
 
-      if (!req.user.roles.includes('SYSTEM_ADMIN') && resolvedStudentId) {
+      // Check department authorization: System Admins, Admins, and HODs can adjudicate registrations
+      const isPrivileged = req.user.roles.includes('SYSTEM_ADMIN') || req.user.roles.includes('ADMIN') || req.is_hod || req.user.is_hod || req.user.roles.includes('HOD');
+      if (!isPrivileged && resolvedStudentId) {
         const studentDeptId = await StudentModel.getStudentDepartmentId(resolvedStudentId);
-        if (studentDeptId) {
-          const teacherDeptId = req.teacher_department_id || (await StudentModel.getTeacherDepartment(req.user.teacher_id));
-          if (teacherDeptId && Number(studentDeptId) !== Number(teacherDeptId)) {
-            const isHod = await StudentModel.isHodOfDepartment(studentDeptId, req.user.id);
-            if (!isHod) {
-              return res.status(403).json({
-                success: false,
-                error: { code: 'FORBIDDEN', message: 'You can only adjudicate registrations for students in your department.' }
-              });
-            }
+        const userDeptId = req.hod_department_id || req.teacher_department_id || req.user.hod_department_id || req.user.department_id || (req.user.teacher_id ? await StudentModel.getTeacherDepartment(req.user.teacher_id) : null);
+        if (studentDeptId && userDeptId && Number(studentDeptId) !== Number(userDeptId)) {
+          const isHod = await StudentModel.isHodOfDepartment(studentDeptId, req.user.id);
+          if (!isHod) {
+            return res.status(403).json({
+              success: false,
+              error: { code: 'FORBIDDEN', message: 'You can only adjudicate registrations for students in your department.' }
+            });
           }
         }
       }

@@ -166,7 +166,7 @@ router.get('/registrations/count', auth, requireRole('TEACHER'), requireDepartme
 router.post(
   ['/registrations/:id/adjudicate', '/registrations/:id/approve', '/:id/approve'],
   auth,
-  requireRole('TEACHER'),
+  requireRole('TEACHER', 'SYSTEM_ADMIN', 'HOD', 'ADMIN'),
   requireDepartmentFaculty(),
   [
     body('action').optional().isIn(['APPROVE', 'REJECT']).withMessage("Action must be 'APPROVE' or 'REJECT'"),
