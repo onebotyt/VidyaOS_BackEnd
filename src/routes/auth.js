@@ -225,7 +225,16 @@ router.post(
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('official_enrollment_no').trim().notEmpty().withMessage('Enrollment number is required'),
     body('email').isEmail().withMessage('Valid Gmail address is required').normalizeEmail({ gmail_remove_dots: false }),
-    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('password').custom((value, { req }) => {
+      const hasGoogle = Boolean(req.body.google_sub || req.body.google_id_token);
+      if (hasGoogle && (!value || String(value).trim() === '')) {
+        return true;
+      }
+      if (!value || String(value).length < 8) {
+        throw new Error('Password must be at least 8 characters');
+      }
+      return true;
+    }),
     body('phone').optional().trim(),
     body('parent_phone').optional().trim(),
     body('parent_name').optional().trim(),
@@ -248,7 +257,16 @@ router.post(
   [
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('email').isEmail().withMessage('Valid Gmail address is required').normalizeEmail({ gmail_remove_dots: false }),
-    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('password').custom((value, { req }) => {
+      const hasGoogle = Boolean(req.body.google_sub || req.body.google_id_token);
+      if (hasGoogle && (!value || String(value).trim() === '')) {
+        return true;
+      }
+      if (!value || String(value).length < 8) {
+        throw new Error('Password must be at least 8 characters');
+      }
+      return true;
+    }),
     body('account_type').isIn(['FACULTY', 'HOD']).withMessage('Account type must be FACULTY or HOD'),
     body('department_id').optional({ nullable: true }),
     body('phone').optional().trim(),

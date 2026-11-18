@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const AuthModel = require('../models/authModel');
 const authService = require('../services/authService');
@@ -204,6 +205,9 @@ class AuthController {
     const mode = req.query.mode || 'LOGIN';
     const userId = req.query.user_id || null;
     let frontendOrigin = req.query.origin || null;
+    if (!frontendOrigin && req.get('origin')) {
+      frontendOrigin = req.get('origin');
+    }
     if (!frontendOrigin && req.get('referer')) {
       try { frontendOrigin = new URL(req.get('referer')).origin; } catch (_) {}
     }
@@ -310,11 +314,11 @@ class AuthController {
             } else {
               const origin = payload.frontendOrigin || (window.location.origin.includes('onrender.com') ? 'https://vidyaos-pink.vercel.app' : window.location.origin);
               if (payload.action === 'STUDENT_REGISTER') {
-                window.location.href = origin + '/login/register.html?role=student&google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
+                window.location.href = origin + '/login/register/index.html?role=student&google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
               } else if (payload.action === 'PENDING_APPROVAL') {
                 window.location.href = origin + '/login/index.html?role=student&google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
               } else if (payload.action === 'NOT_REGISTERED') {
-                window.location.href = origin + '/login/register.html?role=student&google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
+                window.location.href = origin + '/login/register/index.html?role=student&google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
               } else if (payload.access_token) {
                 let target = '/faculty/dashboard.html';
                 if (payload.user && payload.user.roles && payload.user.roles.includes('STUDENT')) {
@@ -803,7 +807,6 @@ class AuthController {
         }
       }
 
-      const passwordHash = await bcrypt.hash(password, 12);
       let resolvedGoogleSub = (google_sub && typeof google_sub === 'string') ? google_sub.trim() : null;
       if (!resolvedGoogleSub && google_id_token) {
         try {
@@ -813,6 +816,12 @@ class AuthController {
           }
         } catch (_) {}
       }
+
+      const effPassword = (password && String(password).trim()) ? String(password).trim() : (resolvedGoogleSub ? crypto.randomBytes(16).toString('hex') + '!Aa1' : null);
+      if (!effPassword) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Password is required' } });
+      }
+      const passwordHash = await bcrypt.hash(effPassword, 12);
 
       const result = await AuthModel.registerStudentTransaction({
         email: cleanEmail,
