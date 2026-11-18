@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const mediaModel = require('../models/mediaModel');
 const auditService = require('../services/auditService');
+const storageService = require('../services/storageService');
 const { UPLOAD_ROOT } = require('../middleware/upload');
 const logger = require('../utils/logger');
 
@@ -93,8 +94,12 @@ class MediaController {
       } = req.body;
 
       const fileType = classifyFile(req.file.mimetype, req.file.originalname);
-      const filePath = `/uploads/media/${req.file.filename}`;
       const displayTitle = title ? title.trim() : path.basename(req.file.originalname, path.extname(req.file.originalname));
+
+      // Provider-agnostic storage upload (Cloudinary, S3, or Local Disk)
+      const storageResult = await storageService.upload(req.file, { subfolder: 'media' });
+      const filePath = storageResult.url;
+      const storedFileName = storageResult.publicId || req.file.filename;
 
       const asset = await mediaModel.createAsset({
         teacherId: effTeacherId,
@@ -103,7 +108,7 @@ class MediaController {
         studentId: student_id,
         title: displayTitle,
         description,
-        filename: req.file.filename,
+        filename: storedFileName,
         originalname: req.file.originalname,
         filePath,
         fileType,
@@ -120,7 +125,7 @@ class MediaController {
         actorRole: req.user.roles?.[0] || 'TEACHER',
         targetType: 'faculty_media_assets',
         targetId: asset.id,
-        details: { title: displayTitle, fileType, size: req.file.size, category }
+        details: { title: displayTitle, fileType, size: req.file.size, category, storageProvider: storageService.getProviderName() }
       });
 
       return res.status(201).json({
@@ -264,12 +269,17 @@ class MediaController {
       }
 
       try {
+        // Delete via storage adapter (Cloudinary or local)
+        if (asset.file_name) {
+          await storageService.delete(asset.file_name);
+        }
+        // Fallback cleanup if local file still exists
         const diskPath = path.join(UPLOAD_ROOT, 'media', asset.file_name);
         if (fs.existsSync(diskPath)) {
           fs.unlinkSync(diskPath);
         }
       } catch (diskErr) {
-        logger.warn('[MediaController] Could not remove file from disk:', { error: diskErr.message });
+        logger.warn('[MediaController] Could not remove file from storage:', { error: diskErr.message });
       }
 
       await mediaModel.deleteAsset(assetId);
