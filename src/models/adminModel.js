@@ -454,9 +454,9 @@ class AdminModel {
     let whereClause = `WHERE 1=1`;
     const params = [];
     if (search && search.trim()) {
-      whereClause += ` AND (t.full_name LIKE ? OR u.email LIKE ? OR t.employee_id LIKE ?)`;
+      whereClause += ` AND (t.full_name LIKE ? OR u.email LIKE ? OR t.employee_id LIKE ? OR t.phone LIKE ?)`;
       const term = `%${search.trim()}%`;
-      params.push(term, term, term);
+      params.push(term, term, term, term);
     }
     return await query(
       `SELECT t.id as teacher_id, t.full_name, t.employee_id, t.phone,

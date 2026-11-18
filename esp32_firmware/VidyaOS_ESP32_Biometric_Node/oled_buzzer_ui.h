@@ -33,14 +33,26 @@
 #define VIDYAOS_OLED_BUZZER_UI_H
 
 #include <Arduino.h>
+#include <esp_arduino_version.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "config.h"
 
+// Detect ESP32 Arduino Core 3.0+ vs Core 2.x
+#if defined(ESP_ARDUINO_VERSION)
+  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    #define VIDYA_LEDC_CORE_3 1
+  #endif
+#elif defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  #define VIDYA_LEDC_CORE_3 1
+#endif
+
 class VidyaPeripheralsUI {
 private:
   Adafruit_SSD1306 display;
+  bool buzzerPwmReady = false;
+  bool displayReady   = false;
 
 public:
   VidyaPeripheralsUI()
@@ -57,17 +69,35 @@ public:
     // 2. Initialize Battery ADC pin
     pinMode(BATTERY_ADC_PIN, INPUT);
 
-    // 3. Initialize 5V Passive Piezo Buzzer PWM channel (LEDC)
+    // 3. Initialize passive buzzer PWM (Supports ESP32 Core 2.x and 3.x)
+#if defined(VIDYA_LEDC_CORE_3)
+    buzzerPwmReady = ledcAttach(BUZZER_PIN, 2000, 8);
+    if (!buzzerPwmReady) {
+      pinMode(BUZZER_PIN, OUTPUT);
+      digitalWrite(BUZZER_PIN, LOW);
+    }
+#else
     ledcSetup(BUZZER_PWM_CHANNEL, 2000, 8);
     ledcAttachPin(BUZZER_PIN, BUZZER_PWM_CHANNEL);
+    buzzerPwmReady = true;
+#endif
 
-    // 4. Initialize 0.96" SSD1306 I2C OLED (128x64)
+    // 4. Initialize 0.96" SSD1306 I2C OLED (128x64) with dual-address autodetection
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-    display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    display.display();
+    displayReady = display.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR);
+    if (!displayReady) {
+      // Auto-fallback to alternative I2C address 0x3D
+      displayReady = display.begin(SSD1306_SWITCHCAPVCC, 0x3D);
+    }
+
+    if (displayReady) {
+      display.clearDisplay();
+      display.setTextColor(SSD1306_WHITE);
+      display.display();
+    }
   }
+
+  bool isDisplayReady() const { return displayReady; }
 
   // ─── 1. Status LED Controls ───────────────────────────────────────────────
   void setWifiLed(bool on)     { digitalWrite(LED_WIFI_PIN, on ? HIGH : LOW); }
@@ -106,12 +136,23 @@ public:
   // ─── 2. 5V Passive Piezoelectric Buzzer Audio Profiles ───────────────────
   void playTone(uint32_t freqHz, uint32_t durationMs) {
     if (freqHz == 0 || durationMs == 0) {
+#if defined(VIDYA_LEDC_CORE_3)
+      if (buzzerPwmReady) ledcWriteTone(BUZZER_PIN, 0);
+#else
       ledcWriteTone(BUZZER_PWM_CHANNEL, 0);
+#endif
       return;
     }
+
+#if defined(VIDYA_LEDC_CORE_3)
+    if (buzzerPwmReady) ledcWriteTone(BUZZER_PIN, freqHz);
+    delay(durationMs);
+    if (buzzerPwmReady) ledcWriteTone(BUZZER_PIN, 0);
+#else
     ledcWriteTone(BUZZER_PWM_CHANNEL, freqHz);
     delay(durationMs);
     ledcWriteTone(BUZZER_PWM_CHANNEL, 0);
+#endif
   }
 
   /**
@@ -143,7 +184,11 @@ public:
       playTone(800, 75);
       delay(35);
     }
+#if defined(VIDYA_LEDC_CORE_3)
+    if (buzzerPwmReady) ledcWriteTone(BUZZER_PIN, 0);
+#else
     ledcWriteTone(BUZZER_PWM_CHANNEL, 0);
+#endif
   }
 
   /**
@@ -201,18 +246,19 @@ public:
 
   // ─── 4. OLED Display Power State Management (Sleep / Wake) ────────────────
   void powerOffDisplay() {
-    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    if (displayReady) {
+      display.ssd1306_command(SSD1306_DISPLAYOFF);
+    }
   }
 
   void powerOnDisplay() {
-    display.ssd1306_command(SSD1306_DISPLAYON);
+    if (displayReady) {
+      display.ssd1306_command(SSD1306_DISPLAYON);
+    }
   }
 
   // ─── 5. OLED Screen Renderers (128x64 px) ─────────────────────────────────
 
-  /**
-   * Helper: Draw standard battery gauge text, e.g. "[████] 88%" or "[█░░░] 14%"
-   */
   static void formatBatteryGauge(char* outBuf, size_t bufSize, int pct, float volts = 0.0f) {
     const char* bar = "[░░░░]";
     if (pct >= 75)      bar = "[████]";
@@ -228,6 +274,32 @@ public:
   }
 
   /**
+   * Boot screen rendered during startup & network connection
+   */
+  void showBootScreen(const char* title, const char* statusMsg) {
+    if (!displayReady) return;
+    display.clearDisplay();
+    display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(6, 3);
+    display.print(title ? title : "VIDYAOS TERMINAL");
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(4, 20);
+    display.print("Firmware: v3.1.0");
+
+    display.drawRoundRect(2, 38, 124, 22, 3, SSD1306_WHITE);
+    display.setCursor(6, 45);
+    char buf[22];
+    strncpy(buf, statusMsg ? statusMsg : "Starting...", 21);
+    buf[21] = '\0';
+    display.print(buf);
+
+    display.display();
+  }
+
+  /**
    * Screen 1: Successful Attendance
    * Header: SUCCESSFULLY MARKED
    * Line 1: Enroll: 2024IT005
@@ -235,8 +307,8 @@ public:
    * Line 3: Time: 10:45:12 AM
    */
   void showAttendanceSuccess(const char* enrollmentNo, const char* fullName, const char* timeStr) {
+    if (!displayReady) return;
     display.clearDisplay();
-    // Header Banner (Inverted bar for high institutional visibility)
     display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
     display.setTextSize(1);
@@ -273,8 +345,8 @@ public:
    * Line 3: Time: 10:45:14 AM
    */
   void showAttendanceFailed(const char* reason, const char* timeStr) {
+    if (!displayReady) return;
     display.clearDisplay();
-    // Header Banner
     display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
     display.setTextSize(1);
@@ -310,6 +382,7 @@ public:
    * Line 3: Contact HOD Office
    */
   void showFingerNotRegistered() {
+    if (!displayReady) return;
     display.clearDisplay();
     display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
@@ -337,6 +410,7 @@ public:
    * Prompt: Connect 5V/9V Charger
    */
   void showLowBatteryScreen(float battVolts, int battPct) {
+    if (!displayReady) return;
     display.clearDisplay();
     display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
@@ -363,10 +437,11 @@ public:
   /**
    * Screen 5: Idle / Standby State
    * Top Bar: Wi-Fi RSSI • Battery % ([████] 88%)
-   * Center: Institutional Clock (10:45 AM)
+   * Center: Institutional Clock (10:45 AM or 10:45:12 AM)
    * Bottom: 👉 Place Finger to Scan
    */
   void showIdleScreen(int batteryPct, float batteryVolts, bool isWifiConnected, const char* currentTimeStr, int rssi = -60) {
+    if (!displayReady) return;
     display.clearDisplay();
 
     // Top Status Bar (Solid Bar)
@@ -386,7 +461,7 @@ public:
     char gauge[16];
     snprintf(gauge, sizeof(gauge), "%d%% %.1fV", batteryPct, batteryVolts);
     int16_t x = 128 - (strlen(gauge) * 6) - 2;
-    display.setCursor(max((int)x, 56), 2);
+    display.setCursor(max((int)x, 54), 2);
     display.print(gauge);
 
     display.setTextColor(SSD1306_WHITE);
@@ -413,6 +488,7 @@ public:
    * Sleep transition banner before powering down OLED
    */
   void showSleepBanner(int battPct) {
+    if (!displayReady) return;
     display.clearDisplay();
     display.setTextSize(1);
     display.setCursor(14, 18);
@@ -430,6 +506,7 @@ public:
    * Screen shown immediately upon touch wakeup
    */
   void showWakingScreen() {
+    if (!displayReady) return;
     display.clearDisplay();
     display.setTextSize(1);
     display.setCursor(20, 22);
@@ -439,11 +516,15 @@ public:
     display.display();
   }
 
-  // Interactive Remote Enrollment Guide Screen
+  /**
+   * Interactive Remote Enrollment Guide Screen
+   */
   void showEnrollmentScreen(const char* studentName, uint16_t rollNo, const char* stepPrompt) {
+    if (!displayReady) return;
     display.clearDisplay();
     display.fillRect(0, 0, 128, 12, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
     display.setCursor(6, 2);
     display.print("ENROLL FINGERPRINT");
     display.setTextColor(SSD1306_WHITE);
@@ -460,7 +541,11 @@ public:
 
     display.drawRoundRect(2, 40, 124, 22, 3, SSD1306_WHITE);
     display.setCursor(6, 47);
-    display.print(stepPrompt);
+    char promptBuf[22];
+    strncpy(promptBuf, stepPrompt ? stepPrompt : "Follow Prompts", 21);
+    promptBuf[21] = '\0';
+    display.print(promptBuf);
+
     display.display();
   }
 };

@@ -106,3 +106,101 @@ When the ESP32 registers a finger match:
    - Sounds 3 continuous short beeps.
    - Flashes Red LED 3 times.
    - Displays "ATTENDANCE FAILED" on OLED screen.
+
+---
+
+## 6. Required Software Libraries Installation Guide
+
+To compile and flash this firmware, install the following official C++ libraries:
+
+### A. Arduino IDE (Library Manager)
+In Arduino IDE, navigate to **Sketch** ➔ **Include Library** ➔ **Manage Libraries...** (`Ctrl + Shift + I`):
+
+1. **Adafruit Fingerprint Sensor Library**
+   - *Search term*: `Adafruit Fingerprint Sensor Library`
+   - *Author*: `Adafruit`
+   - *Version*: `v2.1.3` or higher
+
+2. **Adafruit SSD1306**
+   - *Search term*: `Adafruit SSD1306`
+   - *Author*: `Adafruit`
+   - *Version*: `v2.5.9` or higher
+
+3. **Adafruit GFX Library**
+   - *Search term*: `Adafruit GFX Library`
+   - *Author*: `Adafruit`
+   - *Version*: `v1.11.9` or higher
+
+4. **ArduinoJson**
+   - *Search term*: `ArduinoJson`
+   - *Author*: `Benoit Blanchon`
+   - *Version*: `v6.21.4` (Note: v6 is recommended for low RAM footprint)
+
+5. **PubSubClient** *(For Dual-Stack MQTT Support)*
+   - *Search term*: `PubSubClient`
+   - *Author*: `Nick O'Leary`
+   - *Version*: `v2.8` or higher
+
+*(Note: `WiFi.h`, `WiFiMulti.h`, `HTTPClient.h`, `Preferences.h`, `mbedtls`, and `esp_sleep.h` are standard built-in ESP32 core libraries and do not require external installation).*
+
+### B. PlatformIO (`platformio.ini`)
+For VSCode + PlatformIO users, configure your `platformio.ini` as follows:
+
+```ini
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+monitor_speed = 115200
+
+lib_deps =
+  adafruit/Adafruit Fingerprint Sensor Library @ ^2.1.3
+  adafruit/Adafruit SSD1306 @ ^2.5.9
+  adafruit/Adafruit GFX Library @ ^1.11.9
+  bblanchon/ArduinoJson @ ^6.21.4
+  knolleary/PubSubClient @ ^2.8
+```
+
+---
+
+## 7. Architectural Analysis: Why MQTT vs HTTPS REST in Institutional IoT
+
+### Why Many IoT Projects Use MQTT:
+1. **Persistent TCP Socket**: MQTT maintains an open TCP pipe to an MQTT broker (`EMQX`, `Mosquitto`, `HiveMQ`).
+2. **Low Overhead**: Headers are only 2 bytes compared to HTTP request headers which can be several hundred bytes.
+3. **Publish / Subscribe**: Instant 1-to-many event broadcasting without polling.
+
+### Why College & University Deployments Break with Pure MQTT:
+1. **Campus Network Firewalls & Captive Portals**: Almost every government college, university, or corporate network strictly blocks non-standard outbound TCP ports (`1883` for unencrypted MQTT and `8883` for MQTTS). In contrast, **HTTPS on port `443` is universal and never blocked**.
+2. **Proxy Authentication & Deep Packet Inspection**: Institutional networks routinely inspect traffic; raw MQTT connections are dropped or timed out by campus firewalls.
+3. **End-to-End Encryption**: Standard HTTP REST coupled with **Hardware-Accelerated AES-256-GCM** guarantees end-to-end cryptographic integrity directly between the microcontroller and the Node.js backend without depending on a third-party intermediary broker.
+
+### VidyaOS Dual-Stack Solution:
+- **Primary Protocol**: **HTTPS REST with AES-256-GCM** on port `443`. Universal, rock-solid, works across all academic firewalls, mobile hotspots, and corporate Wi-Fi.
+- **Secondary / Telemetry Protocol**: **MQTT (PubSubClient)** enabled via `#define ENABLE_MQTT_TELEMETRY true` in `config.h`. When enabled, the terminal mirrors telemetry to `MQTT_TOPIC_TELEMETRY` on open IoT subnets, while seamlessly failing back to HTTPS for attendance recording and command polling.
+
+---
+
+## 8. Multi-Wi-Fi Connectivity, Nearby Scanning & Failover Protocol
+
+The VidyaOS ESP32 node incorporates a dynamic Wi-Fi manager designed to prevent terminals from ever becoming "bricked" or unreachable due to changed router passwords:
+
+1. **Nearby Network Discovery (`SCAN_WIFI`)**:
+   - The HOD clicks **"Scan Nearby Wi-Fi"** in the HOD portal.
+   - Server queues command `SCAN_WIFI`.
+   - The terminal scans all 2.4GHz channels (`WiFi.scanNetworks()`), measures signal strength (RSSI), detects BSSIDs and encryption protocols (`WPA2_PSK`, `WPA3_PSK`, `OPEN`), and sends the scan report to `/api/v1/devices/esp32/wifi-scan-report`.
+   - The HOD sees all available classroom access points in real-time.
+
+2. **Switching / Adding Wi-Fi Credentials (`SWITCH_WIFI`)**:
+   - The HOD selects a scanned network or enters credentials manually, with an optional **"Set as Default Network"** checkbox.
+   - Terminal saves credentials to non-volatile storage (NVS via `Preferences.h`).
+   - Attempts to connect for 12 seconds:
+     - **Success**: Plays confirmation tone, lights Green LED, and reports new active IP/RSSI.
+     - **Failure / Incorrect Password**: Plays alert tone, flashes Red LED, and automatically reconnects to the designated Default Wi-Fi network.
+
+3. **One-Click Fallback (`FALLBACK_WIFI`)**:
+   - When triggered, forces the terminal to abandon the secondary Wi-Fi and re-associate with the designated primary default AP.
+
+4. **Emergency Factory Reset (`RESET_WIFI`)**:
+   - Wipes all custom credentials from NVS.
+   - Restores the factory default network defined in `config.h` (`DEFAULT_FACTORY_WIFI_SSID` / `DEFAULT_FACTORY_WIFI_PASS`).

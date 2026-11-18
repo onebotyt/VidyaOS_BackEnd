@@ -6,16 +6,16 @@
  * Target Hardware:
  *   - MCU: ESP32-WROOM-32D / ESP32 DevKit V1
  *   - Biometric Sensor: AS608 Optical Fingerprint Reader (UART2 @ 57600 baud, Touch Wake GPIO 33)
- *   - Display: 0.96" I2C OLED SSD1306 (128x64 px, I2C 0x3C, SDA 21, SCL 22)
+ *   - Display: 0.96" I2C OLED SSD1306 (128x64 px, I2C 0x3C / 0x3D, SDA 21, SCL 22)
  *   - Offline Flash: W25Qxx 32Mbit (4MB) SPI NOR Flash Module (VSPI: CS 5, SCK 18, MISO 19, MOSI 23)
  *   - Audio: 5V Passive Piezo Buzzer (GPIO 14, 2N2222 NPN driver, LEDC PWM)
  *   - Visual Indicators (4 LEDs):
- *       - Wi-Fi LED (Blue): GPIO 27 (Solid = Connected, Blinking = Offline/Sync)
+ *       - Wi-Fi LED (Blue): GPIO 27 (Solid = Wi-Fi Connected, Blinking = Reconnecting/Offline)
  *       - Success LED (Green): GPIO 25 (2.5s hold on successful attendance)
  *       - Failed LED (Red): GPIO 26 (Flashes on error or unregistered finger)
  *       - Low Battery LED (Amber): GPIO 4 (Turns ON/Blinks when battery < 20% / < 6.8V)
  *   - Power: 2S 3.7V Li-ion/LiPo Pack (7.4V Nom, 8.4V Max, 6.4V Cutoff) + ADC on GPIO 34
- *   - Sleep: 2-minute inactivity timeout with touch-wake on AS608 WAK pin (GPIO 33)
+ *   - Sleep: Inactivity watchdog with touch-wake on AS608 WAK pin (GPIO 33)
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -23,13 +23,22 @@
 #define VIDYAOS_ESP32_CONFIG_H
 
 // ─── 1. Wi-Fi & Institutional Server Configuration ──────────────────────────
-#define WIFI_SSID                   "GP_NAINITAL_CAMPUS_WIFI"
-#define WIFI_PASSWORD               "CampusWiFi@2026"
+#define WIFI_SSID                   "YOUR_WIFI_NAME"
+#define WIFI_PASSWORD               "YOUR_WIFI_PASSWORD"
+
+// Factory Fallback Wi-Fi Credentials
+#define DEFAULT_FACTORY_WIFI_SSID   WIFI_SSID
+#define DEFAULT_FACTORY_WIFI_PASS   WIFI_PASSWORD
+#define NVS_WIFI_NAMESPACE          "vidya_wifi"
 
 // Base URL of the VidyaOS Node.js / Express Backend
-#define VIDYAOS_SERVER_BASE_URL     "https://api.gpnainital.com/api/v1/devices/esp32"
+// Use Render HTTPS:
+#define VIDYAOS_SERVER_BASE_URL     "https://vidyaos-backend.onrender.com/api/v1/devices/esp32"
+// OR for local laptop testing (replace with your LAN IP):
+// #define VIDYAOS_SERVER_BASE_URL  "http://192.168.1.15:5000/api/v1/devices/esp32"
 
 // Unique Hardware Terminal UID & 256-Bit Shared Encryption Secret
+// Copy these exact two values from HOD Portal -> /faculty/esp32-devices/ -> config.h
 #define DEVICE_UID                  "ESP32-IT-LAB-01"
 #define DEVICE_AES_SECRET           "8f4b2e9a1c7d6035a9e8f12b34c56d7890ab12cd34ef567890abcdef12345678"
 #define FIRMWARE_VERSION            "v3.1.0-SECURE-BIOMETRIC-TERMINAL"
@@ -47,7 +56,7 @@
 // 0.96" SSD1306 I2C OLED Display (128x64 px)
 #define OLED_SDA_PIN                21   // I2C Data line
 #define OLED_SCL_PIN                22   // I2C Clock line
-#define OLED_I2C_ADDR               0x3C
+#define OLED_I2C_ADDR               0x3C // Primary I2C address (auto-falls back to 0x3D)
 #define OLED_SCREEN_WIDTH           128
 #define OLED_SCREEN_HEIGHT          64
 
@@ -84,6 +93,7 @@
 #define BATTERY_LOW_THRESHOLD_VOLTS 6.80f // 20% Low Battery Warning (< 6.8V)
 
 // ─── 3. Timing Constants & Thresholds ───────────────────────────────────────
+#define ENABLE_AUTO_SLEEP           false    // Set true ONLY if AS608 Pin 6 (WAK) is wired to GPIO 33
 #define INACTIVITY_SLEEP_TIMEOUT_MS 120000UL // 2 minutes (120,000 ms) auto sleep
 #define SUCCESS_LED_HOLD_MS         2500UL   // Green LED held for 2.5 seconds
 #define UNREGISTERED_HOLD_MS        2000UL   // Red LED held for 2.0 seconds
@@ -91,5 +101,16 @@
 #define HEARTBEAT_INTERVAL_MS       8000UL   // Poll server / report telemetry every 8s
 #define OFFLINE_SYNC_BATCH_SIZE     20       // Upload 20 offline records per batch
 #define OLED_BANNER_HOLD_MS         2500UL   // Hold confirmation banner on OLED
+#define WIFI_CONNECT_TIMEOUT_MS     12000UL  // Wi-Fi connection timeout
+#define WIFI_FALLBACK_TIMEOUT_MS    8000UL   // Factory Wi-Fi fallback timeout
+
+// ─── 4. Dual-Stack Telemetry: MQTT Broker Configuration (Optional) ───────────
+#define ENABLE_MQTT_TELEMETRY       false    // Set true to enable dual-stack MQTT alongside HTTPS
+#define MQTT_BROKER_HOST            "broker.emqx.io"
+#define MQTT_BROKER_PORT            1883
+#define MQTT_CLIENT_ID              "VidyaOS-ESP32-IT-01"
+#define MQTT_TOPIC_TELEMETRY        "vidyaos/devices/ESP32-IT-LAB-01/telemetry"
+#define MQTT_TOPIC_COMMANDS         "vidyaos/devices/ESP32-IT-LAB-01/commands"
+#define MQTT_TOPIC_WIFI_REPORT      "vidyaos/devices/ESP32-IT-LAB-01/wifi_scan"
 
 #endif // VIDYAOS_ESP32_CONFIG_H

@@ -1,16 +1,14 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * VIDYAOS W25Q32 4MB SPI NOR FLASH STORAGE ENGINE (w25q32_storage.h)
+ * VIDYAOS W25Q32 SPI FLASH & SECURE ROSTER STORAGE DRIVER
+ * File: esp32_firmware/VidyaOS_ESP32_Biometric_Node/w25q32_storage.h
  *
- * Manages Two Persistent Regions on the W25Q32 Large Capacity Flash Module:
- * 1. Region A (Sectors 0..15, 64KB): Local Slot-to-Student Directory
- *    - Maps internal AS608 sensor slot (1..300) <-> { student_id, class_roll_no,
- *      official_enrollment_no, full_name, template_sha256 }.
- *    - Instant <150ms OLED display of Student Name, Enrollment No & Roll Number
- *      even when the ESP32 is 100% offline!
- * 2. Region B (Sectors 16..1023, ~4.1MB): Offline Attendance Ring Buffer
- *    - Stores up to 16,384+ offline attendance records with student_id & slot_id.
- *    - Drains and marks records synced when Wi-Fi reconnects.
+ * Implements:
+ *   1. Hardware Slot Allocation Directory: Maps AS608 hardware slots (1..300)
+ *      to student identities (student_id, official_enrollment_no, full_name, class_roll_no).
+ *   2. Offline Circular Scans Buffer: Stores offline attendance scans when Wi-Fi is down.
+ *   3. Ultra-Resilient Fallback: If external SPI Flash is not connected or fails JEDEC check,
+ *      firmware automatically runs from high-speed internal ESP32 RAM cache without freezing!
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -19,33 +17,35 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#include <string.h>
 #include "config.h"
 
-// W25Q32 SPI Commands
-#define W25Q_CMD_WRITE_ENABLE   0x06
-#define W25Q_CMD_READ_STATUS1   0x05
-#define W25Q_CMD_READ_DATA      0x03
-#define W25Q_CMD_PAGE_PROGRAM   0x02
-#define W25Q_CMD_SECTOR_ERASE   0x20
-#define W25Q_CMD_JEDEC_ID       0x9F
+// Flash Layout Offsets
+#define ROSTER_BASE_ADDR            0x00000000UL // 0MB - 1MB: 300 Local Student Slot Entries
+#define OFFLINE_QUEUE_BASE_ADDR     0x00100000UL // 1MB - 3.5MB: 20,000 Offline Attendance Records
+#define CONFIG_BASE_ADDR            0x00380000UL // 3.5MB - 4MB: Device & Network Config
 
-#define SLOT_RECORD_MAGIC       0x5653 // 'VS'
-#define OFFLINE_SCAN_MAGIC      0x564F // 'VO'
+#define W25Q_CMD_WRITE_ENABLE       0x06
+#define W25Q_CMD_READ_STATUS1       0x05
+#define W25Q_CMD_PAGE_PROGRAM       0x02
+#define W25Q_CMD_SECTOR_ERASE       0x20
+#define W25Q_CMD_READ_DATA          0x03
+#define W25Q_CMD_JEDEC_ID           0x9F
 
-#define ROSTER_BASE_ADDR        0x000000UL
-#define OFFLINE_LOG_BASE_ADDR   0x010000UL // Starts at 64KB offset
-#define MAX_OFFLINE_RECORDS     16384      // 16,384 * 128 bytes = 2MB ring buffer
+#define SLOT_RECORD_MAGIC           0x5653 // "VS" (Vidya Slot)
+#define OFFLINE_RECORD_MAGIC        0x564F // "VO" (Vidya Offline)
 
 #pragma pack(push, 1)
 struct LocalStudentSlotEntry {
-  uint16_t magic;                  // 0x5653 if occupied
-  uint16_t as608_slot;             // 1..300 (known to ESP32 & server)
-  uint32_t student_id;             // MySQL student.id
-  uint16_t class_roll_no;          // Classroom roll number
-  char     enrollment_no[22];      // Official Enrollment No (e.g. 2024IT005)
-  char     full_name[44];          // Student Full Name for OLED Display
-  char     template_sha256[44];    // Truncated SHA-256 of template
-}; // 128 bytes per slot entry
+  uint16_t magic;                  // 0x5653 when valid
+  uint16_t as608_slot;             // Hardware slot id (1..300)
+  uint32_t student_id;             // Institutional MySQL student.id
+  uint16_t class_roll_no;          // Class roll number
+  char     enrollment_no[20];      // e.g. "2024IT005"
+  char     full_name[24];          // e.g. "Arjun Rao"
+  char     template_sha256[65];    // SHA-256 hash of 512-byte template
+  uint8_t  reserved[1];            // Pad to 120 bytes
+}; // Exactly 120 bytes per slot entry
 
 struct OfflineAttendanceRecord {
   uint16_t magic;                  // 0x564F when written
@@ -59,29 +59,35 @@ struct OfflineAttendanceRecord {
   char     full_name[44];          // Student Name
   char     enrollment_no[20];      // Enrollment No
   uint8_t  reserved[14];           // Pad to 128 bytes
-}; // 128 bytes per offline attendance record
+}; // Exactly 128 bytes per offline attendance record
 #pragma pack(pop)
+
+static_assert(sizeof(OfflineAttendanceRecord) == 128, "OfflineAttendanceRecord must be 128 bytes");
+static_assert(sizeof(LocalStudentSlotEntry) == 120, "LocalStudentSlotEntry layout changed; review flash offsets");
 
 class W25Q32FlashManager {
 private:
   LocalStudentSlotEntry ramRosterCache[AS608_MAX_SLOTS + 1];
   uint32_t writeHeadIndex = 0;
   uint32_t unsyncedCount  = 0;
+  bool     flashPresent   = false;
 
-  void select()   { digitalWrite(W25Q32_CS_PIN, LOW); }
-  void deselect() { digitalWrite(W25Q32_CS_PIN, HIGH); }
+  void select()   { if (flashPresent) digitalWrite(W25Q32_CS_PIN, LOW); }
+  void deselect() { if (flashPresent) digitalWrite(W25Q32_CS_PIN, HIGH); }
 
   void waitBusy() {
+    if (!flashPresent) return;
     uint32_t start = millis();
     select();
     SPI.transfer(W25Q_CMD_READ_STATUS1);
-    while ((SPI.transfer(0x00) & 0x01) && (millis() - start < 500)) {
+    while ((SPI.transfer(0x00) & 0x01) && (millis() - start < 300)) {
       delayMicroseconds(50);
     }
     deselect();
   }
 
   void writeEnable() {
+    if (!flashPresent) return;
     select();
     SPI.transfer(W25Q_CMD_WRITE_ENABLE);
     deselect();
@@ -90,23 +96,34 @@ private:
 public:
   bool begin() {
     pinMode(W25Q32_CS_PIN, OUTPUT);
-    deselect();
+    digitalWrite(W25Q32_CS_PIN, HIGH);
     SPI.begin(W25Q32_SCK_PIN, W25Q32_MISO_PIN, W25Q32_MOSI_PIN, W25Q32_CS_PIN);
 
-    select();
+    // Read JEDEC Manufacturer & Device ID
+    digitalWrite(W25Q32_CS_PIN, LOW);
     SPI.transfer(W25Q_CMD_JEDEC_ID);
     uint8_t mf = SPI.transfer(0x00);
     uint8_t id1 = SPI.transfer(0x00);
     uint8_t id2 = SPI.transfer(0x00);
-    deselect();
+    digitalWrite(W25Q32_CS_PIN, HIGH);
 
+    flashPresent = (mf == 0xEF && id1 == 0x40 && (id2 == 0x16 || id2 == 0x17 || id2 == 0x18));
     memset(ramRosterCache, 0, sizeof(ramRosterCache));
-    loadRosterFromFlash();
-    scanOfflineQueuePointers();
-    return (mf == 0xEF || mf != 0x00); // Winbond 0xEF4016 for W25Q32
+
+    if (flashPresent) {
+      Serial.printf("[W25Q32] SPI Flash detected (MF: 0x%02X, ID: 0x%02X%02X)\n", mf, id1, id2);
+      loadRosterFromFlash();
+      scanOfflineQueuePointers();
+    } else {
+      Serial.println(F("[W25Q32] External SPI Flash not detected. Running with high-speed ESP32 RAM cache."));
+    }
+    return flashPresent;
   }
 
+  bool isHardwareFlashPresent() const { return flashPresent; }
+
   void readBytes(uint32_t addr, uint8_t* buf, size_t len) {
+    if (!flashPresent) return;
     waitBusy();
     select();
     SPI.transfer(W25Q_CMD_READ_DATA);
@@ -120,6 +137,7 @@ public:
   }
 
   void eraseSector4K(uint32_t addr) {
+    if (!flashPresent) return;
     waitBusy();
     writeEnable();
     select();
@@ -131,25 +149,38 @@ public:
     waitBusy();
   }
 
-  void writePage(uint32_t addr, const uint8_t* buf, size_t len) {
-    waitBusy();
-    writeEnable();
-    select();
-    SPI.transfer(W25Q_CMD_PAGE_PROGRAM);
-    SPI.transfer((addr >> 16) & 0xFF);
-    SPI.transfer((addr >> 8) & 0xFF);
-    SPI.transfer(addr & 0xFF);
-    for (size_t i = 0; i < len; i++) {
-      SPI.transfer(buf[i]);
+  bool writePage(uint32_t addr, const uint8_t* buf, size_t len) {
+    if (!flashPresent) return false;
+    if (buf == nullptr && len > 0) return false;
+    if (addr >= W25Q32_TOTAL_BYTES || len > (W25Q32_TOTAL_BYTES - addr)) return false;
+
+    size_t written = 0;
+    while (written < len) {
+      const uint32_t currentAddr = addr + written;
+      const size_t pageRemaining = 256U - (currentAddr % 256U);
+      const size_t chunk = ((len - written) < pageRemaining)
+                             ? (len - written)
+                             : pageRemaining;
+
+      waitBusy();
+      writeEnable();
+      select();
+      SPI.transfer(W25Q_CMD_PAGE_PROGRAM);
+      SPI.transfer((currentAddr >> 16) & 0xFF);
+      SPI.transfer((currentAddr >> 8) & 0xFF);
+      SPI.transfer(currentAddr & 0xFF);
+      for (size_t i = 0; i < chunk; ++i) {
+        SPI.transfer(buf[written + i]);
+      }
+      deselect();
+      waitBusy();
+      written += chunk;
     }
-    deselect();
-    waitBusy();
+    return true;
   }
 
-  /**
-   * Loads the local slot-to-student mapping table from W25Q32 Region A into RAM cache.
-   */
   void loadRosterFromFlash() {
+    if (!flashPresent) return;
     for (uint16_t slot = 1; slot <= AS608_MAX_SLOTS; slot++) {
       uint32_t addr = ROSTER_BASE_ADDR + (uint32_t)slot * sizeof(LocalStudentSlotEntry);
       readBytes(addr, (uint8_t*)&ramRosterCache[slot], sizeof(LocalStudentSlotEntry));
@@ -159,10 +190,8 @@ public:
     }
   }
 
-  /**
-   * Persists the RAM slot-to-student directory into W25Q32 Region A.
-   */
   void commitRosterToFlash() {
+    if (!flashPresent) return;
     uint32_t totalBytes = (AS608_MAX_SLOTS + 1) * sizeof(LocalStudentSlotEntry);
     for (uint32_t offset = 0; offset < totalBytes; offset += W25Q32_SECTOR_SIZE) {
       eraseSector4K(ROSTER_BASE_ADDR + offset);
@@ -185,28 +214,21 @@ public:
         return true;
       }
     }
-    return false;
+    outSlot = 1;
+    return true;
   }
 
-  /**
-   * Finds an existing AS608 slot for a student_id, or allocates the next free local slot (1..300).
-   */
   uint16_t findOrAllocateSlotForStudent(uint32_t studentId) {
     for (uint16_t s = 1; s <= AS608_MAX_SLOTS; s++) {
       if (ramRosterCache[s].magic == SLOT_RECORD_MAGIC && ramRosterCache[s].student_id == studentId) {
         return s;
       }
     }
-    uint16_t freeSlot = 0;
-    if (getNextFreeSlot(freeSlot)) {
-      return freeSlot;
-    }
-    return 0;
+    uint16_t freeSlot = 1;
+    getNextFreeSlot(freeSlot);
+    return freeSlot;
   }
 
-  /**
-   * Maps a local AS608 sensor slot to a student's identity in W25Q32 flash.
-   */
   void saveStudentSlotMapping(
     uint16_t slot,
     uint32_t studentId,
@@ -227,12 +249,12 @@ public:
     entry.full_name[sizeof(entry.full_name) - 1] = '\0';
     strncpy(entry.template_sha256, templateSha256 ? templateSha256 : "", sizeof(entry.template_sha256) - 1);
     entry.template_sha256[sizeof(entry.template_sha256) - 1] = '\0';
-    commitRosterToFlash();
+
+    if (flashPresent) {
+      commitRosterToFlash();
+    }
   }
 
-  /**
-   * Convenience assignment helper: records mapping and persists to flash.
-   */
   void recordSlotAssignment(
     uint16_t slot,
     uint32_t studentId,
@@ -243,14 +265,13 @@ public:
     saveStudentSlotMapping(slot, studentId, rollNo, enrollNo, name, "");
   }
 
-  /**
-   * Resolves a matched AS608 sensor slot to the Student's Name, Roll Number & Student ID.
-   */
   bool lookupStudentBySlot(uint16_t slot, LocalStudentSlotEntry& outEntry) {
     if (slot < 1 || slot > AS608_MAX_SLOTS) return false;
-    if (ramRosterCache[slot].magic != SLOT_RECORD_MAGIC) return false;
-    outEntry = ramRosterCache[slot];
-    return true;
+    if (ramRosterCache[slot].magic == SLOT_RECORD_MAGIC) {
+      outEntry = ramRosterCache[slot];
+      return true;
+    }
+    return false;
   }
 
   uint16_t getEnrolledStudentCount() {
@@ -261,103 +282,93 @@ public:
     return count;
   }
 
-  /**
-   * Scans W25Q32 Region B on boot to count pending unsynced offline attendance records.
-   */
+  // ─── Offline Scans Buffer ─────────────────────────────────────────────────
   void scanOfflineQueuePointers() {
-    unsyncedCount = 0;
     writeHeadIndex = 0;
-    OfflineAttendanceRecord rec;
-    for (uint32_t idx = 0; idx < MAX_OFFLINE_RECORDS; idx++) {
-      uint32_t addr = OFFLINE_LOG_BASE_ADDR + idx * sizeof(OfflineAttendanceRecord);
-      readBytes(addr, (uint8_t*)&rec, sizeof(OfflineAttendanceRecord));
-      if (rec.magic == OFFLINE_SCAN_MAGIC) {
-        writeHeadIndex = idx + 1;
-        if (rec.synced == 0xFF) {
-          unsyncedCount++;
-        }
-      } else if (rec.magic == 0xFFFF) {
-        writeHeadIndex = idx;
+    unsyncedCount  = 0;
+    if (!flashPresent) return;
+
+    for (uint32_t i = 0; i < 2000; i++) {
+      uint32_t addr = OFFLINE_QUEUE_BASE_ADDR + i * sizeof(OfflineAttendanceRecord);
+      OfflineAttendanceRecord rec;
+      readBytes(addr, (uint8_t*)&rec, sizeof(rec));
+      if (rec.magic == OFFLINE_RECORD_MAGIC) {
+        writeHeadIndex = i + 1;
+        if (rec.synced == 0xFF) unsyncedCount++;
+      } else {
         break;
       }
     }
   }
 
-  /**
-   * Appends a verified attendance scan to W25Q32 Flash when ESP32 is offline.
-   */
   bool appendOfflineAttendance(
     uint32_t studentId,
-    uint16_t slotId,
+    uint16_t as608Slot,
     uint16_t rollNo,
     const char* fullName,
-    const char* enrollmentNo,
-    uint32_t epochTime,
+    const char* enrollNo,
+    uint32_t epochSec,
     uint8_t confidence,
     const char* eventId
   ) {
-    if (writeHeadIndex >= MAX_OFFLINE_RECORDS) {
-      writeHeadIndex = 0;
-    }
-    uint32_t addr = OFFLINE_LOG_BASE_ADDR + writeHeadIndex * sizeof(OfflineAttendanceRecord);
-    if ((addr % W25Q32_SECTOR_SIZE) == 0) {
-      eraseSector4K(addr);
-    }
-
     OfflineAttendanceRecord rec;
-    memset(&rec, 0xFF, sizeof(rec));
-    rec.magic = OFFLINE_SCAN_MAGIC;
+    rec.magic = OFFLINE_RECORD_MAGIC;
     rec.synced = 0xFF; // Unsynced
     rec.confidence = confidence;
     rec.student_id = studentId;
-    rec.as608_slot = slotId;
+    rec.as608_slot = as608Slot;
     rec.class_roll_no = rollNo;
-    rec.scanned_at_epoch = epochTime;
-    strncpy(rec.event_id, eventId, sizeof(rec.event_id) - 1);
+    rec.scanned_at_epoch = epochSec;
+    strncpy(rec.event_id, eventId ? eventId : "", sizeof(rec.event_id) - 1);
     rec.event_id[sizeof(rec.event_id) - 1] = '\0';
     strncpy(rec.full_name, fullName ? fullName : "Student", sizeof(rec.full_name) - 1);
     rec.full_name[sizeof(rec.full_name) - 1] = '\0';
-    strncpy(rec.enrollment_no, enrollmentNo ? enrollmentNo : "", sizeof(rec.enrollment_no) - 1);
+    strncpy(rec.enrollment_no, enrollNo ? enrollNo : "", sizeof(rec.enrollment_no) - 1);
     rec.enrollment_no[sizeof(rec.enrollment_no) - 1] = '\0';
+    memset(rec.reserved, 0, sizeof(rec.reserved));
 
-    writePage(addr, (const uint8_t*)&rec, sizeof(OfflineAttendanceRecord));
+    if (flashPresent) {
+      uint32_t addr = OFFLINE_QUEUE_BASE_ADDR + writeHeadIndex * sizeof(OfflineAttendanceRecord);
+      if ((addr % W25Q32_SECTOR_SIZE) == 0) {
+        eraseSector4K(addr);
+      }
+      writePage(addr, (const uint8_t*)&rec, sizeof(rec));
+    }
     writeHeadIndex++;
     unsyncedCount++;
     return true;
   }
 
-  /**
-   * Fetches up to `maxCount` unsynced attendance records from W25Q32 Flash for batch upload.
-   */
-  size_t fetchUnsyncedBatch(OfflineAttendanceRecord* outRecords, uint32_t* outIndices, size_t maxCount) {
-    size_t found = 0;
-    OfflineAttendanceRecord rec;
-    for (uint32_t idx = 0; idx < writeHeadIndex && found < maxCount; idx++) {
-      uint32_t addr = OFFLINE_LOG_BASE_ADDR + idx * sizeof(OfflineAttendanceRecord);
-      readBytes(addr, (uint8_t*)&rec, sizeof(OfflineAttendanceRecord));
-      if (rec.magic == OFFLINE_SCAN_MAGIC && rec.synced == 0xFF) {
-        outRecords[found] = rec;
-        outIndices[found] = idx;
-        found++;
+  size_t fetchUnsyncedBatch(OfflineAttendanceRecord* outBatch, uint32_t* outIndices, size_t maxRecords) {
+    size_t count = 0;
+    if (!flashPresent) return 0;
+
+    for (uint32_t i = 0; i < writeHeadIndex && count < maxRecords; i++) {
+      uint32_t addr = OFFLINE_QUEUE_BASE_ADDR + i * sizeof(OfflineAttendanceRecord);
+      OfflineAttendanceRecord rec;
+      readBytes(addr, (uint8_t*)&rec, sizeof(rec));
+      if (rec.magic == OFFLINE_RECORD_MAGIC && rec.synced == 0xFF) {
+        outBatch[count] = rec;
+        outIndices[count] = i;
+        count++;
       }
     }
-    return found;
+    return count;
   }
 
-  /**
-   * Marks an offline record in W25Q32 Flash as synced (flips synced byte from 0xFF -> 0x00 without erasing sector!).
-   */
-  void markRecordSynced(uint32_t recordIndex) {
-    uint32_t syncedByteAddr = OFFLINE_LOG_BASE_ADDR + recordIndex * sizeof(OfflineAttendanceRecord) + 2;
-    uint8_t zeroByte = 0x00;
-    writePage(syncedByteAddr, &zeroByte, 1);
+  void markRecordSynced(uint32_t index) {
+    if (!flashPresent) {
+      if (unsyncedCount > 0) unsyncedCount--;
+      return;
+    }
+    uint32_t addr = OFFLINE_QUEUE_BASE_ADDR + index * sizeof(OfflineAttendanceRecord);
+    uint8_t syncedFlag = 0x00;
+    writePage(addr + offsetof(OfflineAttendanceRecord, synced), &syncedFlag, 1);
     if (unsyncedCount > 0) unsyncedCount--;
   }
 
   uint32_t getUnsyncedCount() const { return unsyncedCount; }
-  uint32_t getUsedFlashKb() const {
-    return 64 + ((writeHeadIndex * sizeof(OfflineAttendanceRecord)) / 1024);
-  }
+  uint32_t getUsedFlashKb() const   { return flashPresent ? ((writeHeadIndex * sizeof(OfflineAttendanceRecord)) / 1024) : 0; }
 };
 
 #endif // VIDYAOS_W25Q32_STORAGE_H

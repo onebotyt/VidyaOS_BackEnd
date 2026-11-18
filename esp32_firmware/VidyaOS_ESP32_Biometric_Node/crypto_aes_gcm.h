@@ -3,6 +3,7 @@
  * VIDYAOS ESP32 AES-256-GCM HARDWARE CRYPTO ENGINE (crypto_aes_gcm.h)
  * Uses ESP32 built-in mbedTLS (mbedtls/gcm.h & mbedtls/sha256.h) for
  * authenticated encryption matching src/utils/esp32Crypto.js on the server.
+ * Supports ESP32 Arduino Core 2.x and Core 3.x (mbedTLS 2.x & 3.x).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -10,10 +11,23 @@
 #define VIDYAOS_CRYPTO_AES_GCM_H
 
 #include <Arduino.h>
+#include <esp_arduino_version.h>
+#include "mbedtls/version.h"
 #include "mbedtls/gcm.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/base64.h"
 #include "esp_system.h"
+
+// Compatibility macros for mbedTLS 2.x (Core 2.x) and mbedTLS 3.x (Core 3.x)
+#if (defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)) || (defined(MBEDTLS_VERSION_MAJOR) && (MBEDTLS_VERSION_MAJOR >= 3))
+  #define MBEDTLS_SHA256_STARTS(c, is224)  mbedtls_sha256_starts(c, is224)
+  #define MBEDTLS_SHA256_UPDATE(c, d, l)   mbedtls_sha256_update(c, d, l)
+  #define MBEDTLS_SHA256_FINISH(c, o)      mbedtls_sha256_finish(c, o)
+#else
+  #define MBEDTLS_SHA256_STARTS(c, is224)  mbedtls_sha256_starts_ret(c, is224)
+  #define MBEDTLS_SHA256_UPDATE(c, d, l)   mbedtls_sha256_update_ret(c, d, l)
+  #define MBEDTLS_SHA256_FINISH(c, o)      mbedtls_sha256_finish_ret(c, o)
+#endif
 
 class VidyaCryptoEngine {
 private:
@@ -44,9 +58,9 @@ public:
   void begin(const char* secretKeyStr) {
     mbedtls_sha256_context shaCtx;
     mbedtls_sha256_init(&shaCtx);
-    mbedtls_sha256_starts_ret(&shaCtx, 0);
-    mbedtls_sha256_update_ret(&shaCtx, (const unsigned char*)secretKeyStr, strlen(secretKeyStr));
-    mbedtls_sha256_finish_ret(&shaCtx, aesKey);
+    MBEDTLS_SHA256_STARTS(&shaCtx, 0);
+    MBEDTLS_SHA256_UPDATE(&shaCtx, (const unsigned char*)secretKeyStr, strlen(secretKeyStr));
+    MBEDTLS_SHA256_FINISH(&shaCtx, aesKey);
     mbedtls_sha256_free(&shaCtx);
   }
 
@@ -57,9 +71,9 @@ public:
     uint8_t hash[32];
     mbedtls_sha256_context ctx;
     mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts_ret(&ctx, 0);
-    mbedtls_sha256_update_ret(&ctx, data, len);
-    mbedtls_sha256_finish_ret(&ctx, hash);
+    MBEDTLS_SHA256_STARTS(&ctx, 0);
+    MBEDTLS_SHA256_UPDATE(&ctx, data, len);
+    MBEDTLS_SHA256_FINISH(&ctx, hash);
     mbedtls_sha256_free(&ctx);
     char hex[65];
     bytesToHex(hash, 32, hex);
