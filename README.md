@@ -592,6 +592,48 @@ node backend/scripts/test-term-automation.js         # 52/52 (Academic session e
 
 ---
 
+## 👥 Contributors & Collaboration
+
+- **Lead Architect (Dev 1)**: `@onebotyt`
+- **Contributor (Dev 2)**: `@AkashK-Repo`
+- **Contributor (Dev 3)**: `@onebotyt-mobile`
+
+---
+
+## 🚀 3-Developer Git Collaboration Guide
+
+To maintain database schema integrity and prevent route collisions when multiple developers work simultaneously:
+
+### 1. Always Pull Latest Before Starting
+```bash
+git pull --rebase origin main
+```
+
+### 2. Work on Isolated Feature Branches
+Do **not** commit directly to `main`:
+```bash
+# Developer 2
+git checkout -b dev2/<feature-name>
+
+# Developer 3
+git checkout -b dev3/<feature-name>
+```
+
+### 3. Database Schema Rules (Zero SQLite Syntax)
+- All schema changes must be written as MySQL 8.x migrations under `database/`.
+- Never run destructive `DROP TABLE` in migrations; use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+- Test local API endpoints against MySQL before pushing.
+
+### 4. Push Feature Branch & Open a PR
+```bash
+git add -A
+git commit -m "feat(api): clear explanation of changes"
+git push -u origin dev2/<feature-name>
+```
+Open a Pull Request on GitHub for review before merging into `main`.
+
+---
+
 <div align="center">
   <p>© 2026 VidyaOS — Institutional Campus Operating System</p>
   <p><em>Built for Uttarakhand Polytechnic Colleges — IRDT Curriculum Framework</em></p>
