@@ -801,8 +801,27 @@ class HodController {
    * @usesModel HodModel.bulkCreateStudents() (models/hodModel.js)
    */
   static async bulkCreateStudents(req, res) {
-    const { year, semester, students, academic_year_id } = req.body;
-    const deptId = req.hod_department_id;
+    let { year, semester, students, academic_year_id, department_id } = req.body;
+    const deptId = req.hod_department_id || department_id || req.user.department_id;
+
+    if (!deptId) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Department ID required' } });
+    }
+
+    if (!students || !Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Students list required' } });
+    }
+
+    // Auto-detect semester & year from students if not specified at top level
+    if (!semester && students[0] && students[0].semester) {
+      semester = parseInt(students[0].semester, 10);
+    }
+    if (!semester) semester = 1;
+
+    if (!year && students[0] && students[0].year) {
+      year = parseInt(students[0].year, 10);
+    }
+    if (!year) year = Math.ceil(semester / 2);
 
     try {
       let ayId = academic_year_id;

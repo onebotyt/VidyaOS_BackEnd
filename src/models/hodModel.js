@@ -1170,7 +1170,7 @@ class HodModel {
        FROM enrollments e
        JOIN students s ON e.student_id = s.id
        WHERE e.department_id = ? AND e.year = ? AND e.semester = ? AND e.academic_year_id = ? AND e.status = 'ENROLLED'
-       ORDER BY s.full_name COLLATE NOCASE ASC, s.official_enrollment_no ASC`,
+       ORDER BY LOWER(s.full_name) ASC, s.official_enrollment_no ASC`,
       [deptId, year, semester, academicYearId]
     );
 
@@ -1333,6 +1333,8 @@ class HodModel {
     const errors = [];
 
     await withTransaction(async (conn) => {
+      const cohortsToReindex = new Set();
+
       for (const st of students) {
         const enrollNo = (st.official_enrollment_no || '').trim();
         const name = (st.full_name || '').trim();
@@ -1383,17 +1385,38 @@ class HodModel {
         );
         const studentId = sRes.insertId ?? sRes.lastInsertRowid;
 
-        const tempRoll = -((userId * 1000) + 1);
+        const stSem = st.semester ? parseInt(st.semester, 10) : (semester ? parseInt(semester, 10) : 1);
+        const stYear = st.year ? parseInt(st.year, 10) : (year ? parseInt(year, 10) : Math.ceil(stSem / 2));
+        const tempRoll = (st.class_roll_no !== undefined && st.class_roll_no !== null && !isNaN(st.class_roll_no))
+          ? parseInt(st.class_roll_no, 10)
+          : -((userId * 1000) + 1);
+
         await conn.execute(
           `INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
            VALUES (?, ?, ?, ?, ?, ?, 'ENROLLED')`,
-          [studentId, deptId, year, semester, ayId, tempRoll]
+          [studentId, deptId, stYear, stSem, ayId, tempRoll]
         );
 
+        try {
+          await conn.execute(
+            `INSERT INTO student_department_enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+            [studentId, deptId, stYear, stSem, ayId, tempRoll]
+          );
+        } catch (_) {}
+
         createdList.push({ student_id: studentId, official_enrollment_no: enrollNo, full_name: name });
+        cohortsToReindex.add(`${stYear}:${stSem}`);
       }
 
-      await HodModel.reindexCohortRollNumbers(deptId, year, semester, ayId, conn);
+      if (cohortsToReindex.size > 0) {
+        for (const cohortStr of cohortsToReindex) {
+          const [cY, cS] = cohortStr.split(':').map(Number);
+          await HodModel.reindexCohortRollNumbers(deptId, cY, cS, ayId, conn);
+        }
+      } else if (year && semester) {
+        await HodModel.reindexCohortRollNumbers(deptId, year, semester, ayId, conn);
+      }
     });
 
     return { created_count: createdList.length, created: createdList, errors };

@@ -260,8 +260,8 @@ router.post('/students', requireHOD(), [
 // @handler HodController.bulkCreateStudents() -> HodModel.bulkCreateStudents()
 router.post('/students/bulk', requireHOD(), [
   body('academic_year_id').optional().isInt(),
-  body('year').isInt({ min: 1, max: 6 }).withMessage('Year required'),
-  body('semester').isInt({ min: 1, max: 12 }).withMessage('Semester required'),
+  body('year').optional().isInt({ min: 1, max: 6 }).withMessage('Year must be between 1 and 6'),
+  body('semester').optional().isInt({ min: 1, max: 12 }).withMessage('Semester must be between 1 and 12'),
   body('students').isArray({ min: 1 }).withMessage('Students list required'),
   validate
 ], HodController.bulkCreateStudents);

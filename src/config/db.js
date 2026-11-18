@@ -25,6 +25,8 @@ function normalizeParams(params = []) {
  */
 function getPool() {
   if (!pool) {
+    const isLocal = ['127.0.0.1', 'localhost'].includes(env.DB_HOST);
+    const useSsl = env.DB_SSL === 'true' || (!isLocal && env.DB_SSL !== 'false' && process.env.NODE_ENV === 'production');
     pool = mysql.createPool({
       host: (env.DB_HOST === 'localhost' ? '127.0.0.1' : env.DB_HOST) || '127.0.0.1',
       port: Number(env.DB_PORT) || 3306,
@@ -39,7 +41,8 @@ function getPool() {
       timezone: '+05:30',
       decimalNumbers: true,
       dateStrings: true,
-      multipleStatements: false
+      multipleStatements: false,
+      ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {})
     });
   }
   return pool;
@@ -228,6 +231,16 @@ async function ensureCompatibilityViews() {
       await query("ALTER TABLE students ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL AFTER updated_at");
       logger.info('✓ Added missing column students.deleted_at');
     }
+
+    // 1c. Ensure fingerprint_slots has slot_id for compatibility
+    try {
+      const fsCols = await query("SHOW COLUMNS FROM fingerprint_slots LIKE 'slot_id'");
+      if (!fsCols || fsCols.length === 0) {
+        await query("ALTER TABLE fingerprint_slots ADD COLUMN slot_id INT NULL AFTER slot_number");
+        await query("UPDATE fingerprint_slots SET slot_id = slot_number WHERE slot_id IS NULL");
+        logger.info('✓ Added missing column fingerprint_slots.slot_id');
+      }
+    } catch (_) {}
   } catch (err) {
     logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
   }

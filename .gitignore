@@ -55,3 +55,6 @@ scripts/inspect-*
 *.spec.js
 test/
 scratch/
+
+backups/
+*.sqlite
