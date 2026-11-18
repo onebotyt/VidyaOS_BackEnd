@@ -221,6 +221,13 @@ async function ensureCompatibilityViews() {
       await query("ALTER TABLE teaching_groups ADD COLUMN subject_code VARCHAR(50) DEFAULT NULL AFTER subject_name");
       logger.info('✓ Added missing column teaching_groups.subject_code');
     }
+
+    // 1b. Ensure students.deleted_at exists for trash management
+    const stuCols = await query("SHOW COLUMNS FROM students LIKE 'deleted_at'");
+    if (!stuCols || stuCols.length === 0) {
+      await query("ALTER TABLE students ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL AFTER updated_at");
+      logger.info('✓ Added missing column students.deleted_at');
+    }
   } catch (err) {
     logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
   }

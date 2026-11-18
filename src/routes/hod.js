@@ -13,6 +13,8 @@ const { requireHOD, requireHODOrClassTeacher } = require('../middleware/requireS
 const validate = require('../middleware/validate');
 const { makeUploader } = require('../middleware/upload');
 const HodController = require('../controllers/hodController');
+const StudentController = require('../controllers/studentController');
+const AuthController = require('../controllers/authController');
 
 const uploadStudentDoc = makeUploader('student-documents', 50);
 
@@ -417,5 +419,14 @@ router.post('/faculty-registration-toggle', requireHOD(), [
   body('department_id').optional().isInt(),
   validate
 ], HodController.toggleFacultyRegistration);
+
+// @route   GET /api/v1/hod/registrations/pending-students
+// @route   GET /api/v1/hod/pending-students
+// @desc    Retrieve pending student registration requests for HOD/faculty review
+router.get(['/registrations/pending-students', '/pending-students'], StudentController.listPendingRegistrations);
+
+// @route   GET /api/v1/hod/student-registration-status
+// @desc    Check whether student self-registration gate is open for department
+router.get('/student-registration-status', AuthController.getStudentRegistrationStatus);
 
 module.exports = router;
