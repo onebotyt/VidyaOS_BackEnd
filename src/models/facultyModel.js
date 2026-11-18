@@ -306,6 +306,8 @@ class FacultyModel {
     const pNum = periodNumber || 1;
     const sLabel = label || `${sType === 'PRACTICAL' ? 'Practical Lab' : 'Theory Class'} (Period ${pNum})`;
     const sDate = sessionDate || new Date().toISOString().slice(0, 10);
+    const effStartTime = startTime || `${sDate} 09:00:00`;
+    const effEndTime = endTime || null;
 
     let effSubjectId = reg.subject_id;
     if (!effSubjectId) {
@@ -335,7 +337,7 @@ class FacultyModel {
       [
         reg.id, reg.teacher_id, effSubjectId, reg.department_id,
         reg.year, reg.semester, reg.academic_year_id,
-        sType, sLabel, sDate, pNum, startTime || null, endTime || null
+        sType, sLabel, sDate, pNum, effStartTime, effEndTime
       ]
     );
 

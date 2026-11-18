@@ -296,28 +296,30 @@ class FacultyController {
         }
       }
 
-      res.json({ success: true, data: {
-        register,
-        sessions,
-        grid: {
-          dates: allFinalizedSessions.map(s => s.session_date),
-          finalized_sessions: monthFinalizedSessions.map(s => ({
-            id: s.id,
-            session_date: s.session_date,
-            day: parseInt(s.session_date.slice(8, 10), 10),
-            period_number: s.period_number || 1,
-            label: s.label || `Period ${s.period_number || 1}`,
-            session_type: s.session_type,
-            state: s.state
-          })),
-          students: gridData,
-          month: targetMonth,
-          available_months: availableMonths,
-          month_days: monthDays,
-          daily_totals: dailyTotals,
-          academic_events: academicEvents
+      res.json({
+        success: true, data: {
+          register,
+          sessions,
+          grid: {
+            dates: allFinalizedSessions.map(s => s.session_date),
+            finalized_sessions: monthFinalizedSessions.map(s => ({
+              id: s.id,
+              session_date: s.session_date,
+              day: parseInt(s.session_date.slice(8, 10), 10),
+              period_number: s.period_number || 1,
+              label: s.label || `Period ${s.period_number || 1}`,
+              session_type: s.session_type,
+              state: s.state
+            })),
+            students: gridData,
+            month: targetMonth,
+            available_months: availableMonths,
+            month_days: monthDays,
+            daily_totals: dailyTotals,
+            academic_events: academicEvents
+          }
         }
-      }});
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
@@ -428,6 +430,22 @@ class FacultyController {
   }
 
   /**
+   * Retrieves all sessions for a specific register.
+   * @route GET /api/v1/faculty/registers/:id/sessions (routes/faculty.js)
+   * @access TEACHER, SYSTEM_ADMIN
+   * @usesModel FacultyModel.getRegisterSessions() (models/facultyModel.js)
+   */
+  static async getRegisterSessions(req, res) {
+    try {
+      const registerId = req.params.id;
+      const sessions = await FacultyModel.getRegisterSessions(registerId);
+      res.json({ success: true, data: sessions });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
    * Manually creates a new attendance session under a register.
    * @route POST /api/v1/faculty/registers/:id/sessions (routes/faculty.js)
    * @access TEACHER, SYSTEM_ADMIN
@@ -460,7 +478,17 @@ class FacultyController {
         endTime: end_time
       });
 
-      res.status(201).json({ success: true, data: { session_id: newSessionId, session_date, state: 'DRAFT' } });
+      res.status(201).json({
+        success: true,
+        data: {
+          id: newSessionId,
+          session_id: newSessionId,
+          session_date,
+          period_number: period_number || 1,
+          state: 'DRAFT',
+          label: label || `Class 1 (Period ${period_number || 1})`
+        }
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }

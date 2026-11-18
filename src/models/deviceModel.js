@@ -161,7 +161,8 @@ class DeviceModel {
     const lim = Math.min(500, Math.max(1, parseInt(limit, 10) || 100));
     return await query(
       `SELECT ie.id, ie.student_id, ie.device_id, ie.department_id,
-              ie.scan_time, ie.scan_date, ie.verification_status, ie.event_type, ie.payload_json,
+              ie.scan_time, ie.scan_date, ie.verification_status, ie.event_type,
+              COALESCE(ie.payload_json, ie.raw_payload) as payload_json,
               s.full_name as student_name, s.official_enrollment_no, s.registration_no,
               COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
               e.year, e.semester,

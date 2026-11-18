@@ -304,13 +304,13 @@ router.delete('/students/:id/documents/:docId', requireHOD(), [param('id').isInt
 
 // @route   GET /api/v1/hod/trash/students
 // @desc    Retrieve soft-deleted students for HOD department currently in Trash
-// @access  Protected (HOD, SYSTEM_ADMIN)
-router.get('/trash/students', requireHOD(), HodController.getTrashStudents);
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.get('/trash/students', requireHODOrClassTeacher(), HodController.getTrashStudents);
 
 // @route   POST /api/v1/hod/trash/students/:id/restore
 // @desc    Restore a soft-deleted student from Trash
-// @access  Protected (HOD, SYSTEM_ADMIN)
-router.post('/trash/students/:id/restore', requireHOD(), [param('id').isInt(), validate], HodController.restoreStudent);
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.post('/trash/students/:id/restore', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.restoreStudent);
 
 // @route   POST /api/v1/hod/students/:id/reset-password
 // @desc    Reset student account password
@@ -427,6 +427,18 @@ router.get(['/registrations/pending-students', '/pending-students'], StudentCont
 
 // @route   GET /api/v1/hod/student-registration-status
 // @desc    Check whether student self-registration gate is open for department
-router.get('/student-registration-status', AuthController.getStudentRegistrationStatus);
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.get('/student-registration-status', HodController.getStudentRegistrationStatus);
+
+// @route   POST /api/v1/hod/student-registration-toggle
+// @desc    Toggle departmental student self-registration gate with audit trail
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.post('/student-registration-toggle', [
+  body('is_open').optional().isBoolean(),
+  body('open').optional().isBoolean(),
+  body('registration_open').optional().isBoolean(),
+  body('department_id').optional().isInt(),
+  validate
+], HodController.toggleStudentRegistration);
 
 module.exports = router;

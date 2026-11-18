@@ -154,7 +154,7 @@ async function auth(req, res, next) {
       user.employee_id = teachers[0].employee_id;
       if (!user.full_name) user.full_name = teachers[0].full_name;
       if (!user.department_id) user.department_id = teachers[0].department_id;
-    } else if (user.roles.includes('SYSTEM_ADMIN') || user.roles.includes('TEACHER')) {
+    } else if (user.roles.includes('SYSTEM_ADMIN') || user.roles.includes('ADMIN') || user.roles.includes('TEACHER') || user.roles.includes('HOD') || user.roles.includes('FACULTY')) {
       const firstTeacher = await query(`SELECT id, employee_id, full_name, department_id FROM teachers ORDER BY id ASC LIMIT 1`);
       if (firstTeacher.length > 0) {
         user.teacher_id = firstTeacher[0].id;
@@ -165,6 +165,7 @@ async function auth(req, res, next) {
     }
 
     // Resolve HOD status
+    let hodDept = null;
     if (user.teacher_id) {
       const hodAssignments = await query(
         `SELECT ta.department_id, d.name as department_name, d.code as department_code
@@ -175,13 +176,27 @@ async function auth(req, res, next) {
         [user.teacher_id]
       );
       if (hodAssignments.length > 0) {
-        user.is_hod = true;
-        user.hod_department_id = hodAssignments[0].department_id;
-        user.hod_department_name = hodAssignments[0].department_name;
-        user.hod_department_code = hodAssignments[0].department_code;
-      } else {
-        user.is_hod = false;
+        hodDept = hodAssignments[0];
       }
+    }
+    if (!hodDept) {
+      const deptHods = await query(
+        `SELECT id as department_id, name as department_name, code as department_code
+         FROM departments WHERE hod_user_id = ? AND is_active = 1 LIMIT 1`,
+        [user.id]
+      );
+      if (deptHods.length > 0) {
+        hodDept = deptHods[0];
+      }
+    }
+    if (hodDept) {
+      user.is_hod = true;
+      user.hod_department_id = hodDept.department_id;
+      user.hod_department_name = hodDept.department_name;
+      user.hod_department_code = hodDept.department_code;
+      if (!user.department_id) user.department_id = hodDept.department_id;
+    } else {
+      user.is_hod = false;
     }
 
     // If student, fetch profile ID

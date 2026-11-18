@@ -10,8 +10,8 @@ const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
 const StudentRecordController = require('../controllers/studentRecordController');
 
-// All student records routes require TEACHER or SYSTEM_ADMIN authentication
-router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN'));
+// All student records routes require institutional faculty or admin authentication
+router.use(auth, requireRole('TEACHER', 'HOD', 'DEPT_HEAD', 'FACULTY', 'COMMON_FACULTY_MANAGER', 'SYSTEM_ADMIN', 'ADMIN'));
 
 // @route   GET /api/v1/student-records/filters
 // @desc    Retrieve filter options (Sessions, Years, Semesters, Batches)

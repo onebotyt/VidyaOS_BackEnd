@@ -10,9 +10,9 @@
 const StudentRecordModel = require('../models/studentRecordModel');
 
 function resolveDeptId(req) {
-  let deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id || req.query?.department_id;
+  let deptId = req.hod_department_id || req.user?.hod_department_id || req.user?.department_id || req.query?.department_id;
   if (!deptId) {
-    return 2; // Default department (Information Technology)
+    return 4; // Default institutional department (Information Technology)
   }
   return Number(deptId);
 }

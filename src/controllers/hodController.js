@@ -1402,6 +1402,64 @@ class HodController {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
   }
+
+  /**
+   * Check whether student self-registration gate is open for department
+   * @route GET /api/v1/hod/student-registration-status (routes/hod.js)
+   * @access Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+   */
+  static async getStudentRegistrationStatus(req, res) {
+    try {
+      let deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id || req.query.department_id;
+      if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
+        const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+        deptId = defaultDept;
+      }
+      if (!deptId) {
+        return res.status(400).json({ success: false, error: { code: 'NO_DEPARTMENT', message: 'No assigned department found' } });
+      }
+
+      const isOpen = await HodModel.getStudentRegistrationStatus(deptId);
+      res.json({
+        success: true,
+        data: {
+          is_open: isOpen,
+          department_id: deptId
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Toggle departmental student self-registration gate with audit trail
+   * @route POST /api/v1/hod/student-registration-toggle (routes/hod.js)
+   * @access Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+   */
+  static async toggleStudentRegistration(req, res) {
+    try {
+      let deptId = req.body.department_id || req.hod_department_id || req.user?.department_id || req.user?.hod_department_id;
+      if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
+        const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+        deptId = defaultDept;
+      }
+      if (!deptId) {
+        return res.status(400).json({ success: false, error: { code: 'NO_DEPARTMENT', message: 'No assigned department found' } });
+      }
+
+      const isOpen = req.body.is_open !== undefined ? Boolean(req.body.is_open) : (req.body.open !== undefined ? Boolean(req.body.open) : (req.body.registration_open !== undefined ? Boolean(req.body.registration_open) : true));
+      await HodModel.toggleStudentRegistration(deptId, isOpen, req.user.id);
+
+      res.json({
+        success: true,
+        message: `Student self-registration for this department is now ${isOpen ? 'OPEN' : 'CLOSED'}`,
+        data: { is_open: isOpen, department_id: deptId }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
 }
 
 module.exports = HodController;

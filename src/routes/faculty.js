@@ -76,6 +76,15 @@ router.post('/registers', [
   validate
 ], FacultyController.createPersonalRegister);
 
+// @route   GET /api/v1/faculty/registers/:id/sessions
+// @desc    Retrieve all class attendance sessions for a specific register
+// @access  Protected (TEACHER, SYSTEM_ADMIN)
+// @handler FacultyController.getRegisterSessions() -> FacultyModel.getRegisterSessions()
+router.get('/registers/:id/sessions', [
+  param('id').isInt(),
+  validate
+], FacultyController.getRegisterSessions);
+
 // @route   POST /api/v1/faculty/registers/:id/sessions
 // @desc    Create a new daily class session for a specific register
 // @access  Protected (TEACHER, SYSTEM_ADMIN)

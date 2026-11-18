@@ -2495,6 +2495,59 @@ class HodModel {
       [userId, String(deptId), JSON.stringify({ is_open: isOpen, department_id: deptId, code: deptCode })]
     );
   }
+
+  /**
+   * Check whether student self-registration gate is open for department
+   * @calledBy HodController.getStudentRegistrationStatus() (controllers/hodController.js)
+   * @route GET /api/v1/hod/student-registration-status (routes/hod.js)
+   * @param {number} deptId Department ID
+   * @returns {Promise<boolean>}
+   */
+  static async getStudentRegistrationStatus(deptId) {
+    const settings = await query(
+      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key = ? OR setting_key LIKE ?`,
+      [`cohort_reg_dept_${deptId}`, `cohort_reg_${deptId}_%`]
+    );
+
+    const isBranchOpen = settings.some(s => s.setting_key === `cohort_reg_dept_${deptId}` && (s.setting_value === '1' || s.setting_value === 'true'));
+    if (isBranchOpen) return true;
+
+    const isAnyCohortOpen = settings.some(s => s.setting_key.startsWith(`cohort_reg_${deptId}_`) && (s.setting_value === '1' || s.setting_value === 'true'));
+    return isAnyCohortOpen;
+  }
+
+  /**
+   * Toggle departmental student self-registration gate with audit trail
+   * @calledBy HodController.toggleStudentRegistration() (controllers/hodController.js)
+   * @route POST /api/v1/hod/student-registration-toggle (routes/hod.js)
+   * @param {number} deptId Department ID
+   * @param {boolean} isOpen Gate open status
+   * @param {number} userId User ID
+   * @returns {Promise<void>}
+   */
+  static async toggleStudentRegistration(deptId, isOpen, userId) {
+    const settingKey = `cohort_reg_dept_${deptId}`;
+    await query(
+      `INSERT INTO system_settings (setting_key, setting_value, description, updated_by, updated_at)
+       VALUES (?, ?, 'Department Student Self-Registration Open/Closed', ?, CURRENT_TIMESTAMP)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP`,
+      [settingKey, isOpen ? '1' : '0', userId]
+    );
+
+    if (!isOpen) {
+      await query(
+        `UPDATE system_settings SET setting_value = '0', updated_by = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE setting_key LIKE ?`,
+        [userId, `cohort_reg_${deptId}_%`]
+      );
+    }
+
+    await query(
+      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+       VALUES (?, 'STUDENT_REGISTRATION_TOGGLED', 'departments', ?, ?, CURRENT_TIMESTAMP)`,
+      [userId, String(deptId), JSON.stringify({ is_open: isOpen, department_id: deptId })]
+    );
+  }
 }
 
 module.exports = HodModel;

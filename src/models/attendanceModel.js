@@ -267,7 +267,7 @@ class AttendanceModel {
                 MAX(d.name) as device_name
          FROM esp32_presence ep
          JOIN students s ON ep.student_id = s.id
-         JOIN teaching_group_members tgm ON tgm.student_id = s.id AND tgm.group_id = ? AND tgm.status = 'ENROLLED'
+         JOIN teaching_group_members tgm ON tgm.student_id = s.id AND tgm.group_id = ? AND (tgm.status = 'ENROLLED' OR tgm.status = 'ACTIVE')
          LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
          LEFT JOIN devices d ON ep.device_id = d.id
          WHERE DATE(ep.scan_time) = ?
@@ -339,7 +339,7 @@ class AttendanceModel {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'FINALIZED')`,
       [registerId, teacherId, reg.subject_id, reg.department_id, reg.year, reg.semester, reg.academic_year_id, sType, label, date, `${date} 09:00:00`]
     );
-    const sessId = insRes[0]?.insertId ?? insRes.lastInsertRowid;
+    const sessId = insRes?.insertId ?? insRes?.[0]?.insertId ?? insRes?.lastID ?? insRes?.lastInsertRowid;
     const created = await query(`SELECT * FROM attendance_sessions WHERE id = ?`, [sessId]);
     return created[0];
   }
@@ -359,7 +359,7 @@ class AttendanceModel {
          FROM teaching_group_members tgm
          JOIN students s ON tgm.student_id = s.id
          LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
-         WHERE tgm.group_id = ? AND tgm.status = 'ENROLLED'
+         WHERE tgm.group_id = ? AND (tgm.status = 'ENROLLED' OR tgm.status = 'ACTIVE')
          ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 0) ASC`,
         [reg.group_id]
       );

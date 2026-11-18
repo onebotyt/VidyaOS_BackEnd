@@ -402,8 +402,13 @@ class AttendanceController {
       const d = await AttendanceModel.getDeviceForCohort(reg.department_id, reg.year, reg.semester);
       let device = null;
       if (d) {
-        const hbStr = d.last_heartbeat_at ? (d.last_heartbeat_at.includes('Z') ? d.last_heartbeat_at : (d.last_heartbeat_at.replace(' ', 'T') + 'Z')) : null;
-        const isOnline = d.is_active && hbStr && (Math.abs(Date.now() - new Date(hbStr).getTime()) < 120 * 60 * 1000);
+        let isOnline = false;
+        if (d.is_active && d.last_heartbeat_at) {
+          const hbTime = new Date(d.last_heartbeat_at).getTime();
+          if (!isNaN(hbTime)) {
+            isOnline = Math.abs(Date.now() - hbTime) < 120 * 60 * 1000;
+          }
+        }
         device = {
           id: d.id,
           device_uid: d.device_uid,
@@ -493,7 +498,7 @@ class AttendanceController {
           details: { register_id: registerId, session_date: date },
           ipAddress: req.ip
         });
-      } catch (_) {}
+      } catch (_) { }
 
       res.json({
         success: true,

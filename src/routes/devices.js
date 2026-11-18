@@ -39,67 +39,68 @@ router.post('/esp32/wifi-scan-report', deviceWebhookLimiter, (req, res) => devic
 router.post('/webhook/scan', deviceWebhookLimiter, (req, res) => deviceController.handleScanWebhook(req, res));
 
 // ── 2. HOD & Faculty Biometric & Wi-Fi Management Endpoints ──────────────────
+const facultyRoles = ['TEACHER', 'HOD', 'DEPT_HEAD', 'FACULTY', 'CLASS_TEACHER', 'COMMON_FACULTY_MANAGER', 'SYSTEM_ADMIN', 'ADMIN'];
 
 // @route   GET /api/v1/devices/hod/overview
 // @desc    Complete HOD Department ESP32 & Student Biometric Template Overview
-router.get('/hod/overview', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.getHodEsp32Overview(req, res));
+router.get('/hod/overview', auth, requireRole(...facultyRoles), (req, res) => deviceController.getHodEsp32Overview(req, res));
 
 // @route   GET /api/v1/devices/hod/:device_id/wifi
 // @desc    List Configured Wi-Fi Networks for Terminal
-router.get('/hod/:device_id/wifi', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.getDeviceWifiNetworks(req, res));
+router.get('/hod/:device_id/wifi', auth, requireRole(...facultyRoles), (req, res) => deviceController.getDeviceWifiNetworks(req, res));
 
 // @route   POST /api/v1/devices/hod/:device_id/wifi
 // @desc    Add New Wi-Fi Network & Queue to ESP32
-router.post('/hod/:device_id/wifi', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.addDeviceWifiNetwork(req, res));
+router.post('/hod/:device_id/wifi', auth, requireRole(...facultyRoles), (req, res) => deviceController.addDeviceWifiNetwork(req, res));
 
 // @route   PUT /api/v1/devices/hod/:device_id/wifi/:wifi_id/default
 // @desc    Set a Wi-Fi Network as Default
-router.put('/hod/:device_id/wifi/:wifi_id/default', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.setDefaultWifiNetwork(req, res));
+router.put('/hod/:device_id/wifi/:wifi_id/default', auth, requireRole(...facultyRoles), (req, res) => deviceController.setDefaultWifiNetwork(req, res));
 
 // @route   DELETE /api/v1/devices/hod/:device_id/wifi/:wifi_id
 // @desc    Delete Wi-Fi Network from Terminal
-router.delete('/hod/:device_id/wifi/:wifi_id', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.deleteDeviceWifiNetwork(req, res));
+router.delete('/hod/:device_id/wifi/:wifi_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteDeviceWifiNetwork(req, res));
 
 // @route   POST /api/v1/devices/hod/:device_id/wifi/scan
 // @desc    Trigger Real-Time Nearby Wi-Fi Scan on ESP32
-router.post('/hod/:device_id/wifi/scan', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.triggerWifiScan(req, res));
+router.post('/hod/:device_id/wifi/scan', auth, requireRole(...facultyRoles), (req, res) => deviceController.triggerWifiScan(req, res));
 
 // @route   GET /api/v1/devices/hod/:device_id/wifi/scans
 // @desc    Fetch Latest Scanned Nearby Wi-Fi Networks
-router.get('/hod/:device_id/wifi/scans', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.getLatestWifiScans(req, res));
+router.get('/hod/:device_id/wifi/scans', auth, requireRole(...facultyRoles), (req, res) => deviceController.getLatestWifiScans(req, res));
 
 // @route   POST /api/v1/devices/hod/:device_id/wifi/switch
 // @desc    Instruct ESP32 to Switch to a Specific Network
-router.post('/hod/:device_id/wifi/switch', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.switchDeviceWifi(req, res));
+router.post('/hod/:device_id/wifi/switch', auth, requireRole(...facultyRoles), (req, res) => deviceController.switchDeviceWifi(req, res));
 
 // @route   POST /api/v1/devices/hod/:device_id/wifi/fallback
 // @desc    Trigger Instant Fallback to Default Institutional Wi-Fi
-router.post('/hod/:device_id/wifi/fallback', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.triggerWifiFallback(req, res));
+router.post('/hod/:device_id/wifi/fallback', auth, requireRole(...facultyRoles), (req, res) => deviceController.triggerWifiFallback(req, res));
 
 // @route   POST /api/v1/devices/hod/:device_id/wifi/reset
 // @desc    Reset Wi-Fi Credentials on ESP32 to Factory Default
-router.post('/hod/:device_id/wifi/reset', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.triggerWifiReset(req, res));
+router.post('/hod/:device_id/wifi/reset', auth, requireRole(...facultyRoles), (req, res) => deviceController.triggerWifiReset(req, res));
 
 // @route   POST /api/v1/devices/hod/command
 // @desc    Queue Remote Command to ESP32 (ENROLL_STUDENT, SYNC_TEMPLATES, BUZZER_CHIME)
-router.post('/hod/command', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.queueHodDeviceCommand(req, res));
+router.post('/hod/command', auth, requireRole(...facultyRoles), (req, res) => deviceController.queueHodDeviceCommand(req, res));
 
 // @route   POST /api/v1/devices/hod/simulate-esp32
 // @desc    Simulate Encrypted ESP32 Enrollment or Attendance Scan with OLED Preview
-router.post('/hod/simulate-esp32', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.simulateEsp32Action(req, res));
+router.post('/hod/simulate-esp32', auth, requireRole(...facultyRoles), (req, res) => deviceController.simulateEsp32Action(req, res));
 
 // @route   DELETE /api/v1/devices/hod/templates/:student_id
 // @desc    Remove a student's cloud fingerprint template
-router.delete('/hod/templates/:student_id', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.deleteStudentTemplate(req, res));
+router.delete('/hod/templates/:student_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteStudentTemplate(req, res));
 
 // ── 3. Standard Device Administration Routes ────────────────────────────────
 
-router.get('/', auth, requireRole('SYSTEM_ADMIN', 'TEACHER'), (req, res) => deviceController.getDevices(req, res));
+router.get('/', auth, requireRole(...facultyRoles), (req, res) => deviceController.getDevices(req, res));
 
 router.post(
   '/',
   auth,
-  requireRole('SYSTEM_ADMIN', 'TEACHER'),
+  requireRole(...facultyRoles),
   [
     body('device_uid').trim().notEmpty().withMessage('Unique device identifier required'),
     body('name').trim().notEmpty().withMessage('Terminal name required'),
@@ -108,9 +109,9 @@ router.post(
   (req, res) => deviceController.registerDevice(req, res)
 );
 
-router.post('/:id/slots', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.assignSlot(req, res));
-router.delete('/:id/slots/:slot_id', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.removeSlot(req, res));
-router.put('/:id/status', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.updateDeviceStatus(req, res));
-router.get('/events/raw', auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), (req, res) => deviceController.getRawEvents(req, res));
+router.post('/:id/slots', auth, requireRole(...facultyRoles), (req, res) => deviceController.assignSlot(req, res));
+router.delete('/:id/slots/:slot_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.removeSlot(req, res));
+router.put('/:id/status', auth, requireRole(...facultyRoles), (req, res) => deviceController.updateDeviceStatus(req, res));
+router.get('/events/raw', auth, requireRole(...facultyRoles), (req, res) => deviceController.getRawEvents(req, res));
 
 module.exports = router;
