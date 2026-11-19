@@ -5,7 +5,12 @@
 
 const path = require('path');
 const fs = require('fs');
-const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+let PDFDocument, rgb, StandardFonts;
+try {
+  ({ PDFDocument, rgb, StandardFonts } = require('pdf-lib'));
+} catch (err) {
+  // Graceful fallback if pdf-lib is not yet installed in local environment
+}
 const courseFileModel = require('../models/courseFileModel');
 const theoryClassModel = require('../models/theoryClassModel');
 const labClassModel = require('../models/labClassModel');
