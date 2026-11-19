@@ -23,8 +23,12 @@
 #define VIDYAOS_ESP32_CONFIG_H
 
 // ─── 1. Wi-Fi & Institutional Server Configuration ──────────────────────────
-#define WIFI_SSID                   "Airtel_Ruby"
-#define WIFI_PASSWORD               "Rubyblack@567"
+#define WIFI_SSID                   "Airtel_neer_3811"
+#define WIFI_PASSWORD               "air56914"
+
+// Secondary / Fallback Wi-Fi Credentials
+#define FALLBACK_WIFI_SSID          "vivot3lite"
+#define FALLBACK_WIFI_PASS          "12345678"
 
 // Factory Fallback Wi-Fi Credentials
 #define DEFAULT_FACTORY_WIFI_SSID   WIFI_SSID
@@ -32,10 +36,9 @@
 #define NVS_WIFI_NAMESPACE          "vidya_wifi"
 
 // Base URL of the VidyaOS Node.js / Express Backend
-// Use Render HTTPS:
-#define VIDYAOS_SERVER_BASE_URL     "https://vidyaos-backend.onrender.com/api/v1/devices/esp32"
-// OR for local laptop testing (replace with your LAN IP):
-// #define VIDYAOS_SERVER_BASE_URL  "http://192.168.1.15:5000/api/v1/devices/esp32"
+// Primary: Local host IP on Wi-Fi (192.168.1.9:3000), Fallback: Render cloud
+#define VIDYAOS_SERVER_BASE_URL     "http://192.168.1.9:3000/api/v1/devices/esp32"
+#define VIDYAOS_RENDER_FALLBACK_URL "https://vidyaos-backend.onrender.com/api/v1/devices/esp32"
 
 // Unique Hardware Terminal UID & 256-Bit Shared Encryption Secret
 // Copy these exact two values from HOD Portal -> /faculty/esp32-devices/ -> config.h

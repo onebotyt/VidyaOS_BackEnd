@@ -97,13 +97,31 @@ router.post('/hod/:device_id/wifi/reset', auth, requireRole(...facultyRoles), (r
 // @desc    Queue Remote Command to ESP32 (ENROLL_STUDENT, SYNC_TEMPLATES, BUZZER_CHIME)
 router.post('/hod/command', auth, requireRole(...facultyRoles), (req, res) => deviceController.queueHodDeviceCommand(req, res));
 
+// Direct route aliases for HOD device actions
+router.post('/hod/:device_id/enroll', auth, requireRole(...facultyRoles), (req, res) => {
+  req.body.device_id = parseInt(req.params.device_id, 10);
+  req.body.command_type = 'ENROLL_STUDENT';
+  return deviceController.queueHodDeviceCommand(req, res);
+});
+
+router.post('/hod/:device_id/sync-templates', auth, requireRole(...facultyRoles), (req, res) => {
+  req.body.device_id = parseInt(req.params.device_id, 10);
+  req.body.command_type = 'SYNC_TEMPLATES';
+  return deviceController.queueHodDeviceCommand(req, res);
+});
+
 // @route   POST /api/v1/devices/hod/simulate-esp32
 // @desc    Simulate Encrypted ESP32 Enrollment or Attendance Scan with OLED Preview
 router.post('/hod/simulate-esp32', auth, requireRole(...facultyRoles), (req, res) => deviceController.simulateEsp32Action(req, res));
+router.post('/hod/simulate-biometric', auth, requireRole(...facultyRoles), (req, res) => {
+  req.body.action_type = req.body.action || req.body.action_type || 'ENROLL_TEMPLATE';
+  return deviceController.simulateEsp32Action(req, res);
+});
 
 // @route   DELETE /api/v1/devices/hod/templates/:student_id
 // @desc    Remove a student's cloud fingerprint template
 router.delete('/hod/templates/:student_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteStudentTemplate(req, res));
+router.delete('/hod/template/:student_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteStudentTemplate(req, res));
 
 // ── 3. Standard Device Administration Routes ────────────────────────────────
 

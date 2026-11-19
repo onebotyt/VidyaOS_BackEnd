@@ -813,6 +813,14 @@ class AuthController {
         parsedRollNo = parseInt(rollStr, 10);
       }
 
+      let cleanRegNo = null;
+      if (registration_no !== undefined && registration_no !== null && String(registration_no).trim() !== '') {
+        cleanRegNo = String(registration_no).trim().toUpperCase();
+        if (cleanRegNo.length > 8) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Registration Number cannot exceed 8 characters/digits' } });
+        }
+      }
+
       const cleanEmail = email.trim();
       const existingEmail = await AuthModel.findExistingUser(cleanEmail, cleanEmail);
       if (existingEmail) {
@@ -857,7 +865,7 @@ class AuthController {
         resolvedGoogleSub,
         officialEnrollmentNo: cleanEnroll,
         enrollmentNoStatus: enrollmentStatus,
-        registrationNo: (registration_no || '').trim() || null,
+        registrationNo: cleanRegNo,
         classRollNo: parsedRollNo,
         fullName: full_name,
         parentPhone: parent_phone,

@@ -202,7 +202,7 @@ function parsePagesMd(filePath) {
 
 // Function to resolve HTML file path
 function resolveHtmlPath(frontendDir, pageSource, route) {
-  const cleanSource = pageSource.replace(/[`]/g, '').trim();
+  const cleanSource = pageSource.replace(/[`]/g, '').replace(/^frontend\//, '').trim();
   const candidates = [
     path.join(frontendDir, cleanSource),
     path.join(frontendDir, cleanSource, 'index.html'),

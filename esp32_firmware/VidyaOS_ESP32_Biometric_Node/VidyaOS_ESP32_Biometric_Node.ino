@@ -78,33 +78,22 @@ void onEnrollStageUpdate(const char* stageMsg) {
   ui.showEnrollmentScreen(activeEnrollName, activeEnrollRoll, stageMsg);
 }
 
-/**
- * Posts an AES-256-GCM encrypted JSON payload to the VidyaOS backend and decrypts the response.
- * Features automatic HTTPS (WiFiClientSecure with setInsecure()) & HTTP (WiFiClient) resolution,
- * 25-second timeout for Render cold-starts, and 32KB JSON parsing buffer for template bundles.
- */
-bool postEncryptedToServer(const String& endpointPath, const String& plainJson, String& outDecryptedJson) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[HTTP] Skipped: Wi-Fi not connected");
-    return false;
-  }
-
+static bool executeSinglePost(const String& fullUrl, const String& endpointPath, const String& plainJson, String& outDecryptedJson) {
   HTTPClient http;
   WiFiClientSecure secureClient;
   WiFiClient plainClient;
-  String url = String(VIDYAOS_SERVER_BASE_URL) + endpointPath;
 
-  http.setTimeout(25000); // 25s timeout for Render cold start
+  http.setTimeout(15000); // 15s timeout
   bool began = false;
-  if (url.startsWith("https://")) {
+  if (fullUrl.startsWith("https://")) {
     secureClient.setInsecure(); // Allow HTTPS to Render without embedding CA cert
-    began = http.begin(secureClient, url);
+    began = http.begin(secureClient, fullUrl);
   } else {
-    began = http.begin(plainClient, url);
+    began = http.begin(plainClient, fullUrl);
   }
 
   if (!began) {
-    Serial.println("[HTTP] http.begin() failed for: " + url);
+    Serial.println("[HTTP] http.begin() failed for: " + fullUrl);
     return false;
   }
 
@@ -147,6 +136,35 @@ bool postEncryptedToServer(const String& endpointPath, const String& plainJson, 
   }
   outDecryptedJson = respStr;
   return true;
+}
+
+/**
+ * Posts an AES-256-GCM encrypted JSON payload to the VidyaOS backend with automatic cloud fallback.
+ */
+bool postEncryptedToServer(const String& endpointPath, const String& plainJson, String& outDecryptedJson) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[HTTP] Skipped: Wi-Fi not connected");
+    return false;
+  }
+
+  // 1. Try Primary Server Base URL
+  String primaryUrl = String(VIDYAOS_SERVER_BASE_URL) + endpointPath;
+  if (executeSinglePost(primaryUrl, endpointPath, plainJson, outDecryptedJson)) {
+    return true;
+  }
+
+  // 2. Try Fallback Cloud Base URL (Render) if configured
+#if defined(VIDYAOS_RENDER_FALLBACK_URL)
+  String fallbackUrl = String(VIDYAOS_RENDER_FALLBACK_URL) + endpointPath;
+  if (fallbackUrl != primaryUrl) {
+    Serial.println(F("[HTTP][FAILOVER] Primary server failed. Trying Render Cloud fallback..."));
+    if (executeSinglePost(fallbackUrl, endpointPath, plainJson, outDecryptedJson)) {
+      return true;
+    }
+  }
+#endif
+
+  return false;
 }
 
 /**
@@ -426,22 +444,44 @@ bool connectToNetwork(const String& ssid, const String& pass, uint32_t timeoutMs
 
 /**
  * Initializes persistent Wi-Fi storage (NVS) and attempts connection
- * to the stored default network, with automatic fallback to factory credentials.
+ * to Main Wi-Fi (Airtel_neer_3811) with instant fallback to Fallback Wi-Fi (vivot3lite).
  */
 void initWifiManager() {
   Serial.println(F("[WiFi] Initializing Wi-Fi manager..."));
   wifiPrefs.begin(NVS_WIFI_NAMESPACE, false);
+  wifiPrefs.clear(); // Wipe any stale custom NVS keys so it never connects to Airtel_Ruby!
   
-  // Always synchronize primary credentials from config.h to NVS
-  defaultWifiSsid = DEFAULT_FACTORY_WIFI_SSID;
-  defaultWifiPass = DEFAULT_FACTORY_WIFI_PASS;
+  // Store default credentials
+  defaultWifiSsid = WIFI_SSID;
+  defaultWifiPass = WIFI_PASSWORD;
   wifiPrefs.putString("def_ssid", defaultWifiSsid);
   wifiPrefs.putString("def_pass", defaultWifiPass);
 
-  WiFi.mode(WIFI_STA);
-  wifiMulti.addAP(defaultWifiSsid.c_str(), defaultWifiPass.c_str());
+  // Erase any ESP-IDF cached credentials from old networks (e.g. Airtel_Ruby)
+  WiFi.persistent(false);
+  WiFi.disconnect(true, true);
+  delay(200);
 
-  bool ok = connectToNetwork(defaultWifiSsid, defaultWifiPass, WIFI_CONNECT_TIMEOUT_MS);
+  WiFi.mode(WIFI_STA);
+  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
+#if defined(FALLBACK_WIFI_SSID)
+  wifiMulti.addAP(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASS);
+#endif
+
+  // 1. Attempt connection to Main Wi-Fi (Airtel_neer_3811)
+  Serial.printf("[WiFi] Attempting connection to Main Wi-Fi: %s...\n", WIFI_SSID);
+  ui.showBootScreen("CONNECTING WIFI", WIFI_SSID);
+  bool ok = connectToNetwork(WIFI_SSID, WIFI_PASSWORD, 8000);
+
+  // 2. If Main Wi-Fi fails or not reachable, attempt Fallback Wi-Fi (vivot3lite)
+#if defined(FALLBACK_WIFI_SSID)
+  if (!ok) {
+    Serial.printf("[WiFi][FAILOVER] Main Wi-Fi unreachable. Connecting to Fallback: %s...\n", FALLBACK_WIFI_SSID);
+    ui.showBootScreen("WIFI FALLBACK", FALLBACK_WIFI_SSID);
+    ok = connectToNetwork(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASS, 8000);
+  }
+#endif
+
   if (ok) {
     currentConnectedSsid = WiFi.SSID();
   }
@@ -740,9 +780,43 @@ void loop() {
     ui.setWifiLed(false);
   }
 
-  if (!isOnline && millis() - lastWifiReconnectMs >= 15000UL) {
+  // Multi-Network Automatic Failover Watchdog
+  if (!isOnline && millis() - lastWifiReconnectMs >= 12000UL) {
     lastWifiReconnectMs = millis();
-    WiFi.reconnect();
+    static uint8_t failCount = 0;
+    failCount++;
+    if (failCount % 2 == 1) {
+      Serial.printf("[WiFi][RECONNECT] Attempting Main Wi-Fi: %s...\n", WIFI_SSID);
+      connectToNetwork(WIFI_SSID, WIFI_PASSWORD, 8000);
+    } else {
+#if defined(FALLBACK_WIFI_SSID)
+      Serial.printf("[WiFi][RECONNECT] Attempting Fallback Wi-Fi: %s...\n", FALLBACK_WIFI_SSID);
+      connectToNetwork(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASS, 8000);
+#else
+      WiFi.reconnect();
+#endif
+    }
+  }
+
+  // Interactive USB Serial Commands (Press 'e' for enrollment, 'p' for ping)
+  if (Serial.available()) {
+    char ch = Serial.read();
+    if (ch == 'e' || ch == 'E') {
+      Serial.println(F("\n[SERIAL] >>> Manual Enrollment Triggered via USB Serial! <<<"));
+#if defined(ARDUINOJSON_VERSION_MAJOR) && (ARDUINOJSON_VERSION_MAJOR >= 7)
+      JsonDocument testDoc;
+#else
+      DynamicJsonDocument testDoc(512);
+#endif
+      testDoc["student_id"] = 1;
+      testDoc["full_name"] = "Student Enroll Test";
+      testDoc["class_roll_no"] = 1;
+      testDoc["official_enrollment_no"] = "2024IT001";
+      handleRemoteStudentEnrollment(testDoc.as<JsonObject>());
+    } else if (ch == 'p' || ch == 'P') {
+      Serial.println(F("\n[SERIAL] >>> Manual Heartbeat Ping Triggered! <<<"));
+      lastHeartbeatMs = 0;
+    }
   }
 
   // 1. Wi-Fi Status LED & Dual-Stack MQTT Maintenance

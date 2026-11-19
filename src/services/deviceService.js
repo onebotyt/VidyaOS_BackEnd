@@ -37,7 +37,7 @@ class DeviceService {
 
     const rows = await query(
       `SELECT id, device_uid, name, department_id, year, semester,
-              assigned_years, assigned_semesters, academic_year_id,
+              assigned_years, assigned_semesters,
               secret_key, secret_hash, is_active
        FROM devices
        WHERE device_uid = ?
@@ -102,7 +102,7 @@ class DeviceService {
 
     await query(
       `UPDATE devices
-       SET last_heartbeat_at = CURRENT_TIMESTAMP,
+       SET last_heartbeat = CURRENT_TIMESTAMP,
            battery_voltage = COALESCE(?, battery_voltage),
            battery_pct = COALESCE(?, battery_pct),
            is_charging = COALESCE(?, is_charging),
@@ -402,7 +402,7 @@ class DeviceService {
       effectiveSecret = device.secret_key || device.secret_hash || 'default_secret';
     }
 
-    await query(`UPDATE devices SET last_heartbeat_at = CURRENT_TIMESTAMP WHERE id = ?`, [device.id]);
+    await query(`UPDATE devices SET last_heartbeat = CURRENT_TIMESTAMP WHERE id = ?`, [device.id]);
 
     let inserted = 0;
     let duplicates = 0;
