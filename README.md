@@ -594,13 +594,14 @@ node backend/scripts/test-term-automation.js         # 52/52 (Academic session e
 
 ## 👥 Contributors & Collaboration
 
-- **Lead Architect (Dev 1)**: `@onebotyt`
-- **Contributor (Dev 2)**: `@AkashK-Repo`
-- **Contributor (Dev 3)**: `@onebotyt-mobile`
+- **Lead Architect (Dev 1)**: [@onebotyt](https://github.com/onebotyt)
+- **Contributor (Dev 2)**: [@AkashK-Repo](https://github.com/AkashK-Repo)
+- **Contributor (Dev 3)**: [@onebotyt-mobile](https://github.com/onebotyt-mobile)
+- **Contributor (Dev 4)**: [@Surendra-singh885](https://github.com/Surendra-singh885)
 
 ---
 
-## 🚀 3-Developer Git Collaboration Guide
+## 🚀 4-Developer Git Collaboration Guide
 
 To maintain database schema integrity and prevent route collisions when multiple developers work simultaneously:
 
@@ -617,6 +618,9 @@ git checkout -b dev2/<feature-name>
 
 # Developer 3
 git checkout -b dev3/<feature-name>
+
+# Developer 4
+git checkout -b dev4/<feature-name>
 ```
 
 ### 3. Database Schema Rules (Zero SQLite Syntax)
