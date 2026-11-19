@@ -596,7 +596,7 @@ node backend/scripts/test-term-automation.js         # 52/52 (Academic session e
 
 - **Lead Architect (Dev 1)**: [@onebotyt](https://github.com/onebotyt)
 - **Contributor (Dev 2)**: [@AkashK-Repo](https://github.com/AkashK-Repo)
-- **Contributor (Dev 3)**: [@onebotyt-mobile](https://github.com/onebotyt-mobile)
+- **Contributor (Dev 3)**: [@onebotyt-mobile](https://github.com/onebotyt-mobile) (Full-Stack & Mobile via Mobile Antigravity CLI)
 - **Contributor (Dev 4)**: [@Surendra-singh885](https://github.com/Surendra-singh885)
 
 ---
