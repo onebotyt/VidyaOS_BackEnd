@@ -71,8 +71,8 @@ async function main() {
     const teacherRows = await query(`SELECT id FROM teachers WHERE department_id = 4 LIMIT 1`);
     const teacherId = teacherRows[0]?.id || 1;
     const res = await query(`
-      INSERT INTO teaching_groups (department_id, teacher_id, name, subject_name, subject_code, subject_short_name, semester, year, academic_year_id)
-      VALUES (4, ?, 'Java Programming [IT506]', 'Java Programming', 'IT506', 'Java', 5, 3, 1)
+      INSERT INTO teaching_groups (department_id, teacher_id, name, subject_name, subject_code, subject_short_name, semester, year, academic_year_id, invite_code)
+      VALUES (4, ?, 'Java Programming [IT506]', 'Java Programming', 'IT506', 'Java', 5, 3, 1, 'JAVA506')
     `, [teacherId]);
     groupId = res.insertId || res.lastID;
     console.log('✓ Created Java Teaching Group ID:', groupId);

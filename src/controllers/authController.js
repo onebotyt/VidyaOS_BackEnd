@@ -144,12 +144,20 @@ class AuthController {
       try {
         result = await authService.facultyLogin(credential, req.body.password, clientInfo);
       } catch (err) {
-        if (err.code === 'ACCOUNT_ALREADY_ACTIVE' || err.code === 'PENDING_APPROVAL' || err.code === 'REGISTRATION_REJECTED') throw err;
+        if (err.code === 'ACCOUNT_ALREADY_ACTIVE' || err.code === 'PENDING_APPROVAL' || err.code === 'REGISTRATION_REJECTED' || err.code === 'ENROLLMENT_LOGIN_DISABLED') throw err;
+
+        // If the user actually exists as a faculty/admin user, their password failed!
+        // Never fall through to studentLogin in that case.
+        const isFaculty = await authService.isFacultyUser(credential);
+        if (isFaculty) {
+          throw err;
+        }
+
         try {
           result = await authService.studentLogin(credential, req.body.password, clientInfo);
         } catch (studentErr) {
           if (studentErr.code === 'ACCOUNT_ALREADY_ACTIVE' || studentErr.code === 'PENDING_APPROVAL' || studentErr.code === 'FORBIDDEN') throw studentErr;
-          throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+          throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid credentials. Please check your username/email and password.' };
         }
       }
       setAuthCookies(res, result);

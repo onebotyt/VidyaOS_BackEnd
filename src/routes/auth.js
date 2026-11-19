@@ -290,4 +290,36 @@ router.post(
   }
 );
 
+// @route   GET /api/v1/auth/branding
+// @desc    Public institution branding metadata (campus image, logo, college name)
+// @access  Public
+router.get('/branding', async (req, res) => {
+  try {
+    const { query } = require('../config/db');
+    const rows = await query(
+      `SELECT setting_key, setting_value FROM system_settings 
+       WHERE setting_key IN ('institution_name', 'institution_tagline', 'institution_logo_url', 'institution_banner_url', 'campus_location')`
+    );
+    const map = {};
+    (rows || []).forEach(r => { map[r.setting_key] = r.setting_value; });
+    return res.json({
+      success: true,
+      data: {
+        institution_name: map.institution_name || 'Government Polytechnic Nainital',
+        institution_tagline: map.institution_tagline || '',
+        institution_logo_url: map.institution_logo_url || '/images/college-logo.png',
+        institution_banner_url: map.institution_banner_url || '/images/campus-nainital.jpg',
+        campus_location: map.campus_location || 'Uttarakhand, India'
+      }
+    });
+  } catch (err) {
+    return res.json({
+      success: true,
+      data: {
+        institution_banner_url: '/images/campus-nainital.jpg'
+      }
+    });
+  }
+});
+
 module.exports = router;

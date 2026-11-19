@@ -37,11 +37,16 @@ class StorageProvider {
 class CloudinaryStorageProvider extends StorageProvider {
   constructor() {
     super();
-    const cloudinary = require('cloudinary').v2;
+    let cloudinary;
+    try {
+      cloudinary = require('cloudinary').v2;
+    } catch (e) {
+      throw new Error("Optional package 'cloudinary' is not installed.");
+    }
     cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'lnhrxgwb',
-      api_key: process.env.CLOUDINARY_API_KEY || '519762971172132',
-      api_secret: process.env.CLOUDINARY_API_SECRET || 'oxlRMKpivmWFvWTcVtciiOKP5iA',
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
       secure: true
     });
     this.cloudinary = cloudinary;
@@ -132,23 +137,31 @@ class LocalDiskStorageProvider extends StorageProvider {
  */
 class StorageService {
   constructor() {
-    this.providerName = (process.env.STORAGE_PROVIDER || 'cloudinary').toLowerCase();
+    const isProduction = process.env.NODE_ENV === 'production';
+    const reqProvider = (process.env.STORAGE_PROVIDER || (isProduction ? 'cloudinary' : 'local')).toLowerCase();
     
-    // Auto-detect: if cloudinary credentials are missing or set to local, fallback to local
-    const hasCloudinary = Boolean(
-      (process.env.CLOUDINARY_API_KEY || '519762971172132') &&
-      (process.env.CLOUDINARY_API_SECRET || 'oxlRMKpivmWFvWTcVtciiOKP5iA') &&
-      (process.env.CLOUDINARY_CLOUD_NAME || 'lnhrxgwb')
+    // Cloudinary is only activated when explicitly requested AND cloud credentials are provided
+    const hasCloudinaryEnv = Boolean(
+      process.env.CLOUDINARY_API_KEY &&
+      process.env.CLOUDINARY_API_SECRET &&
+      process.env.CLOUDINARY_CLOUD_NAME
     );
 
-    if (this.providerName === 'cloudinary' && hasCloudinary) {
-      this.provider = new CloudinaryStorageProvider();
-      logger.info('[StorageService] Initialized with Cloudinary Provider');
-    } else {
-      this.provider = new LocalDiskStorageProvider();
-      this.providerName = 'local';
-      logger.info('[StorageService] Initialized with Local Disk Provider');
+    if (reqProvider === 'cloudinary' && hasCloudinaryEnv) {
+      try {
+        this.provider = new CloudinaryStorageProvider();
+        this.providerName = 'cloudinary';
+        logger.info('[StorageService] Initialized with Cloudinary Provider');
+        return;
+      } catch (err) {
+        logger.warn('[StorageService] Cloudinary init failed, falling back to Local Disk Provider:', { error: err.message });
+      }
     }
+
+    // Default to Local Disk Provider (Local testing / offline development)
+    this.provider = new LocalDiskStorageProvider();
+    this.providerName = 'local';
+    logger.info('[StorageService] Initialized with Local Disk Provider (Local Storage)');
   }
 
   /**

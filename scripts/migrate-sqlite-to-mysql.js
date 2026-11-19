@@ -3,7 +3,7 @@ const { DatabaseSync } = require('node:sqlite');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const { query, withTransaction } = require('../src/config/db');
 
-const sqlitePath = 'E:/uiap/Attendance-System-Simplified/backend/college_attendance.sqlite';
+const sqlitePath = process.env.SQLITE_FILE || path.resolve(__dirname, '../college_attendance.sqlite');
 const sqliteDb = new DatabaseSync(sqlitePath);
 
 async function migrate() {

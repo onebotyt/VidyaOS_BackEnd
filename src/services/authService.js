@@ -24,6 +24,8 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+const GENERIC_AUTH_ERROR_MSG = 'Invalid credentials. Please check your username/email and password.';
+
 const { normalizePhone } = require('../utils/formatters');
 
 /**
@@ -335,7 +337,7 @@ class AuthService {
           if (tableErr.status) throw tableErr;
         }
       }
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
     }
     const user = users[0];
 
@@ -350,14 +352,14 @@ class AuthService {
     const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
     const userRoles = roles.map(r => r.role);
     if (!userRoles.includes('TEACHER') && !userRoles.includes('SYSTEM_ADMIN')) {
-      throw { status: 403, code: 'FORBIDDEN', message: 'User does not have faculty privileges' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
     }
 
     // First-time login with temporary password
     if (user.status === 'PROVISIONED' || user.must_change_password) {
       const matchTemp = user.temp_password_hash ? await bcrypt.compare(password, user.temp_password_hash) : false;
       if (!matchTemp) {
-        throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+        throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
       }
       // Return activation token — frontend shows "Set permanent password + Connect Google" card
       const activationToken = generateActivationToken(user);
@@ -385,7 +387,7 @@ class AuthService {
       isMatch = (await bcrypt.compare('Password@123', user.password_hash)) || (await bcrypt.compare('Admin@123', user.password_hash));
     }
     if (!isMatch) {
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
     }
 
     // Enforce single active session
@@ -543,7 +545,7 @@ class AuthService {
     }
 
     if (!users || users.length === 0) {
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
     }
     const user = users[0];
 
@@ -555,6 +557,12 @@ class AuthService {
     }
     if (user.status === 'SUSPENDED') {
       throw { status: 403, code: 'FORBIDDEN', message: 'Account suspended. Contact college office.' };
+    }
+
+    const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
+    const userRoles = roles.map(r => r.role);
+    if (!userRoles.includes('STUDENT')) {
+      throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
     }
 
     const student = (await query(
@@ -570,7 +578,7 @@ class AuthService {
     // Provisioned: use temp password
     if (user.status === 'PROVISIONED' || user.must_change_password) {
       const matchTemp = user.temp_password_hash ? await bcrypt.compare(password, user.temp_password_hash) : false;
-      if (!matchTemp) throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+      if (!matchTemp) throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
 
       const activationToken = generateActivationToken(user);
       return {
@@ -592,13 +600,12 @@ class AuthService {
     if (!isMatch && (trimmedPass === 'Password@123' || trimmedPass === 'Admin@123' || trimmedPass === 'password123')) {
       isMatch = (await bcrypt.compare('Password@123', user.password_hash)) || (await bcrypt.compare('Admin@123', user.password_hash));
     }
-    if (!isMatch) throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+    if (!isMatch) throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
 
     // Enforce single active session
     await enforceSingleActiveSession(user.id, clientInfo);
 
-    const roles = await query(`SELECT role FROM user_roles WHERE user_id = ?`, [user.id]);
-    user.roles = roles.map(r => r.role);
+    user.roles = userRoles;
     user.full_name = student?.full_name || user.username;
 
     const { refreshToken, sessionId } = await persistSession(user.id, clientInfo);
@@ -1136,6 +1143,26 @@ class AuthService {
 
   async verifyGoogleToken(idToken) {
     return verifyGoogleToken(idToken);
+  }
+
+  async isFacultyUser(credential) {
+    try {
+      const trimmed = (credential || '').trim().toLowerCase();
+      if (!trimmed) return false;
+      const rows = await query(
+        `SELECT ur.role 
+         FROM users u 
+         LEFT JOIN teachers t ON t.user_id = u.id
+         JOIN user_roles ur ON ur.user_id = u.id
+         WHERE LOWER(u.email) = ? OR u.phone = ? OR t.phone = ? OR (LOWER(?) = 'admin' AND u.username = 'admin')`,
+        [trimmed, trimmed, trimmed, trimmed]
+      );
+      if (!rows || rows.length === 0) return false;
+      const roles = rows.map(r => r.role);
+      return roles.includes('TEACHER') || roles.includes('SYSTEM_ADMIN') || roles.includes('HOD') || roles.includes('ADMIN');
+    } catch {
+      return false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────
