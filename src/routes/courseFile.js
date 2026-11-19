@@ -22,6 +22,12 @@ router.use(requireRole('TEACHER', 'FACULTY', 'HOD', 'DEPT_HEAD', 'SYSTEM_ADMIN')
 // @handler CourseFileController.getDefinitions() -> CourseFileModel.getItemsDefinition()
 router.get('/definitions', (req, res) => courseFileController.getDefinitions(req, res));
 
+// @route   GET /api/v1/course-files/merge-export
+// @desc    Merge all uploaded documents into one consolidated institutional PDF dossier
+// @access  Protected (Faculty/HOD/Admin)
+// @handler CourseFileController.mergeExport()
+router.get('/merge-export', (req, res) => courseFileController.mergeExport(req, res));
+
 // @route   GET /api/v1/course-files
 // @desc    Fetch or auto-provision course file dossier for a teaching group
 // @access  Protected (All Authenticated Users)

@@ -23,8 +23,8 @@
 #define VIDYAOS_ESP32_CONFIG_H
 
 // ─── 1. Wi-Fi & Institutional Server Configuration ──────────────────────────
-#define WIFI_SSID                   "YOUR_WIFI_NAME"
-#define WIFI_PASSWORD               "YOUR_WIFI_PASSWORD"
+#define WIFI_SSID                   "Airtel_Ruby"
+#define WIFI_PASSWORD               "Rubyblack@567"
 
 // Factory Fallback Wi-Fi Credentials
 #define DEFAULT_FACTORY_WIFI_SSID   WIFI_SSID

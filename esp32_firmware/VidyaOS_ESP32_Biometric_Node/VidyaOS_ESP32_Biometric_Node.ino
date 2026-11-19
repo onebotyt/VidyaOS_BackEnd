@@ -391,16 +391,19 @@ bool connectToNetwork(const String& ssid, const String& pass, uint32_t timeoutMs
     return false;
   }
 
-  WiFi.disconnect();
-  delay(200);
+  WiFi.disconnect(true, true);
+  delay(300);
   WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.begin(ssid.c_str(), pass.c_str());
 
   const uint32_t startedAt = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - startedAt < timeoutMs)) {
     ui.setWifiLed(!digitalRead(LED_WIFI_PIN));
-    delay(200);
+    delay(300);
+    Serial.print(F("."));
   }
+  Serial.println();
 
   const bool connected = (WiFi.status() == WL_CONNECTED);
   ui.setWifiLed(connected);
@@ -427,20 +430,18 @@ bool connectToNetwork(const String& ssid, const String& pass, uint32_t timeoutMs
 void initWifiManager() {
   Serial.println(F("[WiFi] Initializing Wi-Fi manager..."));
   wifiPrefs.begin(NVS_WIFI_NAMESPACE, false);
-  defaultWifiSsid = wifiPrefs.getString("def_ssid", DEFAULT_FACTORY_WIFI_SSID);
-  defaultWifiPass = wifiPrefs.getString("def_pass", DEFAULT_FACTORY_WIFI_PASS);
+  
+  // Always synchronize primary credentials from config.h to NVS
+  defaultWifiSsid = DEFAULT_FACTORY_WIFI_SSID;
+  defaultWifiPass = DEFAULT_FACTORY_WIFI_PASS;
+  wifiPrefs.putString("def_ssid", defaultWifiSsid);
+  wifiPrefs.putString("def_pass", defaultWifiPass);
 
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(defaultWifiSsid.c_str(), defaultWifiPass.c_str());
-  if (defaultWifiSsid != DEFAULT_FACTORY_WIFI_SSID) {
-    wifiMulti.addAP(DEFAULT_FACTORY_WIFI_SSID, DEFAULT_FACTORY_WIFI_PASS);
-  }
 
   bool ok = connectToNetwork(defaultWifiSsid, defaultWifiPass, WIFI_CONNECT_TIMEOUT_MS);
-  if (!ok && defaultWifiSsid != DEFAULT_FACTORY_WIFI_SSID) {
-    ok = connectToNetwork(DEFAULT_FACTORY_WIFI_SSID, DEFAULT_FACTORY_WIFI_PASS, WIFI_FALLBACK_TIMEOUT_MS);
-    if (ok) currentConnectedSsid = DEFAULT_FACTORY_WIFI_SSID;
-  } else if (ok) {
+  if (ok) {
     currentConnectedSsid = WiFi.SSID();
   }
 }
