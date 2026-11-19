@@ -312,6 +312,21 @@ router.get('/trash/students', requireHODOrClassTeacher(), HodController.getTrash
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
 router.post('/trash/students/:id/restore', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.restoreStudent);
 
+// @route   POST /api/v1/hod/trash/students/bulk-restore
+// @desc    Bulk restore soft-deleted students from Trash
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.post('/trash/students/bulk-restore', requireHODOrClassTeacher(), HodController.bulkRestoreStudents);
+
+// @route   POST /api/v1/hod/trash/students/bulk-delete
+// @desc    Bulk permanently delete students from Trash
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.post('/trash/students/bulk-delete', requireHODOrClassTeacher(), HodController.bulkDeleteStudents);
+
+// @route   DELETE /api/v1/hod/trash/students/:id/permanent
+// @desc    Permanently delete a single student from Trash
+// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+router.delete('/trash/students/:id/permanent', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.permanentDeleteStudent);
+
 // @route   POST /api/v1/hod/students/:id/reset-password
 // @desc    Reset student account password
 // @access  Protected (HOD, SYSTEM_ADMIN)

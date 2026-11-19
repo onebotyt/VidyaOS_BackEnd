@@ -903,12 +903,69 @@ class HodController {
    */
   static async restoreStudent(req, res) {
     try {
-      const deptId = req.hod_department_id;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
       const result = await HodModel.restoreStudent(req.params.id, deptId, req.user?.id);
       if (!result) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found in Trash or unauthorized' } });
       }
       res.json({ success: true, message: result.message });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Bulk restore soft-deleted students from Trash
+   * @route POST /api/v1/hod/trash/students/bulk-restore
+   */
+  static async bulkRestoreStudents(req, res) {
+    try {
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
+      const ids = req.body.ids || req.body.student_ids || [];
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Array of student IDs required' } });
+      }
+      const result = await HodModel.bulkRestoreStudents(ids, deptId, req.user?.id);
+      res.json({ success: true, message: `Successfully restored ${result.restored_count} student(s)!`, restored_count: result.restored_count });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Bulk permanent delete/purge students from Trash
+   * @route POST /api/v1/hod/trash/students/bulk-delete
+   */
+  static async bulkDeleteStudents(req, res) {
+    try {
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
+      const ids = req.body.ids || req.body.student_ids || [];
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Array of student IDs required' } });
+      }
+      const result = await HodModel.permanentDeleteStudents(ids, deptId, req.user?.id);
+      res.json({ success: true, message: `Permanently deleted ${result.deleted_count} student(s) from Trash.`, deleted_count: result.deleted_count });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * Single permanent delete/purge student from Trash
+   * @route DELETE /api/v1/hod/trash/students/:id/permanent
+   */
+  static async permanentDeleteStudent(req, res) {
+    try {
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
+      const result = await HodModel.permanentDeleteStudents([req.params.id], deptId, req.user?.id);
+      if (!result.deleted_count) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found in Trash or unauthorized' } });
+      }
+      res.json({ success: true, message: 'Student permanently deleted from Trash.' });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }

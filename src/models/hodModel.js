@@ -1556,6 +1556,78 @@ class HodModel {
   }
 
   /**
+   * Bulk restore soft-deleted students from Trash
+   * @param {Array<number>} studentIds Array of student IDs
+   * @param {number} deptId Department ID
+   * @param {number} userId Acting user ID
+   * @returns {Promise<{restored_count: number}>}
+   */
+  static async bulkRestoreStudents(studentIds, deptId, userId = 1) {
+    if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
+      return { restored_count: 0 };
+    }
+
+    let count = 0;
+    for (const sid of studentIds) {
+      const res = await HodModel.restoreStudent(sid, deptId, userId);
+      if (res && res.success) count++;
+    }
+    return { restored_count: count };
+  }
+
+  /**
+   * Permanently delete/purge students from Trash Bin (irreversible)
+   * @param {Array<number>} studentIds Array of student IDs
+   * @param {number} deptId Department ID
+   * @param {number} userId Acting user ID
+   * @returns {Promise<{deleted_count: number}>}
+   */
+  static async permanentDeleteStudents(studentIds, deptId, userId = 1) {
+    if (!studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
+      return { deleted_count: 0 };
+    }
+
+    let count = 0;
+    for (const sid of studentIds) {
+      const sRows = await query(
+        `SELECT s.id, s.user_id, s.full_name FROM students s
+         LEFT JOIN enrollments e ON e.student_id = s.id
+         WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NOT NULL`,
+        deptId ? [sid, deptId] : [sid]
+      );
+      if (!sRows.length) continue;
+      const uid = sRows[0].user_id;
+
+      // Purge all relations
+      await query(`DELETE FROM register_attendance WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM attendance_session_students WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM student_self_attendance WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM assessment_submissions WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM enrollments WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM student_department_enrollments WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM student_documents WHERE student_id = ?`, [sid]).catch(() => { });
+      await query(`DELETE FROM students WHERE id = ?`, [sid]).catch(() => { });
+      if (uid) {
+        await query(`DELETE FROM user_roles WHERE user_id = ?`, [uid]).catch(() => { });
+        await query(`DELETE FROM user_sessions WHERE user_id = ?`, [uid]).catch(() => { });
+        await query(`DELETE FROM users WHERE id = ?`, [uid]).catch(() => { });
+      }
+
+      try {
+        await query(
+          `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+           VALUES (?, 'STUDENT_PERMANENTLY_PURGED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+          [userId || 1, String(sid), JSON.stringify({ name: sRows[0].full_name })]
+        );
+      } catch (_) { }
+
+      count++;
+    }
+
+    return { deleted_count: count };
+  }
+
+  /**
    * Transfer student to another institution/branch.
    * Student data is NEVER deleted; status is set to TRANSFERRED and account suspended.
    * Academic records, attendance, and documents remain permanently accessible.
