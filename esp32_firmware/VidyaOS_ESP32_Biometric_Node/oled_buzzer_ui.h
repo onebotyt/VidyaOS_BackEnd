@@ -548,6 +548,67 @@ public:
 
     display.display();
   }
+
+  /**
+   * Wi-Fi Spectrum Scanning Screen with real-time radar sweep animation
+   */
+  void showWifiScanningScreen(int step = 0) {
+    if (!displayReady) return;
+    display.clearDisplay();
+
+    // Top banner
+    display.fillRect(0, 0, 128, 13, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(10, 3);
+    display.print("WI-FI SCANNER 2.4G");
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(6, 18);
+    display.print("Scanning Airwaves...");
+
+    // Animated radar sweep progress bar
+    int barWidth = ((step % 6) + 1) * 19;
+    if (barWidth > 116) barWidth = 116;
+    display.drawRoundRect(4, 32, 120, 12, 2, SSD1306_WHITE);
+    display.fillRect(6, 34, barWidth, 8, SSD1306_WHITE);
+
+    display.setCursor(6, 49);
+    display.print("Detecting Ch 1-13 APs");
+
+    display.display();
+  }
+
+  /**
+   * Wi-Fi Scan Complete Summary Screen
+   */
+  void showWifiScanComplete(int count) {
+    if (!displayReady) return;
+    display.clearDisplay();
+
+    display.fillRect(0, 0, 128, 13, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(18, 3);
+    display.print("SCAN COMPLETE");
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(6, 20);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Discovered: %d APs", count);
+    display.print(buf);
+
+    display.setCursor(6, 34);
+    display.print("Reporting to Portal...");
+
+    display.drawRoundRect(4, 47, 120, 15, 2, SSD1306_WHITE);
+    display.setCursor(8, 51);
+    display.print("Airwaves Synced OK");
+
+    display.display();
+  }
 };
 
 #endif // VIDYAOS_OLED_BUZZER_UI_H

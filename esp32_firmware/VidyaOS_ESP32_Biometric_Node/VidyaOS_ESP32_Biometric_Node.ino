@@ -491,9 +491,23 @@ void initWifiManager() {
  * Scans nearby Wi-Fi networks in real-time and transmits the report encrypted to the server.
  */
 void scanNearbyWifiNetworksAndReport() {
+  Serial.println(F("[WiFi] Scanning 2.4GHz Wi-Fi channels (1-13)..."));
   ui.setWifiLed(true);
+  
+  // Show animated scanning screen on 0.96" OLED
+  ui.showWifiScanningScreen(1);
+  delay(150);
+  ui.showWifiScanningScreen(2);
+  delay(150);
+
   int n = WiFi.scanNetworks();
   if (n < 0) n = 0;
+
+  Serial.printf("[WiFi] Scan complete. Found %d access points.\n", n);
+  ui.showWifiScanningScreen(5);
+  delay(200);
+  ui.showWifiScanComplete(n);
+  delay(1000);
 
   String reportJson = "{\"networks\":[";
   for (int i = 0; i < n; i++) {

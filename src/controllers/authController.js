@@ -213,7 +213,7 @@ class AuthController {
       frontendOrigin = req.get('origin');
     }
     if (!frontendOrigin && req.get('referer')) {
-      try { frontendOrigin = new URL(req.get('referer')).origin; } catch (_) {}
+      try { frontendOrigin = new URL(req.get('referer')).origin; } catch (_) { }
     }
     if (!frontendOrigin) {
       frontendOrigin = process.env.FRONTEND_URL || (req.get('host') && req.get('host').includes('onrender.com') ? 'https://vidyaos-pink.vercel.app' : '');
@@ -249,7 +249,7 @@ class AuthController {
       try {
         stateParsed = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
       } catch {
-        try { stateParsed = JSON.parse(Buffer.from(state, 'base64').toString('utf8')); } catch {}
+        try { stateParsed = JSON.parse(Buffer.from(state, 'base64').toString('utf8')); } catch { }
       }
     }
 
@@ -493,7 +493,7 @@ class AuthController {
             userId = decoded.user_id;
             sessionId = sessionId || decoded.session_id;
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       await authService.logout({ refreshToken, sessionId, userId });
@@ -698,7 +698,7 @@ class AuthController {
         data: {
           is_open: isOpen,
           faculty_exists: true,
-          reason: isOpen 
+          reason: isOpen
             ? `Registration is open for ${targetDept.name} Semester ${semNum}. Applications will be reviewed by Department Faculty.`
             : `Registration is closed for ${targetDept.name} Semester ${semNum}. Department faculty has not opened student registration for this cohort.`
         }
@@ -849,7 +849,7 @@ class AuthController {
           if (gPayload && gPayload.sub) {
             resolvedGoogleSub = gPayload.sub;
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       const effPassword = (password && String(password).trim()) ? String(password).trim() : (resolvedGoogleSub ? crypto.randomBytes(16).toString('hex') + '!Aa1' : null);
