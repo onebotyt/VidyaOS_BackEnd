@@ -205,15 +205,17 @@ function requireHOD() {
       }
 
       // 2. User identified as HOD in req.user passes
-      if (req.user?.is_hod) {
-        req.hod_department_id = req.user.hod_department_id || req.hod_department_id || req.user.department_id;
-        req.hod_department_name = req.user.hod_department_name || req.hod_department_name;
+      if (req.user?.is_hod || req.is_hod) {
+        req.hod_department_id = req.user?.hod_department_id || req.hod_department_id || req.user?.department_id;
+        req.hod_department_name = req.user?.hod_department_name || req.hod_department_name;
+        req.is_hod = true;
         return next();
       }
 
       // 3. User with explicit HOD role passes
       if (req.user?.roles?.includes('HOD') || req.user?.roles?.includes('DEPT_HEAD')) {
         req.is_hod = true;
+        if (req.user) req.user.is_hod = true;
         req.hod_department_id = req.hod_department_id || req.user?.department_id;
         return next();
       }
@@ -225,17 +227,18 @@ function requireHOD() {
             `SELECT ta.department_id, d.name as department_name
              FROM teacher_assignments ta
              JOIN departments d ON ta.department_id = d.id
-             WHERE ta.teacher_id = ?
+             WHERE (ta.teacher_id = ? OR ta.teacher_id IN (SELECT id FROM teachers WHERE user_id = ?))
                AND ta.assignment_type = 'HOD'
                AND ta.is_active = 1
              LIMIT 1`,
-            [req.user.teacher_id]
+            [req.user.teacher_id, req.user.id]
           );
 
           if (hodAssignment && hodAssignment.length > 0) {
             req.hod_department_id = hodAssignment[0].department_id;
             req.hod_department_name = hodAssignment[0].department_name;
             req.is_hod = true;
+            if (req.user) req.user.is_hod = true;
             return next();
           }
         }
@@ -245,12 +248,13 @@ function requireHOD() {
            FROM departments d
            WHERE (d.hod_user_id = ? OR d.hod_user_id = ?) AND d.is_active = 1
            LIMIT 1`,
-          [req.user.id, req.user.user_id || req.user.id]
+          [req.user.id, req.user.teacher_id || 0]
         );
         if (deptHod && deptHod.length > 0) {
           req.hod_department_id = deptHod[0].department_id;
           req.hod_department_name = deptHod[0].department_name;
           req.is_hod = true;
+          if (req.user) req.user.is_hod = true;
           return next();
         }
       }

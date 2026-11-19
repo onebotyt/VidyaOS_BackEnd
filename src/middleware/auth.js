@@ -166,24 +166,27 @@ async function auth(req, res, next) {
 
     // Resolve HOD status
     let hodDept = null;
-    if (user.teacher_id) {
-      const hodAssignments = await query(
-        `SELECT ta.department_id, d.name as department_name, d.code as department_code
-         FROM teacher_assignments ta
-         JOIN departments d ON ta.department_id = d.id
-         WHERE ta.teacher_id = ? AND ta.assignment_type = 'HOD' AND ta.is_active = 1
-         LIMIT 1`,
-        [user.teacher_id]
-      );
-      if (hodAssignments.length > 0) {
-        hodDept = hodAssignments[0];
+    if (user.teacher_id || user.id) {
+      if (user.teacher_id) {
+        const hodAssignments = await query(
+          `SELECT ta.department_id, d.name as department_name, d.code as department_code
+           FROM teacher_assignments ta
+           JOIN departments d ON ta.department_id = d.id
+           WHERE (ta.teacher_id = ? OR ta.teacher_id IN (SELECT id FROM teachers WHERE user_id = ?))
+             AND ta.assignment_type = 'HOD' AND ta.is_active = 1
+           LIMIT 1`,
+          [user.teacher_id, user.id]
+        );
+        if (hodAssignments.length > 0) {
+          hodDept = hodAssignments[0];
+        }
       }
     }
     if (!hodDept) {
       const deptHods = await query(
         `SELECT id as department_id, name as department_name, code as department_code
-         FROM departments WHERE hod_user_id = ? AND is_active = 1 LIMIT 1`,
-        [user.id]
+         FROM departments WHERE (hod_user_id = ? OR hod_user_id = ?) AND is_active = 1 LIMIT 1`,
+        [user.id, user.teacher_id || 0]
       );
       if (deptHods.length > 0) {
         hodDept = deptHods[0];
@@ -195,6 +198,9 @@ async function auth(req, res, next) {
       user.hod_department_name = hodDept.department_name;
       user.hod_department_code = hodDept.department_code;
       if (!user.department_id) user.department_id = hodDept.department_id;
+      if (!user.roles.includes('HOD')) {
+        user.roles.push('HOD');
+      }
     } else {
       user.is_hod = false;
     }

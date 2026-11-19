@@ -291,6 +291,26 @@ const uploadsDir = process.env.UPLOADS_DIR
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+// Robust fallback for ephemeral branding assets (Render container restart safety)
+app.get(['/uploads/branding/:filename', '/uploads/branding/*'], (req, res, next) => {
+  const filename = req.params.filename || path.basename(req.path);
+  const filePath = path.join(uploadsDir, 'branding', filename);
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    return res.sendFile(filePath);
+  }
+  const fallbackLogo = path.join(frontendBase, 'images/collegelogo.jpeg');
+  if (fs.existsSync(fallbackLogo)) {
+    res.setHeader('Content-Type', 'image/jpeg');
+    return res.sendFile(fallbackLogo);
+  }
+  const fallbackSvg = path.join(frontendBase, 'images/college-logo.svg');
+  if (fs.existsSync(fallbackSvg)) {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    return res.sendFile(fallbackSvg);
+  }
+  res.redirect('/images/collegelogo.jpeg');
+});
+
 app.use('/uploads', (req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox");
@@ -337,14 +357,33 @@ app.get(['/api/v1/settings', '/api/v1/settings/institution', '/api/v1/auth/insti
     `);
     const map = {};
     (rows || []).forEach(r => { map[r.setting_key] = r.setting_value; });
+
+    let logoUrl = map.institution_logo_url || '/images/collegelogo.jpeg';
+    if (logoUrl.startsWith('/uploads/')) {
+      const cleanRel = logoUrl.replace(/^\/+/, '');
+      const localPath = path.resolve(__dirname, cleanRel);
+      if (!fs.existsSync(localPath)) {
+        logoUrl = '/images/collegelogo.jpeg';
+      }
+    }
+
+    let bannerUrl = map.institution_banner_url || '/images/campus-nainital.jpg';
+    if (bannerUrl.startsWith('/uploads/')) {
+      const cleanRel = bannerUrl.replace(/^\/+/, '');
+      const localPath = path.resolve(__dirname, cleanRel);
+      if (!fs.existsSync(localPath)) {
+        bannerUrl = '/images/campus-nainital.jpg';
+      }
+    }
+
     res.json({
       success: true,
       data: {
         institution_name: map.institution_name || 'Government Polytechnic Nainital',
         institution_code: map.institution_code || 'GP-UBTER-101',
         institution_tagline: map.institution_tagline || 'Uttarakhand | Completely Adhered to NBA Guidelines',
-        institution_logo_url: map.institution_logo_url || '/images/college-logo.svg',
-        institution_banner_url: map.institution_banner_url || '/images/campus-nainital.jpg',
+        institution_logo_url: logoUrl,
+        institution_banner_url: bannerUrl,
         institution_affiliation: map.institution_affiliation || 'Uttarakhand Board of Technical Education, Roorkee (UBTER)',
         campus_location: map.campus_location || 'Uttarakhand, India'
       }

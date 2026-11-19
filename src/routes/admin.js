@@ -243,7 +243,9 @@ router.post('/branding/upload', uploadBranding.single('file'), async (req, res) 
     if (!req.file) {
       return res.status(400).json({ success: false, error: { message: 'No image file uploaded' } });
     }
-    const fileUrl = `/uploads/branding/${req.file.filename}`;
+    const storageService = require('../services/storageService');
+    const uploadRes = await storageService.upload(req.file, { subfolder: 'branding' });
+    const fileUrl = uploadRes.url || `/uploads/branding/${req.file.filename}`;
     const type = req.body.type || 'logo';
     const key = type === 'banner' ? 'institution_banner_url' : 'institution_logo_url';
 
@@ -256,7 +258,8 @@ router.post('/branding/upload', uploadBranding.single('file'), async (req, res) 
       data: {
         url: fileUrl,
         key: key,
-        filename: req.file.filename
+        filename: req.file.filename,
+        provider: uploadRes.provider || 'local'
       }
     });
   } catch (err) {

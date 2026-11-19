@@ -425,7 +425,26 @@ class AdminModel {
         `UPDATE teachers SET department_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         [targetDeptId, teacherId]
       );
+
+      // Ensure 'HOD' role exists in user_roles
+      const [existingRoles] = await conn.execute(
+        `SELECT role FROM user_roles WHERE user_id = ? AND role = 'HOD'`,
+        [userId]
+      );
+      if (!existingRoles || existingRoles.length === 0) {
+        await conn.execute(
+          `INSERT INTO user_roles (user_id, role) VALUES (?, 'HOD')`,
+          [userId]
+        );
+      }
     });
+
+    try {
+      const auth = require('../middleware/auth');
+      if (auth && typeof auth.invalidateUserAuthCache === 'function') {
+        auth.invalidateUserAuthCache(userId);
+      }
+    } catch (_) {}
   }
 
   /**
@@ -495,7 +514,27 @@ class AdminModel {
         `UPDATE departments SET hod_user_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE hod_user_id = ?`,
         [userId]
       );
+
+      // Remove 'HOD' role if user has no remaining active HOD departments
+      const [otherDepts] = await conn.execute(
+        `SELECT id FROM departments WHERE hod_user_id = ? AND is_active = 1`,
+        [userId]
+      );
+      if (!otherDepts || otherDepts.length === 0) {
+        await conn.execute(
+          `DELETE FROM user_roles WHERE user_id = ? AND role = 'HOD'`,
+          [userId]
+        );
+      }
     });
+
+    try {
+      const auth = require('../middleware/auth');
+      if (auth && typeof auth.invalidateUserAuthCache === 'function') {
+        auth.invalidateUserAuthCache(userId);
+      }
+    } catch (_) {}
+
     return true;
   }
 

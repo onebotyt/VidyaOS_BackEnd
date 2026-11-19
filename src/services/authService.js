@@ -216,13 +216,28 @@ async function buildUserPayload(user) {
         `SELECT ta.id, ta.department_id, d.name as department_name
          FROM teacher_assignments ta
          JOIN departments d ON ta.department_id = d.id
-         WHERE ta.teacher_id = ? AND ta.assignment_type = 'HOD' AND ta.is_active = 1`,
-        [teachers[0].teacher_id]
+         WHERE (ta.teacher_id = ? OR ta.teacher_id IN (SELECT id FROM teachers WHERE user_id = ?))
+           AND ta.assignment_type = 'HOD' AND ta.is_active = 1`,
+        [teachers[0].teacher_id, user.id]
       );
       extra.is_hod = hodAssignments.length > 0;
       if (extra.is_hod) {
         extra.hod_department_id = hodAssignments[0].department_id;
         extra.hod_department_name = hodAssignments[0].department_name;
+      } else {
+        const deptHods = await query(
+          `SELECT d.id as department_id, d.name as department_name
+           FROM departments d WHERE (d.hod_user_id = ? OR d.hod_user_id = ?) AND d.is_active = 1 LIMIT 1`,
+          [user.id, teachers[0].teacher_id || 0]
+        );
+        if (deptHods.length > 0) {
+          extra.is_hod = true;
+          extra.hod_department_id = deptHods[0].department_id;
+          extra.hod_department_name = deptHods[0].department_name;
+        }
+      }
+      if (extra.is_hod && Array.isArray(user.roles) && !user.roles.includes('HOD')) {
+        user.roles.push('HOD');
       }
 
       // Department Faculty: All teachers in the department can manage and assist students
@@ -388,6 +403,9 @@ class AuthService {
       if (!userRoles.includes('ADMIN')) userRoles.push('ADMIN');
     }
     const isHod = Boolean(payload.is_hod);
+    if (isHod && !userRoles.includes('HOD')) {
+      userRoles.push('HOD');
+    }
     let primaryRole = 'TEACHER';
     if (isAdmin) {
       primaryRole = 'SYSTEM_ADMIN';
@@ -451,6 +469,9 @@ class AuthService {
     const payload = await buildUserPayload(user);
     const googleLinked = !!(await query(`SELECT google_sub FROM users WHERE id = ? AND google_sub IS NOT NULL`, [user.id]))[0];
     const isHod = Boolean(payload.is_hod);
+    if (isHod && !userRoles.includes('HOD')) {
+      userRoles.push('HOD');
+    }
     let primaryRole = 'TEACHER';
     if (isAdmin) {
       primaryRole = 'SYSTEM_ADMIN';

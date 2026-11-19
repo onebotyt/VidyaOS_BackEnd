@@ -579,9 +579,10 @@ class AdminController {
       settingsObj.default_attendance_threshold_percent = settingsObj.attendance_threshold;
     }
 
-    // Convert any Base64 Data URL images (e.g. logo or banner) into saved files on disk to prevent database bloat and column overflow
+    // Convert any Base64 Data URL images (e.g. logo or banner) into saved files or cloud storage
     const fs = require('fs');
     const path = require('path');
+    const storageService = require('../services/storageService');
     for (const [key, val] of Object.entries(settingsObj)) {
       if (typeof val === 'string' && val.startsWith('data:image/')) {
         try {
@@ -594,11 +595,23 @@ class AdminController {
             const uploadsDir = path.resolve(__dirname, '../../uploads/branding');
             if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
             const filename = `${key}_${Date.now()}.${ext}`;
-            fs.writeFileSync(path.join(uploadsDir, filename), buffer);
-            settingsObj[key] = `/uploads/branding/${filename}`;
+            const filePath = path.join(uploadsDir, filename);
+            fs.writeFileSync(filePath, buffer);
+
+            try {
+              const uploadRes = await storageService.upload({
+                path: filePath,
+                filename,
+                mimetype: `image/${ext}`
+              }, { subfolder: 'branding' });
+              settingsObj[key] = uploadRes.url || `/uploads/branding/${filename}`;
+            } catch (uploadErr) {
+              logger.warn(`Storage upload warning for ${key}, using local path:`, uploadErr.message);
+              settingsObj[key] = `/uploads/branding/${filename}`;
+            }
           }
         } catch (e) {
-          logger.warn(`Failed to write base64 image for ${key}:`, e.message);
+          logger.warn(`Failed to process base64 image for ${key}:`, e.message);
         }
       }
     }
