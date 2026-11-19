@@ -305,6 +305,28 @@ async function ensureCompatibilityViews() {
         INDEX idx_tt_dept (department_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // 5. Ensure student_documents table exists for archived student records
+    await query(`
+      CREATE TABLE IF NOT EXISTS student_documents (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        student_id INT NOT NULL,
+        department_id INT NULL,
+        title VARCHAR(255) NOT NULL,
+        document_type VARCHAR(100) NOT NULL DEFAULT 'ACADEMIC_RECORD',
+        file_path VARCHAR(500) NOT NULL,
+        file_name VARCHAR(255) NULL,
+        file_size INT NULL,
+        mime_type VARCHAR(100) NULL,
+        uploaded_by INT NULL,
+        uploader_name VARCHAR(255) NULL,
+        notes TEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_stdoc_student (student_id),
+        INDEX idx_stdoc_dept (department_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
   } catch (err) {
     logger.warn(`Note on tables auto-provision check: ${err.message}`);
   }

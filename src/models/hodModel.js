@@ -1707,35 +1707,44 @@ class HodModel {
     if (!sRows.length) return null;
 
     // 1. Custom uploaded student documents
-    const documents = await query(
-      `SELECT id, student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploader_name, notes, created_at
-       FROM student_documents
-       WHERE student_id = ?
-       ORDER BY created_at DESC`,
-      [studentId]
-    );
+    let documents = [];
+    try {
+      documents = await query(
+        `SELECT id, student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploader_name, notes, created_at
+         FROM student_documents
+         WHERE student_id = ?
+         ORDER BY created_at DESC`,
+        [studentId]
+      );
+    } catch (_) { }
 
     // 2. Academic assignment submissions & coursework files
-    const submissions = await query(
-      `SELECT asub.id, asub.assessment_id, asub.original_filename, asub.file_path, asub.marks_obtained, asub.status, asub.submitted_at,
-              a.title as assessment_title, a.type as assessment_type,
-              s.name as subject_name, s.code as subject_code
-       FROM assessment_submissions asub
-       JOIN assessments a ON a.id = asub.assessment_id
-       LEFT JOIN subjects s ON s.id = a.subject_id
-       WHERE asub.student_id = ?
-       ORDER BY asub.submitted_at DESC`,
-      [studentId]
-    );
+    let submissions = [];
+    try {
+      submissions = await query(
+        `SELECT asub.id, asub.assessment_id, asub.original_filename, asub.file_path, asub.marks_obtained, asub.status, asub.submitted_at,
+                a.title as assessment_title, a.type as assessment_type,
+                s.name as subject_name, s.code as subject_code
+         FROM assessment_submissions asub
+         JOIN assessments a ON a.id = asub.assessment_id
+         LEFT JOIN subjects s ON s.id = a.subject_id
+         WHERE asub.student_id = ?
+         ORDER BY asub.submitted_at DESC`,
+        [studentId]
+      );
+    } catch (_) { }
 
     // 3. Leave applications & records
-    const leaves = await query(
-      `SELECT id, start_date, end_date, reason, status, reviewed_at, review_notes, created_at
-       FROM leave_applications
-       WHERE student_id = ?
-       ORDER BY created_at DESC`,
-      [studentId]
-    );
+    let leaves = [];
+    try {
+      leaves = await query(
+        `SELECT id, start_date, end_date, reason, status, reviewed_at, review_notes, created_at
+         FROM leave_applications
+         WHERE student_id = ?
+         ORDER BY created_at DESC`,
+        [studentId]
+      );
+    } catch (_) { }
 
     return {
       student: sRows[0],

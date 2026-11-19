@@ -192,31 +192,54 @@ function requireTeachingGroupOwner(paramName = 'id') {
 /**
  * Ensures teacher has an active HOD assignment.
  * Resolves and attaches req.hod_department_id and req.hod_department_name.
- * SYSTEM_ADMIN is allowed through unconditionally.
+ * SYSTEM_ADMIN, ADMIN, and resolved HODs are allowed through.
  */
 function requireHOD() {
   return async (req, res, next) => {
     try {
-      if (req.user.teacher_id) {
-        // Find active HOD assignment for this teacher
-        const hodAssignment = await query(
-          `SELECT ta.department_id, d.name as department_name
-           FROM teacher_assignments ta
-           JOIN departments d ON ta.department_id = d.id
-           WHERE ta.teacher_id = ?
-             AND ta.assignment_type = 'HOD'
-             AND ta.is_active = 1
-           LIMIT 1`,
-          [req.user.teacher_id]
-        );
+      // 1. SYSTEM_ADMIN or ADMIN passes unconditionally
+      if (req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN')) {
+        req.hod_department_id = req.hod_department_id || req.body?.department_id || req.query?.department_id || req.user?.department_id || null;
+        req.hod_department_name = req.hod_department_name || 'All Departments';
+        return next();
+      }
 
-        if (hodAssignment && hodAssignment.length > 0) {
-          req.hod_department_id = hodAssignment[0].department_id;
-          req.hod_department_name = hodAssignment[0].department_name;
-          return next();
+      // 2. User identified as HOD in req.user passes
+      if (req.user?.is_hod) {
+        req.hod_department_id = req.user.hod_department_id || req.hod_department_id || req.user.department_id;
+        req.hod_department_name = req.user.hod_department_name || req.hod_department_name;
+        return next();
+      }
+
+      // 3. User with explicit HOD role passes
+      if (req.user?.roles?.includes('HOD') || req.user?.roles?.includes('DEPT_HEAD')) {
+        req.is_hod = true;
+        req.hod_department_id = req.hod_department_id || req.user?.department_id;
+        return next();
+      }
+
+      // 4. Check teacher_assignments or departments table
+      if (req.user?.teacher_id || req.user?.id) {
+        if (req.user.teacher_id) {
+          const hodAssignment = await query(
+            `SELECT ta.department_id, d.name as department_name
+             FROM teacher_assignments ta
+             JOIN departments d ON ta.department_id = d.id
+             WHERE ta.teacher_id = ?
+               AND ta.assignment_type = 'HOD'
+               AND ta.is_active = 1
+             LIMIT 1`,
+            [req.user.teacher_id]
+          );
+
+          if (hodAssignment && hodAssignment.length > 0) {
+            req.hod_department_id = hodAssignment[0].department_id;
+            req.hod_department_name = hodAssignment[0].department_name;
+            req.is_hod = true;
+            return next();
+          }
         }
 
-        // Also check if teacher's user account is directly appointed in departments table
         const deptHod = await query(
           `SELECT d.id as department_id, d.name as department_name
            FROM departments d
@@ -227,22 +250,9 @@ function requireHOD() {
         if (deptHod && deptHod.length > 0) {
           req.hod_department_id = deptHod[0].department_id;
           req.hod_department_name = deptHod[0].department_name;
+          req.is_hod = true;
           return next();
         }
-      }
-
-      if (req.user.roles.includes('SYSTEM_ADMIN')) {
-        // Pure Admin passes through — they can view HOD data across departments
-        req.hod_department_id = null;
-        req.hod_department_name = 'All Departments';
-        return next();
-      }
-
-      if (!req.user.teacher_id) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'User is not registered as a faculty member' }
-        });
       }
 
       return res.status(403).json({
@@ -264,60 +274,96 @@ function requireHOD() {
 /**
  * Ensures teacher has an active HOD assignment or is Department Faculty.
  * Resolves and attaches req.hod_department_id and req.hod_department_name.
- * SYSTEM_ADMIN is allowed through unconditionally.
+ * SYSTEM_ADMIN and ADMIN are allowed through unconditionally.
  */
 function requireHODOrClassTeacher() {
   return async (req, res, next) => {
     try {
-      if (req.user.roles.includes('SYSTEM_ADMIN')) {
-        req.hod_department_id = null;
-        req.hod_department_name = 'All Departments';
+      // 1. SYSTEM_ADMIN or ADMIN passes unconditionally
+      if (req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN')) {
+        req.hod_department_id = req.hod_department_id || req.body?.department_id || req.query?.department_id || req.user?.department_id || null;
+        req.hod_department_name = req.hod_department_name || 'All Departments';
         return next();
       }
 
-      if (!req.user.teacher_id) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'User is not registered as a faculty member' }
-        });
+      // 2. User identified as HOD in req.user
+      if (req.user?.is_hod) {
+        req.hod_department_id = req.user.hod_department_id || req.hod_department_id || req.user.department_id;
+        req.hod_department_name = req.user.hod_department_name || req.hod_department_name;
+        return next();
       }
 
-      // Check active HOD assignment first
-      const hodAssignment = await query(
-        `SELECT ta.department_id, d.name as department_name
-         FROM teacher_assignments ta
-         JOIN departments d ON ta.department_id = d.id
-         WHERE ta.teacher_id = ?
-           AND ta.assignment_type = 'HOD'
-           AND ta.is_active = 1
-         LIMIT 1`,
-        [req.user.teacher_id]
-      );
+      // 3. User with explicit HOD role
+      if (req.user?.roles?.includes('HOD') || req.user?.roles?.includes('DEPT_HEAD')) {
+        req.is_hod = true;
+        req.hod_department_id = req.hod_department_id || req.user?.department_id;
+        return next();
+      }
 
-      if (hodAssignment && hodAssignment.length > 0) {
-        req.hod_department_id = hodAssignment[0].department_id;
-        req.hod_department_name = hodAssignment[0].department_name;
+      // 4. Check active HOD assignment in DB
+      if (req.user?.teacher_id) {
+        const hodAssignment = await query(
+          `SELECT ta.department_id, d.name as department_name
+           FROM teacher_assignments ta
+           JOIN departments d ON ta.department_id = d.id
+           WHERE ta.teacher_id = ?
+             AND ta.assignment_type = 'HOD'
+             AND ta.is_active = 1
+           LIMIT 1`,
+          [req.user.teacher_id]
+        );
+
+        if (hodAssignment && hodAssignment.length > 0) {
+          req.hod_department_id = hodAssignment[0].department_id;
+          req.hod_department_name = hodAssignment[0].department_name;
+          req.is_hod = true;
+          return next();
+        }
+      }
+
+      // 5. Check departments table for direct appointment
+      const deptHod = await query(
+        `SELECT d.id as department_id, d.name as department_name
+         FROM departments d
+         WHERE (d.hod_user_id = ? OR d.hod_user_id = ?) AND d.is_active = 1
+         LIMIT 1`,
+        [req.user.id, req.user.user_id || req.user.id]
+      );
+      if (deptHod && deptHod.length > 0) {
+        req.hod_department_id = deptHod[0].department_id;
+        req.hod_department_name = deptHod[0].department_name;
         req.is_hod = true;
         return next();
       }
 
-      // Check department teacher affiliation
-      const teacherRows = await query(
-        `SELECT t.department_id, d.name as department_name
-         FROM teachers t
-         LEFT JOIN departments d ON t.department_id = d.id
-         WHERE t.id = ?`,
-        [req.user.teacher_id]
-      );
+      // 6. Check department teacher affiliation (Department Faculty / Class Teacher)
+      if (req.user?.teacher_id) {
+        const teacherRows = await query(
+          `SELECT t.department_id, d.name as department_name
+           FROM teachers t
+           LEFT JOIN departments d ON t.department_id = d.id
+           WHERE t.id = ?`,
+          [req.user.teacher_id]
+        );
 
-      if (teacherRows && teacherRows.length > 0 && teacherRows[0].department_id) {
-        req.hod_department_id = teacherRows[0].department_id;
-        req.hod_department_name = teacherRows[0].department_name;
+        if (teacherRows && teacherRows.length > 0 && teacherRows[0].department_id) {
+          req.hod_department_id = teacherRows[0].department_id;
+          req.hod_department_name = teacherRows[0].department_name;
+          req.teacher_department_id = teacherRows[0].department_id;
+          req.is_department_faculty = true;
+          req.is_class_teacher = true;
+          req.class_teacher_cohort = {
+            department_id: teacherRows[0].department_id
+          };
+          return next();
+        }
+      }
+
+      // 7. User has department_id directly on user profile
+      if (req.user?.department_id) {
+        req.hod_department_id = req.user.department_id;
+        req.teacher_department_id = req.user.department_id;
         req.is_department_faculty = true;
-        req.is_class_teacher = true;
-        req.class_teacher_cohort = {
-          department_id: teacherRows[0].department_id
-        };
         return next();
       }
 

@@ -18,8 +18,8 @@ const AuthController = require('../controllers/authController');
 
 const uploadStudentDoc = makeUploader('student-documents', 50);
 
-// All HOD/Department routes require authenticated TEACHER or SYSTEM_ADMIN with HOD or Class Teacher assignment
-router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN'), requireHODOrClassTeacher());
+// All HOD/Department routes require authenticated faculty or administrator
+router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN', 'ADMIN', 'HOD', 'FACULTY'), requireHODOrClassTeacher());
 
 // @route   GET /api/v1/hod/dashboard
 // @desc    Retrieve high-level departmental dashboard KPIs, active registers, attendance rates, and today's sessions
@@ -240,9 +240,9 @@ router.get('/students', HodController.getStudents);
 
 // @route   POST /api/v1/hod/students
 // @desc    Enroll a new student, create provisioned user account, and reindex roll numbers
-// @access  Protected (HOD, SYSTEM_ADMIN)
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
 // @handler HodController.createStudent() -> HodModel.createStudent()
-router.post('/students', requireHOD(), [
+router.post('/students', requireHODOrClassTeacher(), [
   body('official_enrollment_no').trim().notEmpty().withMessage('Official enrollment number required'),
   body('full_name').trim().notEmpty().withMessage('Student full name required'),
   body('email').optional().trim().isEmail().withMessage('Valid email required'),
@@ -256,9 +256,9 @@ router.post('/students', requireHOD(), [
 
 // @route   POST /api/v1/hod/students/bulk
 // @desc    Bulk import and enroll students for a cohort in a single transaction with automatic roll indexing
-// @access  Protected (HOD, SYSTEM_ADMIN)
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
 // @handler HodController.bulkCreateStudents() -> HodModel.bulkCreateStudents()
-router.post('/students/bulk', requireHOD(), [
+router.post('/students/bulk', requireHODOrClassTeacher(), [
   body('academic_year_id').optional().isInt(),
   body('year').optional().isInt({ min: 1, max: 6 }).withMessage('Year must be between 1 and 6'),
   body('semester').optional().isInt({ min: 1, max: 12 }).withMessage('Semester must be between 1 and 12'),
@@ -268,24 +268,24 @@ router.post('/students/bulk', requireHOD(), [
 
 // @route   DELETE /api/v1/hod/students/:id
 // @desc    Delete student record, user account, attendance records, and reindex roll numbers
-// @access  Protected (HOD, SYSTEM_ADMIN)
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
 // @handler HodController.deleteStudent() -> HodModel.deleteStudent()
-router.delete('/students/:id', requireHOD(), [param('id').isInt(), validate], HodController.deleteStudent);
+router.delete('/students/:id', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.deleteStudent);
 
 // @route   POST /api/v1/hod/students/:id/transfer
 // @desc    Transfer student to another institution/branch (student marked TRANSFERRED, data preserved)
-// @access  Protected (HOD, SYSTEM_ADMIN)
-router.post('/students/:id/transfer', requireHOD(), [param('id').isInt(), validate], HodController.transferStudent);
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+router.post('/students/:id/transfer', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.transferStudent);
 
 // @route   POST /api/v1/hod/students/:id/withdraw
 // @desc    Mark student as withdrawn (student marked WITHDRAWN, data preserved)
-// @access  Protected (HOD, SYSTEM_ADMIN)
-router.post('/students/:id/withdraw', requireHOD(), [param('id').isInt(), validate], HodController.withdrawStudent);
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+router.post('/students/:id/withdraw', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.withdrawStudent);
 
 // @route   POST /api/v1/hod/students/:id/reactivate
 // @desc    Re-activate an inactive/transferred/withdrawn student back to active ENROLLED
-// @access  Protected (HOD, SYSTEM_ADMIN)
-router.post('/students/:id/reactivate', requireHOD(), [param('id').isInt(), validate], HodController.reactivateStudent);
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+router.post('/students/:id/reactivate', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.reactivateStudent);
 
 // @route   GET /api/v1/hod/students/:id/documents
 // @desc    Retrieve all archived academic records and uploaded documents for a student (accessible anytime)

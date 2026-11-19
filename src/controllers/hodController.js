@@ -726,7 +726,10 @@ class HodController {
    */
   static async createStudent(req, res) {
     const { official_enrollment_no, registration_no, full_name, email, year, semester, is_lateral_entry, academic_year_id, initial_password } = req.body;
-    const deptId = req.hod_department_id;
+    let deptId = req.hod_department_id || req.body.department_id || req.user?.department_id || req.teacher_department_id || req.user?.hod_department_id;
+    if (!deptId && (req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN'))) {
+      deptId = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+    }
 
     try {
       const deptRows = await query('SELECT degree_duration_years FROM departments WHERE id = ?', [deptId]);
@@ -802,7 +805,14 @@ class HodController {
    */
   static async bulkCreateStudents(req, res) {
     let { year, semester, students, academic_year_id, department_id } = req.body;
-    const deptId = req.hod_department_id || department_id || req.user.department_id;
+    let deptId = req.hod_department_id || department_id || req.user?.department_id || req.teacher_department_id || req.user?.hod_department_id;
+
+    if (!deptId) {
+      if (req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN')) {
+        const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+        deptId = defaultDept;
+      }
+    }
 
     if (!deptId) {
       return res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Department ID required' } });
@@ -990,7 +1000,8 @@ class HodController {
    */
   static async getStudentDocuments(req, res) {
     try {
-      const deptId = req.hod_department_id;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
       const data = await HodModel.getStudentDocuments(req.params.id, deptId);
       if (!data) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found in your department' } });
