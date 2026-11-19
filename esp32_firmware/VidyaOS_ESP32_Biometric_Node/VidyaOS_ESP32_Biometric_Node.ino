@@ -227,45 +227,44 @@ void getFormattedTime(char* outFull, size_t fullSize, char* outShort, size_t sho
   }
 }
 
-/**
- * Enters Low-Power Light Sleep after 2 minutes of inactivity.
- * Preserves RAM & flash state, wakes immediately upon finger touch on AS608 prism (GPIO 33).
- */
-void enterLowPowerSleep() {
+// ─── Deep Sleep & Persistent RTC State Across Power Cycles ──────────────────
+struct RecentScanRecord {
+  uint32_t student_id;
+  uint32_t epoch_sec;
+};
+#define RECENT_SCANS_CACHE_SIZE 32
+RTC_DATA_ATTR RecentScanRecord recentScans[RECENT_SCANS_CACHE_SIZE];
+RTC_DATA_ATTR uint8_t recentScanHead = 0;
+RTC_DATA_ATTR uint32_t deepSleepCycleCount = 0;
+
+TaskHandle_t wifiSyncTaskHandle = NULL;
+SemaphoreHandle_t flashMutex = NULL;
+
+void enterHardwareDeepSleep() {
+  Serial.println(F("[SLEEP] Inactivity timeout reached (120s). Entering Hardware Deep Sleep..."));
+  queueRemoteLog("INFO", "POWER", "Inactivity timeout (120s) -> Entering Hardware Deep Sleep");
+  deepSleepCycleCount++;
+
   float battVolts = ui.readBatteryVoltage();
   int battPct = ui.readBatteryPercentage(battVolts);
-
-  // 1. Show brief sleep banner on OLED then turn off display controller
   ui.showSleepBanner(battPct);
-  delay(800);
+  delay(350);
   ui.powerOffDisplay();
 
-  // Turn off LEDs (keep amber indicator if battery is low)
   ui.turnOffAllLeds();
-  if (battVolts < BATTERY_LOW_THRESHOLD_VOLTS) {
-    ui.setLowBattLed(true);
-  }
-
-  // 2. Turn off AS608 optical LED
   fingerprintSensor.setBacklight(false);
 
-  // 3. Configure Touch Wakeup on GPIO 33 (Active HIGH) & safe backup timer wakeup
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(50);
+
   pinMode(AS608_TOUCH_WAKE_PIN, INPUT_PULLDOWN);
   esp_sleep_enable_ext0_wakeup((gpio_num_t)AS608_TOUCH_WAKE_PIN, 1);
-  esp_sleep_enable_timer_wakeup(60ULL * 1000000ULL); // 60s backup wake timer
+  esp_sleep_enable_timer_wakeup(BACKUP_TIMER_SLEEP_SEC * 1000000ULL);
 
-  // 4. Enter Light Sleep (preserves RAM, W25Qxx state, and instant resumption)
-  esp_light_sleep_start();
-
-  // 5. Execution resumes right here upon finger touch!
-  lastActivityMs = millis();
-  ui.powerOnDisplay();
-  fingerprintSensor.setBacklight(true);
-  ui.showWakingScreen();
-  delay(500);
-
-  currentUiState = UI_STATE_IDLE;
-  lastDisplayMs = 0; // Trigger immediate idle redraw
+  Serial.println(F("[SLEEP] Entering Deep Sleep. Touch AS608 prism glass to wake!"));
+  Serial.flush();
+  esp_deep_sleep_start();
 }
 
 /**
@@ -393,13 +392,22 @@ void handleRemoteStudentEnrollment(JsonObject cmd) {
 
 /**
  * Drains unsynced offline attendance scans from W25Q32 SPI Flash to the server.
+ * Protected by FreeRTOS mutex to guarantee thread-safety between Core 0 and Core 1.
  */
 void syncOfflineQueueToServer() {
-  if (WiFi.status() != WL_CONNECTED || flashStorage.getUnsyncedCount() == 0) return;
+  if (WiFi.status() != WL_CONNECTED) return;
 
   OfflineAttendanceRecord batch[OFFLINE_SYNC_BATCH_SIZE];
   uint32_t indices[OFFLINE_SYNC_BATCH_SIZE];
-  size_t count = flashStorage.fetchUnsyncedBatch(batch, indices, OFFLINE_SYNC_BATCH_SIZE);
+  size_t count = 0;
+
+  if (flashMutex != NULL && xSemaphoreTake(flashMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+    if (flashStorage.getUnsyncedCount() > 0) {
+      count = flashStorage.fetchUnsyncedBatch(batch, indices, OFFLINE_SYNC_BATCH_SIZE);
+    }
+    xSemaphoreGive(flashMutex);
+  }
+
   if (count == 0) return;
 
   String json = "{\"scans\":[";
@@ -419,9 +427,15 @@ void syncOfflineQueueToServer() {
 
   String decryptedResp;
   if (postEncryptedToServer("/attendance", json, decryptedResp)) {
-    for (size_t i = 0; i < count; i++) {
-      flashStorage.markRecordSynced(indices[i]);
+    Serial.printf("[Core 0][SYNC] Synchronized batch of %u offline attendance scans to server!\n", (unsigned int)count);
+    if (flashMutex != NULL && xSemaphoreTake(flashMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+      for (size_t i = 0; i < count; i++) {
+        flashStorage.markRecordSynced(indices[i]);
+      }
+      xSemaphoreGive(flashMutex);
     }
+  } else {
+    Serial.println(F("[Core 0][SYNC] Server upload failed. Records preserved in local flash for retry."));
   }
 }
 
@@ -756,88 +770,240 @@ void publishMqttTelemetry(float battVolts, int battPct) {
   mqttClient.publish(MQTT_TOPIC_TELEMETRY, p.c_str());
 }
 
+void sendHeartbeatAndProcessCommands() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  float battVolts = ui.readBatteryVoltage();
+  int   battPct   = ui.readBatteryPercentage(battVolts);
+
+  uint32_t unsyncedCount = 0;
+  uint32_t usedFlashKb   = 0;
+  uint16_t enrolledCount = 0;
+  if (flashMutex != NULL && xSemaphoreTake(flashMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+    unsyncedCount = flashStorage.getUnsyncedCount();
+    usedFlashKb   = flashStorage.getUsedFlashKb();
+    enrolledCount = flashStorage.getEnrolledStudentCount();
+    xSemaphoreGive(flashMutex);
+  }
+
+  String hbJson = "{";
+  hbJson += "\"battery_voltage\":" + String(battVolts, 2) + ",";
+  hbJson += "\"battery_pct\":" + String(battPct) + ",";
+  hbJson += "\"offline_queue_count\":" + String(unsyncedCount) + ",";
+  hbJson += "\"w25q32_used_kb\":" + String(usedFlashKb) + ",";
+  hbJson += "\"as608_enrolled_count\":" + String(enrolledCount) + ",";
+  hbJson += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
+  hbJson += "\"connected_ssid\":\"" + currentConnectedSsid + "\",";
+  hbJson += "\"firmware_version\":\"" + String(FIRMWARE_VERSION) + "\"";
+
+  if (remoteLogCount > 0) {
+    hbJson += ",\"logs\":[";
+    for (int i = 0; i < remoteLogCount; i++) {
+      if (i > 0) hbJson += ",";
+      hbJson += "{\"level\":\"" + remoteLogQueue[i].level + "\",";
+      hbJson += "\"tag\":\"" + remoteLogQueue[i].tag + "\",";
+      String cleanMsg = remoteLogQueue[i].msg;
+      cleanMsg.replace("\"", "\\\"");
+      cleanMsg.replace("\n", " ");
+      cleanMsg.replace("\r", "");
+      hbJson += "\"message\":\"" + cleanMsg + "\"}";
+    }
+    hbJson += "]";
+  }
+  hbJson += "}";
+
+  publishMqttTelemetry(battVolts, battPct);
+
+  String hbResp;
+  if (postEncryptedToServer("/heartbeat", hbJson, hbResp)) {
+    remoteLogCount = 0; // Cleared successfully upon delivery
+#if defined(ARDUINOJSON_VERSION_MAJOR) && (ARDUINOJSON_VERSION_MAJOR >= 7)
+    JsonDocument doc;
+#else
+    DynamicJsonDocument doc(2048);
+#endif
+    if (deserializeJson(doc, hbResp) == DeserializationError::Ok) {
+      uint16_t cloudCount = doc["cloud_template_count"] | 0;
+      if (cloudCount > 0 && enrolledCount == 0) {
+        syncDepartmentTemplatesFromServer();
+      }
+
+      JsonObject cmd = doc["command"];
+      if (!cmd.isNull()) {
+        lastActivityMs = millis();
+        String cmdType = String((const char*)(cmd["command_type"] | ""));
+        if (cmdType == "ENROLL_STUDENT") {
+          handleRemoteStudentEnrollment(cmd);
+        } else if (cmdType == "SYNC_TEMPLATES") {
+          syncDepartmentTemplatesFromServer();
+        } else if (cmdType == "BUZZER_CHIME") {
+          ui.beepAttendanceSuccess();
+        } else if (cmdType == "SCAN_WIFI") {
+          handleScanWifiCommand(cmd);
+        } else if (cmdType == "SWITCH_WIFI" || cmdType == "ADD_WIFI") {
+          handleSwitchWifiCommand(cmd);
+        } else if (cmdType == "FALLBACK_WIFI") {
+          handleFallbackWifiCommand(cmd);
+        } else if (cmdType == "RESET_WIFI") {
+          handleResetWifiCommand(cmd);
+        } else if (cmdType == "CMD_OTA_UPDATE" || cmdType == "OTA_UPDATE") {
+          String otaUrl = String((const char*)(cmd["url"] | cmd["payload"]["url"] | ""));
+          if (otaUrl.length() > 0) {
+            performOtaUpdate(otaUrl);
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * FreeRTOS Background Wi-Fi & Cloud Synchronization Engine (Pinned to Core 0)
+ * Completely decouples all networking from the local attendance marking engine on Core 1!
+ */
+void backgroundWifiSyncTask(void* pvParameters) {
+  Serial.println(F("[Core 0] Background Wi-Fi & Cloud Sync Engine initialized."));
+  
+  wifiPrefs.begin(NVS_WIFI_NAMESPACE, false);
+  defaultWifiSsid = WIFI_SSID;
+  defaultWifiPass = WIFI_PASSWORD;
+
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
+#if defined(FALLBACK_WIFI_SSID)
+  wifiMulti.addAP(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASS);
+#endif
+
+  initMqtt();
+
+  // Asynchronous non-blocking Wi-Fi connect
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  unsigned long wifiAttemptStartMs = millis();
+  bool connectingToPrimary = true;
+
+  while (true) {
+    bool isConnected = (WiFi.status() == WL_CONNECTED);
+
+    if (!isConnected) {
+      ui.setWifiLed(false);
+
+      // Auto-failover logic in background between Primary and Fallback routers
+      if (connectingToPrimary && (millis() - wifiAttemptStartMs >= 10000UL)) {
+#if defined(FALLBACK_WIFI_SSID)
+        Serial.printf("[Core 0][WiFi] Primary Wi-Fi timeout. Switching to Fallback: %s\n", FALLBACK_WIFI_SSID);
+        connectingToPrimary = false;
+        wifiAttemptStartMs = millis();
+        WiFi.begin(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASS);
+#else
+        wifiAttemptStartMs = millis();
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
+      } else if (!connectingToPrimary && (millis() - wifiAttemptStartMs >= 10000UL)) {
+        Serial.printf("[Core 0][WiFi] Fallback timeout. Retrying Main Wi-Fi: %s\n", WIFI_SSID);
+        connectingToPrimary = true;
+        wifiAttemptStartMs = millis();
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      }
+
+      vTaskDelay(pdMS_TO_TICKS(1500));
+      continue;
+    }
+
+    // ─── Wi-Fi Connected in Background ───
+    ui.setWifiLed(true);
+    currentConnectedSsid = WiFi.SSID();
+
+    // 1. Maintain NTP time in background without blocking attendance
+    static unsigned long lastNtpSyncMs = 0;
+    if (millis() - lastNtpSyncMs >= 1800000UL || lastNtpSyncMs == 0) {
+      lastNtpSyncMs = millis();
+      configTime(19800, 0, "pool.ntp.org", "time.nist.gov");
+    }
+
+    // 2. Synchronize Unsynced Offline Attendance Records to Server
+    if (flashMutex != NULL && xSemaphoreTake(flashMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+      uint32_t unsynced = flashStorage.getUnsyncedCount();
+      xSemaphoreGive(flashMutex);
+
+      if (unsynced > 0) {
+        syncOfflineQueueToServer();
+      }
+    }
+
+    // 3. Periodic Heartbeat & Remote Command Polling
+    if (millis() - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
+      lastHeartbeatMs = millis();
+      sendHeartbeatAndProcessCommands();
+    }
+
+    // 4. Maintain MQTT if enabled
+    maintainMqtt();
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  delay(300);
+  delay(100);
+
+  esp_sleep_wakeup_cause_t wakeupReason = esp_sleep_get_wakeup_cause();
   Serial.println();
   Serial.println(F("=============================================="));
   Serial.println(F(" VIDYAOS ESP32 BIOMETRIC ATTENDANCE TERMINAL"));
   Serial.println(F(" Firmware: " FIRMWARE_VERSION));
+  Serial.printf("[BOOT] Wakeup Cause: %d (%s) | Deep Sleep Cycles: %lu\n",
+                wakeupReason,
+                (wakeupReason == ESP_SLEEP_WAKEUP_EXT0) ? "TOUCH WAKEUP (GPIO 33)" :
+                (wakeupReason == ESP_SLEEP_WAKEUP_TIMER) ? "TIMER WAKEUP" : "POWER-ON / USB RESET",
+                (unsigned long)deepSleepCycleCount);
   Serial.println(F("=============================================="));
 
   // 1. Initialize Display & Peripherals
   ui.begin();
-  ui.showBootScreen("VIDYAOS TERMINAL", "Initializing HW...");
+  if (wakeupReason == ESP_SLEEP_WAKEUP_EXT0) {
+    ui.showWakingScreen(); // Prominently displays: "Ready / Scan Finger"
+  } else {
+    ui.showBootScreen("VIDYAOS TERMINAL", "Ready / Scan Finger");
+  }
 
   // 2. Initialize Crypto Engine
   cryptoEngine.begin(DEVICE_AES_SECRET);
 
   // 3. Initialize Flash Storage (Ultra-resilient: runs RAM cache if flash not wired)
-  ui.showBootScreen("VIDYAOS TERMINAL", "Checking Storage...");
   flashStorage.begin();
 
-  // 4. Initialize AS608 Fingerprint Sensor
-  ui.showBootScreen("VIDYAOS TERMINAL", "Checking AS608...");
+  // 4. Initialize AS608 Fingerprint Sensor & turn backlight ON
   fingerprintSensor.begin();
 
-  // 5. Initialize Wi-Fi
-  ui.showBootScreen("VIDYAOS TERMINAL", "Connecting WiFi...");
-  initWifiManager();
-  initMqtt();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    ui.setWifiLed(true);
-    configTime(19800, 0, "pool.ntp.org", "time.nist.gov"); // IST UTC+5:30
-    Serial.println(F("[BOOT] Wi-Fi is ready. Device online."));
-    ui.showBootScreen("TERMINAL READY", WiFi.localIP().toString().c_str());
-  } else {
-    ui.setWifiLed(false);
-    Serial.println(F("[BOOT][WARNING] Wi-Fi offline. Local mode active."));
-    ui.showBootScreen("OFFLINE READY", "Local Mode Active");
+  // 5. Create FreeRTOS Mutex for thread-safe flash access across CPU cores
+  if (flashMutex == NULL) {
+    flashMutex = xSemaphoreCreateMutex();
   }
 
-  delay(600);
-  ui.chimeBoot();
+  // 6. Launch Non-Blocking Background Wi-Fi & Server Sync Task on Core 0
+  // Core 1 remains 100% dedicated to instant fingerprint scanning with zero network stutter!
+  xTaskCreatePinnedToCore(
+    backgroundWifiSyncTask,
+    "WifiSyncTask",
+    10240,
+    NULL,
+    1,
+    &wifiSyncTaskHandle,
+    0
+  );
+
   lastActivityMs = millis();
   currentUiState = UI_STATE_IDLE;
   lastDisplayMs = 0; // Trigger immediate idle screen render
+  ui.chimeBoot();
 }
 
 void loop() {
   float battVolts = ui.readBatteryVoltage();
   int   battPct   = ui.readBatteryPercentage(battVolts);
   bool  isOnline  = (WiFi.status() == WL_CONNECTED);
-
-  // Print disconnect once and retry Wi-Fi periodically without blocking the main loop.
-  static bool wasWifiConnected = false;
-  if (isOnline && !wasWifiConnected) {
-    wasWifiConnected = true;
-    currentConnectedSsid = WiFi.SSID();
-    Serial.println(F("[WiFi][CONNECTED] Network active."));
-    configTime(19800, 0, "pool.ntp.org", "time.nist.gov");
-  } else if (!isOnline && wasWifiConnected) {
-    wasWifiConnected = false;
-    Serial.println(F("[WiFi][DISCONNECTED] Network lost."));
-    ui.setWifiLed(false);
-  }
-
-  // Multi-Network Automatic Failover Watchdog
-  if (!isOnline && millis() - lastWifiReconnectMs >= 12000UL) {
-    lastWifiReconnectMs = millis();
-    static uint8_t failCount = 0;
-    failCount++;
-    if (failCount % 2 == 1) {
-      Serial.printf("[WiFi][RECONNECT] Attempting Main Wi-Fi: %s...\n", WIFI_SSID);
-      connectToNetwork(WIFI_SSID, WIFI_PASSWORD, 8000);
-    } else {
-#if defined(FALLBACK_WIFI_SSID)
-      Serial.printf("[WiFi][RECONNECT] Attempting Fallback Wi-Fi: %s...\n", FALLBACK_WIFI_SSID);
-      connectToNetwork(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASS, 8000);
-#else
-      WiFi.reconnect();
-#endif
-    }
-  }
 
   // Interactive USB Serial Commands (Press 'e' for enrollment, 'p' for ping)
   if (Serial.available()) {
@@ -860,19 +1026,7 @@ void loop() {
     }
   }
 
-  // 1. Wi-Fi Status LED & Dual-Stack MQTT Maintenance
-  maintainMqtt();
-  if (isOnline) {
-    ui.setWifiLed(true);
-  } else {
-    static unsigned long lastBlinkMs = 0;
-    if (millis() - lastBlinkMs >= 500) {
-      lastBlinkMs = millis();
-      ui.setWifiLed(!digitalRead(LED_WIFI_PIN));
-    }
-  }
-
-  // 2. Battery Telemetry & Low Battery Warning (Every 10 seconds)
+  // 1. Battery Telemetry & Low Battery Warning (Every 10 seconds)
   if (millis() - lastBatteryCheckMs >= 10000UL) {
     lastBatteryCheckMs = millis();
     if (battVolts < BATTERY_LOW_THRESHOLD_VOLTS) {
@@ -887,15 +1041,22 @@ void loop() {
     }
   }
 
-  // 3. Inactivity Watchdog: Enter Light Sleep only if configured
+  // 2. Inactivity Watchdog: Enter Hardware Deep Sleep after 120s of no activity
 #if defined(ENABLE_AUTO_SLEEP) && (ENABLE_AUTO_SLEEP == true)
   if (millis() - lastActivityMs >= INACTIVITY_SLEEP_TIMEOUT_MS) {
-    enterLowPowerSleep();
+    enterHardwareDeepSleep();
     return;
   }
 #endif
 
-  // 4. Poll AS608 Fingerprint Sensor for Attendance Scan
+  // 3. Detect Finger Touch and Poll AS608 Fingerprint Sensor
+  if (digitalRead(AS608_TOUCH_WAKE_PIN) == HIGH) {
+    lastActivityMs = millis();
+    if (currentUiState == UI_STATE_IDLE) {
+      ui.showScanningScreen();
+    }
+  }
+
   uint16_t matchedSlot = 0;
   uint16_t confidence  = 0;
   int scanStatus = fingerprintSensor.pollAndSearch(matchedSlot, confidence);
@@ -907,79 +1068,63 @@ void loop() {
   // ─── Attendance Scan Match Handling ───
   if (scanStatus == 1) {
     LocalStudentSlotEntry student;
-    bool found = flashStorage.lookupStudentBySlot(matchedSlot, student);
+    bool found = false;
+    if (flashMutex != NULL && xSemaphoreTake(flashMutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+      found = flashStorage.lookupStudentBySlot(matchedSlot, student);
+      xSemaphoreGive(flashMutex);
+    }
 
     char fullTime[24];
     char shortTime[16];
     getFormattedTime(fullTime, sizeof(fullTime), shortTime, sizeof(shortTime));
 
     if (!found) {
-      // Finger is in sensor but unassigned in local flash/RAM roster
+      // Finger is in sensor but unassigned in local roster -> "Fingerprint Not Recognized"
       currentUiState = UI_STATE_BANNER;
       bannerExpireMs = millis() + UNREGISTERED_HOLD_MS;
       ui.setFailLed(true);
       ui.showFingerNotRegistered();
       ui.beepFingerNotRegistered();
-      delay(200);
       ui.setFailLed(false);
+      fingerprintSensor.waitForFingerRelease(2000);
+      lastActivityMs = millis();
     } else {
       time_t nowEpoch;
       time(&nowEpoch);
-      char eventId[40];
-      snprintf(eventId, sizeof(eventId), "EVT_%lu_%lu", (unsigned long)nowEpoch, (unsigned long)student.student_id);
+      if (nowEpoch < 100000) {
+        nowEpoch = (millis() / 1000UL) + 1732000000UL;
+      }
 
-      bool attendanceRecorded = false;
-      bool serverRejected     = false;
-      String serverTimeStr    = String(fullTime);
-
-      if (isOnline) {
-        String scanJson = "{\"device_uid\":\"" + String(DEVICE_UID) + "\",\"scans\":[{";
-        scanJson += "\"event_id\":\"" + String(eventId) + "\",";
-        scanJson += "\"student_id\":" + String(student.student_id) + ",";
-        scanJson += "\"slot_id\":" + String(matchedSlot) + ",";
-        scanJson += "\"enrollment_no\":\"" + String(student.enrollment_no) + "\",";
-        scanJson += "\"confidence\":" + String(confidence) + ",";
-        scanJson += "\"scanned_at\":" + String((unsigned long)nowEpoch) + ",";
-        scanJson += "\"is_offline_sync\":false";
-        scanJson += "}]}";
-
-        String respJson;
-        if (postEncryptedToServer("/attendance", scanJson, respJson)) {
-          StaticJsonDocument<2048> doc;
-          if (deserializeJson(doc, respJson) == DeserializationError::Ok) {
-            bool ok = doc["success"] | false;
-            String status = String((const char*)(doc["status"] | ""));
-            if (ok || status == "ATTENDANCE_MARKED") {
-              attendanceRecorded = true;
-              const char* t = doc["time"] | doc["data"]["time"] | "";
-              if (t && strlen(t) > 0) serverTimeStr = String(t);
-            } else {
-              serverRejected = true;
-            }
-          } else {
-            attendanceRecorded = true;
-          }
-        } else {
-          if (WiFi.status() == WL_CONNECTED) {
-            serverRejected = true;
+      // Duplicate attendance prevention (check recent scans cache across deep sleep)
+      bool isDuplicate = false;
+      for (int i = 0; i < RECENT_SCANS_CACHE_SIZE; i++) {
+        if (recentScans[i].student_id == student.student_id) {
+          if ((nowEpoch >= recentScans[i].epoch_sec) && ((nowEpoch - recentScans[i].epoch_sec) < DUPLICATE_COOLDOWN_SEC)) {
+            isDuplicate = true;
+            break;
           }
         }
       }
 
-      if (serverRejected) {
-        // Mode 2: Failed Attendance
+      if (isDuplicate) {
+        // Situation: Duplicate Attendance -> "Attendance Already Marked"
         currentUiState = UI_STATE_BANNER;
-        bannerExpireMs = millis() + FAILED_HOLD_MS;
-        ui.showAttendanceFailed("Class / Register Error", serverTimeStr.c_str());
-        for (int i = 0; i < 3; i++) {
-          ui.setFailLed(true);
-          ui.playTone(1800, 150);
-          ui.setFailLed(false);
-          delay(100);
-        }
+        bannerExpireMs = millis() + 2500;
+        ui.showDuplicateAttendance(student.enrollment_no, student.full_name, fullTime);
+        ui.chimeError();
+        fingerprintSensor.waitForFingerRelease(2000);
+        lastActivityMs = millis();
       } else {
-        // Online success or offline fallback
-        if (!isOnline || !attendanceRecorded) {
+        // Record into recent scans cache for duplicate suppression
+        recentScans[recentScanHead].student_id = student.student_id;
+        recentScans[recentScanHead].epoch_sec = (uint32_t)nowEpoch;
+        recentScanHead = (recentScanHead + 1) % RECENT_SCANS_CACHE_SIZE;
+
+        char eventId[40];
+        snprintf(eventId, sizeof(eventId), "EVT_%lu_%lu", (unsigned long)nowEpoch, (unsigned long)student.student_id);
+
+        // Save immediately to persistent local storage (W25Q32 SPI Flash / RAM cache)
+        if (flashMutex != NULL && xSemaphoreTake(flashMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
           flashStorage.appendOfflineAttendance(
             student.student_id,
             matchedSlot,
@@ -990,21 +1135,25 @@ void loop() {
             (uint8_t)confidence,
             eventId
           );
+          xSemaphoreGive(flashMutex);
         }
 
-        // Mode 1: Successful Attendance (2s beep, 2.5s Green LED)
+        // Situation: Fingerprint Matched -> "Attendance Marked Successfully"
         currentUiState = UI_STATE_BANNER;
         bannerExpireMs = millis() + SUCCESS_LED_HOLD_MS;
         ui.setSuccessLed(true);
-        ui.showAttendanceSuccess(student.enrollment_no, student.full_name, serverTimeStr.c_str());
-        ui.beepAttendanceSuccess(); // 2000 ms
+        ui.showAttendanceSuccess(student.enrollment_no, student.full_name, fullTime);
+        ui.beepAttendanceSuccess(); // 2000 ms confirmation beep
         delay(500);                 // Total 2.5s hold
         ui.setSuccessLed(false);
+
+        // Bounded wait for student to remove finger
+        fingerprintSensor.waitForFingerRelease(2000);
+        lastActivityMs = millis();
       }
     }
-  }
-  // ─── Mode 3: Finger Not Registered ───
-  else if (scanStatus == -2) {
+  } else if (scanStatus == -2) {
+    // Situation: Unknown Fingerprint -> "Fingerprint Not Recognized"
     currentUiState = UI_STATE_BANNER;
     bannerExpireMs = millis() + UNREGISTERED_HOLD_MS;
     ui.setFailLed(true);
@@ -1012,85 +1161,11 @@ void loop() {
     ui.beepFingerNotRegistered(); // 1800 ms
     delay(200);
     ui.setFailLed(false);
+    fingerprintSensor.waitForFingerRelease(2000);
+    lastActivityMs = millis();
   }
 
-  // 5. Periodic Heartbeat, Offline Sync & Remote Command Poll
-  if (millis() - lastHeartbeatMs >= HEARTBEAT_INTERVAL_MS) {
-    lastHeartbeatMs = millis();
-
-    if (isOnline) {
-      syncOfflineQueueToServer();
-
-      String hbJson = "{";
-      hbJson += "\"battery_voltage\":" + String(battVolts, 2) + ",";
-      hbJson += "\"battery_pct\":" + String(battPct) + ",";
-      hbJson += "\"offline_queue_count\":" + String(flashStorage.getUnsyncedCount()) + ",";
-      hbJson += "\"w25q32_used_kb\":" + String(flashStorage.getUsedFlashKb()) + ",";
-      hbJson += "\"as608_enrolled_count\":" + String(flashStorage.getEnrolledStudentCount()) + ",";
-      hbJson += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
-      hbJson += "\"connected_ssid\":\"" + currentConnectedSsid + "\",";
-      hbJson += "\"firmware_version\":\"" + String(FIRMWARE_VERSION) + "\"";
-
-      // Append buffered remote diagnostic logs for over-the-internet cloud feed
-      if (remoteLogCount > 0) {
-        hbJson += ",\"logs\":[";
-        for (int i = 0; i < remoteLogCount; i++) {
-          if (i > 0) hbJson += ",";
-          hbJson += "{\"level\":\"" + remoteLogQueue[i].level + "\",";
-          hbJson += "\"tag\":\"" + remoteLogQueue[i].tag + "\",";
-          String cleanMsg = remoteLogQueue[i].msg;
-          cleanMsg.replace("\"", "\\\"");
-          cleanMsg.replace("\n", " ");
-          cleanMsg.replace("\r", "");
-          hbJson += "\"message\":\"" + cleanMsg + "\"}";
-        }
-        hbJson += "]";
-      }
-      hbJson += "}";
-
-      publishMqttTelemetry(battVolts, battPct);
-
-      String hbResp;
-      if (postEncryptedToServer("/heartbeat", hbJson, hbResp)) {
-        remoteLogCount = 0; // Cleared successfully upon delivery
-        StaticJsonDocument<2048> doc;
-        if (deserializeJson(doc, hbResp) == DeserializationError::Ok) {
-          uint16_t cloudCount = doc["cloud_template_count"] | 0;
-          if (cloudCount > 0 && flashStorage.getEnrolledStudentCount() == 0) {
-            syncDepartmentTemplatesFromServer();
-          }
-
-          JsonObject cmd = doc["command"];
-          if (!cmd.isNull()) {
-            lastActivityMs = millis();
-            String cmdType = String((const char*)(cmd["command_type"] | ""));
-            if (cmdType == "ENROLL_STUDENT") {
-              handleRemoteStudentEnrollment(cmd);
-            } else if (cmdType == "SYNC_TEMPLATES") {
-              syncDepartmentTemplatesFromServer();
-            } else if (cmdType == "BUZZER_CHIME") {
-              ui.beepAttendanceSuccess();
-            } else if (cmdType == "SCAN_WIFI") {
-              handleScanWifiCommand(cmd);
-            } else if (cmdType == "SWITCH_WIFI" || cmdType == "ADD_WIFI") {
-              handleSwitchWifiCommand(cmd);
-            } else if (cmdType == "FALLBACK_WIFI") {
-              handleFallbackWifiCommand(cmd);
-            } else if (cmdType == "RESET_WIFI") {
-              handleResetWifiCommand(cmd);
-            } else if (cmdType == "CMD_OTA_UPDATE" || cmdType == "OTA_UPDATE") {
-              String otaUrl = String((const char*)(cmd["url"] | cmd["payload"]["url"] | ""));
-              if (otaUrl.length() > 0) {
-                performOtaUpdate(otaUrl);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // ─── 6. Continuous OLED Display Update Engine ───
+  // ─── 5. Continuous OLED Display Update Engine ───
   // Automatically reverts banners back to IDLE after timeout
   if (currentUiState == UI_STATE_BANNER) {
     if (millis() >= bannerExpireMs) {

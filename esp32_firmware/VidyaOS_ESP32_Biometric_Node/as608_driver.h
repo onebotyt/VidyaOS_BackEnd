@@ -103,6 +103,27 @@ public:
   }
 
   /**
+   * Fast check if a finger is currently present on the sensor glass.
+   */
+  bool hasFinger() {
+    uint8_t p = finger.getImage();
+    return (p != FINGERPRINT_NOFINGER);
+  }
+
+  /**
+   * Bounded wait for student to remove their finger from the glass,
+   * preventing multiple repeated scans from a single touch.
+   */
+  void waitForFingerRelease(uint32_t timeoutMs = 2500) {
+    uint32_t start = millis();
+    while ((millis() - start < timeoutMs)) {
+      uint8_t p = finger.getImage();
+      if (p == FINGERPRINT_NOFINGER) break;
+      delay(40);
+    }
+  }
+
+  /**
    * Enrolls a student's fingerprint into `targetSlot` (2 scans) and extracts
    * the 512-byte portable AS608 template into `outTemplate512` via UPCHAR (0x08).
    * Features bounded timeouts so sensor never hangs the ESP32.

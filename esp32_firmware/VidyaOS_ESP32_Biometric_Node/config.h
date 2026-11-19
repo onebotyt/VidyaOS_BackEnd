@@ -96,8 +96,10 @@
 #define BATTERY_LOW_THRESHOLD_VOLTS 6.80f // 20% Low Battery Warning (< 6.8V)
 
 // ─── 3. Timing Constants & Thresholds ───────────────────────────────────────
-#define ENABLE_AUTO_SLEEP           false    // Set true ONLY if AS608 Pin 6 (WAK) is wired to GPIO 33
-#define INACTIVITY_SLEEP_TIMEOUT_MS 120000UL // 2 minutes (120,000 ms) auto sleep
+#define ENABLE_AUTO_SLEEP           true     // Hardware Deep Sleep mode on inactivity
+#define INACTIVITY_SLEEP_TIMEOUT_MS 120000UL // 2 minutes (120,000 ms) auto deep sleep
+#define DUPLICATE_COOLDOWN_SEC      300UL    // 5 minutes duplicate scan suppression
+#define BACKUP_TIMER_SLEEP_SEC      600ULL   // 10 minutes periodic background sync wakeup
 #define SUCCESS_LED_HOLD_MS         2500UL   // Green LED held for 2.5 seconds
 #define UNREGISTERED_HOLD_MS        2000UL   // Red LED held for 2.0 seconds
 #define FAILED_HOLD_MS              2000UL   // Red LED flash / failure hold

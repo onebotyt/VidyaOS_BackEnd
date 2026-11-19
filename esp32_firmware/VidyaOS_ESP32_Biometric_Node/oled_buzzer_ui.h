@@ -301,9 +301,9 @@ public:
 
   /**
    * Screen 1: Successful Attendance
-   * Header: SUCCESSFULLY MARKED
-   * Line 1: Enroll: 2024IT005
-   * Line 2: Arjun Rao
+   * Header: ATTENDANCE MARKED
+   * Line 1: Marked Successfully
+   * Line 2: Arjun Rao (or 2024IT005)
    * Line 3: Time: 10:45:12 AM
    */
   void showAttendanceSuccess(const char* enrollmentNo, const char* fullName, const char* timeStr) {
@@ -312,27 +312,83 @@ public:
     display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
     display.setTextSize(1);
-    display.setCursor(6, 3);
-    display.print("SUCCESSFULLY MARKED");
+    display.setCursor(8, 3);
+    display.print("ATTENDANCE MARKED");
 
     display.setTextColor(SSD1306_WHITE);
 
-    // Line 1: Enrollment Number
-    display.setCursor(2, 19);
-    display.print("Enroll: ");
-    display.print((enrollmentNo && strlen(enrollmentNo) > 0) ? enrollmentNo : "2024IT005");
+    // Line 1: Status confirmation
+    display.setCursor(2, 18);
+    display.print("Marked Successfully");
 
-    // Line 2: Student Full Name
+    // Line 2: Student Full Name / Enroll No
     display.setCursor(2, 33);
     char nameBuf[22];
-    strncpy(nameBuf, (fullName && strlen(fullName) > 0) ? fullName : "Student", 21);
+    strncpy(nameBuf, (fullName && strlen(fullName) > 0) ? fullName : ((enrollmentNo && strlen(enrollmentNo) > 0) ? enrollmentNo : "Student"), 21);
     nameBuf[21] = '\0';
     display.print(nameBuf);
 
     // Line 3: Timestamp
     display.setCursor(2, 49);
     display.print("Time: ");
-    display.print((timeStr && strlen(timeStr) > 0) ? timeStr : "10:45:12 AM");
+    display.print((timeStr && strlen(timeStr) > 0) ? timeStr : "Recorded");
+
+    display.display();
+  }
+
+  /**
+   * Screen 1B: Duplicate Attendance
+   * Header: ALREADY MARKED
+   * Line 1: Attendance Already
+   * Line 2: Marked for Today
+   * Line 3: Student Name
+   */
+  void showDuplicateAttendance(const char* enrollmentNo, const char* fullName, const char* timeStr) {
+    if (!displayReady) return;
+    display.clearDisplay();
+    display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(16, 3);
+    display.print("ALREADY MARKED");
+
+    display.setTextColor(SSD1306_WHITE);
+
+    display.setCursor(2, 19);
+    display.print("Attendance Already");
+
+    display.setCursor(2, 33);
+    display.print("Marked for Today");
+
+    display.setCursor(2, 49);
+    char nameBuf[22];
+    strncpy(nameBuf, (fullName && strlen(fullName) > 0) ? fullName : ((enrollmentNo && strlen(enrollmentNo) > 0) ? enrollmentNo : "Student"), 21);
+    nameBuf[21] = '\0';
+    display.print(nameBuf);
+
+    display.display();
+  }
+
+  /**
+   * Screen 1C: Fingerprint Scanning in Progress
+   */
+  void showScanningScreen() {
+    if (!displayReady) return;
+    display.clearDisplay();
+    display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
+    display.setTextSize(1);
+    display.setCursor(10, 3);
+    display.print("VIDYAOS ATTENDANCE");
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(24, 25);
+    display.print("Scanning...");
+
+    display.drawRoundRect(2, 44, 124, 18, 3, SSD1306_WHITE);
+    display.setCursor(8, 49);
+    display.print("Keep Finger Placed");
 
     display.display();
   }
@@ -375,11 +431,11 @@ public:
   }
 
   /**
-   * Screen 3: Finger Not Registered
-   * Header: NOT REGISTERED
-   * Line 1: Finger Not Found
-   * Line 2: Slot Unassigned
-   * Line 3: Contact HOD Office
+   * Screen 3: Finger Not Recognized
+   * Header: NOT RECOGNIZED
+   * Line 1: Fingerprint Not
+   * Line 2: Recognized
+   * Line 3: Please Retry or HOD
    */
   void showFingerNotRegistered() {
     if (!displayReady) return;
@@ -387,18 +443,18 @@ public:
     display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
     display.setTextColor(SSD1306_BLACK);
     display.setTextSize(1);
-    display.setCursor(20, 3);
-    display.print("NOT REGISTERED");
+    display.setCursor(16, 3);
+    display.print("NOT RECOGNIZED");
 
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(4, 20);
-    display.print("Finger Not Found");
+    display.print("Fingerprint Not");
 
     display.setCursor(4, 34);
-    display.print("Slot Unassigned");
+    display.print("Recognized");
 
     display.setCursor(4, 49);
-    display.print("Contact HOD Office");
+    display.print("Please Retry or HOD");
 
     display.display();
   }
@@ -478,8 +534,8 @@ public:
     // Bottom: Institutional Prompt
     display.setTextSize(1);
     display.drawRoundRect(2, 46, 124, 17, 3, SSD1306_WHITE);
-    display.setCursor(6, 51);
-    display.print("Place Finger to Scan");
+    display.setCursor(8, 51);
+    display.print("Ready / Scan Finger");
 
     display.display();
   }
@@ -508,11 +564,20 @@ public:
   void showWakingScreen() {
     if (!displayReady) return;
     display.clearDisplay();
+    display.fillRect(0, 0, 128, 14, SSD1306_WHITE);
+    display.setTextColor(SSD1306_BLACK);
     display.setTextSize(1);
-    display.setCursor(20, 22);
-    display.print("TOUCH DETECTED");
-    display.setCursor(16, 38);
-    display.print("Terminal Ready...");
+    display.setCursor(10, 3);
+    display.print("VIDYAOS ATTENDANCE");
+
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(8, 24);
+    display.print("Ready / Scan Finger");
+
+    display.drawRoundRect(2, 44, 124, 18, 3, SSD1306_WHITE);
+    display.setCursor(8, 49);
+    display.print("Touch Glass to Mark");
     display.display();
   }
 
