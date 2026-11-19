@@ -251,6 +251,7 @@ class AuthModel {
     resolvedGoogleSub,
     officialEnrollmentNo,
     registrationNo,
+    classRollNo = null,
     fullName,
     parentPhone,
     parentName,
@@ -270,12 +271,13 @@ class AuthModel {
       await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`, [createdUserId]);
 
       const [sRes] = await conn.execute(
-        `INSERT INTO students (user_id, official_enrollment_no, registration_no, full_name, phone, parent_phone, parent_name, is_phone_verified, entry_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'self_registered')`,
+        `INSERT INTO students (user_id, official_enrollment_no, registration_no, class_roll_no, full_name, phone, parent_phone, parent_name, is_phone_verified, entry_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'self_registered')`,
         [
           createdUserId,
           officialEnrollmentNo.trim(),
           (registrationNo || '').trim() || null,
+          classRollNo ? parseInt(classRollNo, 10) : null,
           fullName.trim(),
           cleanPhone,
           parentPhone ? parentPhone.trim() : null,
@@ -286,8 +288,8 @@ class AuthModel {
 
       await conn.execute(
         `INSERT INTO enrollments (student_id, department_id, year, semester, academic_year_id, class_roll_no, status)
-         VALUES (?, ?, ?, ?, ?, NULL, 'PENDING')`,
-        [createdStudentId, effDeptId, effYear, semester, ayId]
+         VALUES (?, ?, ?, ?, ?, ?, 'PENDING')`,
+        [createdStudentId, effDeptId, effYear, semester, ayId, classRollNo ? parseInt(classRollNo, 10) : null]
       );
 
       return {

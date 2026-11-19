@@ -62,7 +62,7 @@ class AuthController {
   static async facultyLogin(req, res) {
     const credential = (req.body.email || req.body.phone || req.body.username || req.body.identifier || req.body.credential || '').trim();
     if (!credential) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' } });
     }
     try {
       const clientInfo = getClientInfo(req);
@@ -106,7 +106,7 @@ class AuthController {
   static async studentLogin(req, res) {
     const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.enrollment_no || req.body.official_enrollment_no || req.body.registration_no || '').trim();
     if (!credential) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' } });
     }
     try {
       const clientInfo = getClientInfo(req);
@@ -134,9 +134,9 @@ class AuthController {
    * @usesService authService.studentLogin() (services/authService.js)
    */
   static async login(req, res) {
-    const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.enrollment_no || '').trim();
+    const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.enrollment_no || req.body.official_enrollment_no || req.body.registration_no || '').trim();
     if (!credential) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required' } });
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' } });
     }
     try {
       const clientInfo = getClientInfo(req);
@@ -144,9 +144,13 @@ class AuthController {
       try {
         result = await authService.facultyLogin(credential, req.body.password, clientInfo);
       } catch (err) {
-        if (err.code === 'ENROLLMENT_LOGIN_DISABLED') throw err;
-        if (err.code === 'ACCOUNT_ALREADY_ACTIVE') throw err;
-        result = await authService.studentLogin(credential, req.body.password, clientInfo);
+        if (err.code === 'ACCOUNT_ALREADY_ACTIVE' || err.code === 'PENDING_APPROVAL' || err.code === 'REGISTRATION_REJECTED') throw err;
+        try {
+          result = await authService.studentLogin(credential, req.body.password, clientInfo);
+        } catch (studentErr) {
+          if (studentErr.code === 'ACCOUNT_ALREADY_ACTIVE' || studentErr.code === 'PENDING_APPROVAL' || studentErr.code === 'FORBIDDEN') throw studentErr;
+          throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
+        }
       }
       setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
@@ -155,7 +159,7 @@ class AuthController {
         success: false,
         error: {
           code: err.code || 'INTERNAL_SERVER_ERROR',
-          message: err.message,
+          message: err.message || 'invalid credentials check id and password ',
           active_session: err.active_session || undefined
         }
       });
@@ -720,7 +724,7 @@ class AuthController {
    * @usesService authService.verifyGoogleToken() (services/authService.js)
    */
   static async registerStudent(req, res) {
-    const { full_name, official_enrollment_no, registration_no, email, password, phone, parent_phone, parent_name, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
+    const { full_name, official_enrollment_no, registration_no, class_roll_no, email, password, phone, parent_phone, parent_name, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
     const effDeptId = department_id || branch_id;
     if (!effDeptId) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Department is required' } });
@@ -777,12 +781,15 @@ class AuthController {
         });
       }
 
-      const cleanEnroll = official_enrollment_no.trim();
+      const cleanEnroll = (official_enrollment_no || '').trim() || (registration_no || '').trim();
+      if (!cleanEnroll) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number or UBTER Registration number is required' } });
+      }
       const existingEnroll = await AuthModel.findExistingEnrollment(cleanEnroll);
       if (existingEnroll) {
         return res.status(409).json({
           success: false,
-          error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` }
+          error: { code: 'CONFLICT', message: `Official Enrollment / Registration Number "${cleanEnroll}" already exists in the system.` }
         });
       }
 
@@ -823,13 +830,16 @@ class AuthController {
       }
       const passwordHash = await bcrypt.hash(effPassword, 12);
 
+      const parsedRollNo = class_roll_no ? parseInt(class_roll_no, 10) : null;
+
       const result = await AuthModel.registerStudentTransaction({
         email: cleanEmail,
         cleanPhone,
         passwordHash,
         resolvedGoogleSub,
-        officialEnrollmentNo: official_enrollment_no,
-        registrationNo: registration_no,
+        officialEnrollmentNo: cleanEnroll,
+        registrationNo: (registration_no || '').trim() || null,
+        classRollNo: parsedRollNo,
         fullName: full_name,
         parentPhone: parent_phone,
         parentName: parent_name,
@@ -865,162 +875,16 @@ class AuthController {
   /**
    * Submits a faculty or HOD registration request pending administrative approval.
    * @route POST /api/v1/auth/faculty/register (routes/auth.js)
-   * @access Public (Rate limited)
-   * @usesModel AuthModel.findExistingUser() (models/authModel.js)
-   * @usesModel AuthModel.findPendingFacultyRequest() (models/authModel.js)
-   * @usesModel AuthModel.getSetting() (models/authModel.js)
-   * @usesModel AuthModel.getDepartmentById() (models/authModel.js)
-   * @usesModel AuthModel.createFacultyRequest() (models/authModel.js)
+   * @access Disabled (Faculty accounts provisioned exclusively by Admin and Department HOD)
    */
   static async registerFaculty(req, res) {
-    const { full_name, email, password, account_type, department_id, phone, employee_id } = req.body;
-    const rawDeptId = (department_id === 'COMMON' || department_id === '' || department_id === null || department_id === undefined) 
-      ? null 
-      : Number(department_id);
-
-    try {
-      const existingUser = await AuthModel.findExistingUser(email, email);
-      if (existingUser) {
-        return res.status(409).json({
-          success: false,
-          error: { code: 'CONFLICT', message: 'An account with this Gmail address already exists.' }
-        });
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Faculty self-registration has been disabled. Faculty and HOD accounts are provisioned exclusively by Institutional Administrators and Department HODs.'
       }
-
-      const existingReq = await AuthModel.findPendingFacultyRequest(email);
-      if (existingReq) {
-        return res.status(409).json({
-          success: false,
-          error: { code: 'CONFLICT', message: 'A registration request with this Gmail address is already pending approval.' }
-        });
-      }
-
-      let approvalType = 'DEPT_HOD';
-      let targetDeptId = rawDeptId;
-
-      if (account_type === 'HOD') {
-        if (!targetDeptId) {
-          return res.status(400).json({
-            success: false,
-            error: { code: 'VALIDATION_ERROR', message: 'Department selection is mandatory for HOD registration.' }
-          });
-        }
-        approvalType = 'ADMIN';
-
-        const isHodOpen = (await AuthModel.getSetting('admin_reg_hod_open')) === '1';
-        if (!isHodOpen) {
-          return res.status(403).json({
-            success: false,
-            error: {
-              code: 'REGISTRATION_CLOSED',
-              message: 'Registration is closed for Head of Department (HOD) appointments. Institutional Administration must open HOD registration before applications can be submitted.'
-            }
-          });
-        }
-      } else {
-        if (!targetDeptId) {
-          approvalType = 'ADMIN';
-          targetDeptId = null;
-
-          const isCommonOpen = (await AuthModel.getSetting('admin_reg_common_faculty_open')) === '1';
-          if (!isCommonOpen) {
-            return res.status(403).json({
-              success: false,
-              error: {
-                code: 'REGISTRATION_CLOSED',
-                message: 'Registration is closed for Common Faculty. Institutional Administration must open common faculty registration before applications can be submitted.'
-              }
-            });
-          }
-        } else {
-          approvalType = 'DEPT_HOD';
-          const deptInfo = await AuthModel.getDepartmentById(targetDeptId);
-          if (!deptInfo) {
-            return res.status(404).json({
-              success: false,
-              error: { code: 'NOT_FOUND', message: 'Selected department does not exist or is inactive.' }
-            });
-          }
-
-          if (!deptInfo.hod_user_id || deptInfo.hod_status !== 'ACTIVE') {
-            return res.status(403).json({
-              success: false,
-              error: {
-                code: 'REGISTRATION_CLOSED',
-                message: `Registration is closed for ${deptInfo.name}. No active Head of Department (HOD) is currently appointed for this branch to open registration.`
-              }
-            });
-          }
-
-          const isDeptFacultyOpen = (await AuthModel.getSetting(`faculty_reg_dept_${targetDeptId}`)) === '1';
-          if (!isDeptFacultyOpen) {
-            return res.status(403).json({
-              success: false,
-              error: {
-                code: 'REGISTRATION_CLOSED',
-                message: `Registration is closed for ${deptInfo.name}. The Department HOD has not opened faculty registration at this time.`
-              }
-            });
-          }
-        }
-      }
-
-      if (targetDeptId) {
-        const deptCheck = await AuthModel.getDepartmentById(targetDeptId);
-        if (!deptCheck) {
-          return res.status(404).json({
-            success: false,
-            error: { code: 'NOT_FOUND', message: 'Selected department does not exist or is inactive.' }
-          });
-        }
-      }
-
-      let cleanPhone = null;
-      if (phone && phone.trim()) {
-        cleanPhone = normalizePhone(phone);
-        if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
-          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mobile number must be a valid 10-digit Indian number.' } });
-        }
-      }
-
-      const passwordHash = await bcrypt.hash(password, 12);
-      const requestId = await AuthModel.createFacultyRequest({
-        fullName: full_name,
-        email,
-        passwordHash,
-        cleanPhone,
-        phone,
-        employeeId: employee_id,
-        accountType: account_type,
-        targetDeptId,
-        approvalType
-      });
-
-      let reviewMsg = 'Your registration request has been submitted successfully.';
-      if (approvalType === 'ADMIN') {
-        reviewMsg = account_type === 'HOD'
-          ? 'Your HOD appointment request has been submitted and is pending review by the System Administrator.'
-          : 'Your common faculty registration has been submitted and is pending review by the Institutional Administrator.';
-      } else {
-        reviewMsg = 'Your faculty registration has been submitted and is pending review by your Department HOD.';
-      }
-
-      res.status(201).json({
-        success: true,
-        message: reviewMsg,
-        data: {
-          request_id: requestId,
-          full_name,
-          email,
-          account_type,
-          department_id: targetDeptId,
-          approval_type: approvalType,
-          status: 'PENDING'
-        }
-      });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
+    });
   }
 }
 

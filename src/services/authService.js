@@ -28,17 +28,20 @@ const { normalizePhone } = require('../utils/formatters');
 
 /**
  * Validates and normalizes login credentials.
- * Strictly accepts Gmail addresses or Phone numbers (and 'admin' for superadmin).
- * Strictly rejects enrollment numbers or unrecognized strings.
+ * Accepts Gmail addresses, Phone numbers, Admin username, or
+ * Enrollment Number / UBTER Registration Number / Employee ID / Username.
  */
 function parseLoginCredential(raw, allowAdmin = false) {
   if (!raw || typeof raw !== 'string') {
-    throw { status: 400, code: 'VALIDATION_ERROR', message: 'Gmail address or Mobile number is required.' };
+    throw { status: 400, code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' };
   }
   const trimmed = raw.trim();
+  if (!trimmed) {
+    throw { status: 400, code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' };
+  }
   if (trimmed.includes('@')) {
     if (!isValidEmail(trimmed)) {
-      throw { status: 400, code: 'VALIDATION_ERROR', message: 'Invalid Gmail address format.' };
+      throw { status: 400, code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' };
     }
     return { type: 'EMAIL', value: trimmed.toLowerCase() };
   }
@@ -53,11 +56,8 @@ function parseLoginCredential(raw, allowAdmin = false) {
     return { type: 'ADMIN_USERNAME', value: 'admin' };
   }
 
-  throw {
-    status: 400,
-    code: 'ENROLLMENT_LOGIN_DISABLED',
-    message: 'Enrollment numbers cannot be used to log in. Please sign in with your registered Gmail address or Mobile number.'
-  };
+  // Identifier: Enrollment Number, UBTER Registration Number, Employee ID, or Username
+  return { type: 'IDENTIFIER', value: trimmed };
 }
 
 // ─── Google Auth ──────────────────────────────────────────
@@ -292,6 +292,14 @@ class AuthService {
          JOIN user_roles ur ON u.id = ur.user_id
          WHERE ur.role = 'SYSTEM_ADMIN' LIMIT 1`
       );
+    } else if (cred.type === 'IDENTIFIER') {
+      users = await query(
+        `SELECT u.id, u.username, u.email, u.phone, u.password_hash, u.temp_password_hash, u.must_change_password, u.status
+         FROM users u
+         LEFT JOIN teachers t ON t.user_id = u.id
+         WHERE LOWER(u.username) = LOWER(?) OR LOWER(t.employee_id) = LOWER(?)`,
+        [cred.value, cred.value]
+      );
     }
 
     if (!users || users.length === 0) {
@@ -312,7 +320,7 @@ class AuthService {
           if (tableErr.status) throw tableErr;
         }
       }
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid credentials. Please check your Gmail address / Mobile number and password.' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
     }
     const user = users[0];
 
@@ -334,7 +342,7 @@ class AuthService {
     if (user.status === 'PROVISIONED' || user.must_change_password) {
       const matchTemp = user.temp_password_hash ? await bcrypt.compare(password, user.temp_password_hash) : false;
       if (!matchTemp) {
-        throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid temporary password' };
+        throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
       }
       // Return activation token — frontend shows "Set permanent password + Connect Google" card
       const activationToken = generateActivationToken(user);
@@ -362,7 +370,7 @@ class AuthService {
       isMatch = (await bcrypt.compare('Password@123', user.password_hash)) || (await bcrypt.compare('Admin@123', user.password_hash));
     }
     if (!isMatch) {
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid credentials' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
     }
 
     // Enforce single active session
@@ -481,7 +489,7 @@ class AuthService {
   }
 
   // ─────────────────────────────────────────────────────────
-  // STUDENT LOGIN (Strictly Gmail or Phone Number)
+  // STUDENT LOGIN (Gmail, Phone, Enrollment No, or UBTER Reg No)
   // ─────────────────────────────────────────────────────────
   async studentLogin(credential, password, clientInfo = {}) {
     const cred = parseLoginCredential(credential, false);
@@ -501,10 +509,20 @@ class AuthService {
          WHERE u.phone = ? OR s.phone = ?`,
         [cred.value, cred.value]
       );
+    } else if (cred.type === 'IDENTIFIER') {
+      users = await query(
+        `SELECT u.id, u.username, u.email, u.phone, u.password_hash, u.temp_password_hash, u.must_change_password, u.status, u.rejection_reason
+         FROM users u 
+         JOIN students s ON u.id = s.user_id
+         WHERE LOWER(s.official_enrollment_no) = LOWER(?)
+            OR LOWER(s.registration_no) = LOWER(?)
+            OR LOWER(u.username) = LOWER(?)`,
+        [cred.value, cred.value, cred.value]
+      );
     }
 
     if (!users || users.length === 0) {
-      throw { status: 401, code: 'UNAUTHORIZED', message: 'Student account not found with this Gmail address or Mobile number.' };
+      throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
     }
     const user = users[0];
 
@@ -531,7 +549,7 @@ class AuthService {
     // Provisioned: use temp password
     if (user.status === 'PROVISIONED' || user.must_change_password) {
       const matchTemp = user.temp_password_hash ? await bcrypt.compare(password, user.temp_password_hash) : false;
-      if (!matchTemp) throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid temporary password' };
+      if (!matchTemp) throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
 
       const activationToken = generateActivationToken(user);
       return {
@@ -553,7 +571,7 @@ class AuthService {
     if (!isMatch && (trimmedPass === 'Password@123' || trimmedPass === 'Admin@123' || trimmedPass === 'password123')) {
       isMatch = (await bcrypt.compare('Password@123', user.password_hash)) || (await bcrypt.compare('Admin@123', user.password_hash));
     }
-    if (!isMatch) throw { status: 401, code: 'UNAUTHORIZED', message: 'Invalid password' };
+    if (!isMatch) throw { status: 401, code: 'UNAUTHORIZED', message: 'invalid credentials check id and password ' };
 
     // Enforce single active session
     await enforceSingleActiveSession(user.id, clientInfo);

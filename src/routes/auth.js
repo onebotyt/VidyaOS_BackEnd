@@ -223,7 +223,24 @@ router.post(
   authLimiter,
   [
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
-    body('official_enrollment_no').trim().notEmpty().withMessage('Enrollment number is required'),
+    body('official_enrollment_no').optional().trim(),
+    body('registration_no').optional().trim(),
+    body().custom((value, { req }) => {
+      const enroll = (req.body.official_enrollment_no || '').trim();
+      const reg = (req.body.registration_no || '').trim();
+      if (!enroll && !reg) {
+        throw new Error('Enrollment number or UBTER Registration number is required');
+      }
+      return true;
+    }),
+    body('class_roll_no').optional().custom((val) => {
+      if (val === undefined || val === null || val === '') return true;
+      const num = parseInt(val, 10);
+      if (isNaN(num) || num <= 0) {
+        throw new Error('Class roll number must be a positive integer');
+      }
+      return true;
+    }),
     body('email').isEmail().withMessage('Valid Gmail address is required').normalizeEmail({ gmail_remove_dots: false }),
     body('password').custom((value, { req }) => {
       const hasGoogle = Boolean(req.body.google_sub || req.body.google_id_token);
@@ -248,32 +265,19 @@ router.post(
 );
 
 // @route   POST /api/v1/auth/faculty/register
-// @desc    Submit faculty / HOD registration request
-// @access  Public (Rate limited)
-// @handler AuthController.registerFaculty() -> AuthModel.createFacultyRequest()
+// @desc    Faculty self-registration disabled (Faculty accounts provisioned exclusively by Admin and Department HOD)
+// @access  Disabled
 router.post(
   '/faculty/register',
-  authLimiter,
-  [
-    body('full_name').trim().notEmpty().withMessage('Full name is required'),
-    body('email').isEmail().withMessage('Valid Gmail address is required').normalizeEmail({ gmail_remove_dots: false }),
-    body('password').custom((value, { req }) => {
-      const hasGoogle = Boolean(req.body.google_sub || req.body.google_id_token);
-      if (hasGoogle && (!value || String(value).trim() === '')) {
-        return true;
+  (req, res) => {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Faculty self-registration has been disabled. Faculty and HOD accounts are provisioned exclusively by Institutional Administrators and Department HODs.'
       }
-      if (!value || String(value).length < 8) {
-        throw new Error('Password must be at least 8 characters');
-      }
-      return true;
-    }),
-    body('account_type').isIn(['FACULTY', 'HOD']).withMessage('Account type must be FACULTY or HOD'),
-    body('department_id').optional({ nullable: true }),
-    body('phone').optional().trim(),
-    body('employee_id').optional().trim(),
-    validate
-  ],
-  AuthController.registerFaculty
+    });
+  }
 );
 
 module.exports = router;
