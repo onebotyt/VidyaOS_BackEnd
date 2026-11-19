@@ -81,13 +81,13 @@ async function auth(req, res, next) {
         if (sess.is_revoked === 1 || isIdleExpired) {
           _userAuthCache.delete(cacheKey);
           if (isIdleExpired && sess.is_revoked === 0) {
-            query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
+            query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => { });
           }
           try {
             res.clearCookie('accessToken', { path: '/' });
             res.clearCookie('token', { path: '/' });
             res.clearCookie('refreshToken', { path: '/' });
-          } catch (_) {}
+          } catch (_) { }
           return res.status(401).json({
             success: false,
             error: {
@@ -102,7 +102,7 @@ async function auth(req, res, next) {
         const lastWrite = _lastHeartbeatWrite.get(decoded.session_id) || 0;
         if ((now - lastWrite) > HEARTBEAT_WRITE_INTERVAL_MS) {
           _lastHeartbeatWrite.set(decoded.session_id, now);
-          query(`UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => {});
+          query(`UPDATE user_sessions SET last_active_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => { });
         }
       }
     }
