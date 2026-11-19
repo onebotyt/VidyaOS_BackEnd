@@ -166,6 +166,24 @@ class DeviceService {
       [device.department_id]
     );
 
+    // Save any remote logs delivered along with heartbeat
+    if (Array.isArray(decryptedPayload.logs) && decryptedPayload.logs.length > 0) {
+      for (const logItem of decryptedPayload.logs) {
+        const level = String(logItem.level || 'INFO').toUpperCase().slice(0, 16);
+        const tag = String(logItem.tag || 'SYSTEM').toUpperCase().slice(0, 32);
+        const msg = String(logItem.message || logItem.msg || '').slice(0, 2048);
+        if (msg) {
+          try {
+            await query(
+              `INSERT INTO device_logs (device_id, device_uid, log_level, tag, message, created_at)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+              [device.id, device.device_uid, level, tag, msg]
+            );
+          } catch (_) {}
+        }
+      }
+    }
+
     const responseObj = {
       status: 'OK',
       device_uid: device.device_uid,
@@ -893,6 +911,68 @@ class DeviceService {
       command_type: 'RESET_WIFI',
       message: 'Wi-Fi reset command queued. ESP32 will clear secondary credentials and reconnect to default Wi-Fi.'
     };
+  }
+
+  async recordDeviceLogs(deviceUid, rawBody = null) {
+    let device = null;
+    let payload = rawBody;
+
+    if (rawBody && rawBody.encrypted) {
+      const resolved = await this.resolveAuthenticatedDevice(deviceUid, {}, rawBody);
+      device = resolved.device;
+      payload = resolved.decryptedPayload;
+    } else {
+      const devices = await query(`SELECT id, device_uid FROM devices WHERE device_uid = ? LIMIT 1`, [deviceUid]);
+      if (devices && devices.length > 0) {
+        device = devices[0];
+      }
+    }
+
+    const deviceId = device ? device.id : 1;
+    const logs = Array.isArray(payload) ? payload : (payload?.logs || []);
+
+    if (Array.isArray(logs) && logs.length > 0) {
+      for (const item of logs) {
+        const level = String(item.level || 'INFO').toUpperCase().slice(0, 16);
+        const tag = String(item.tag || 'SYSTEM').toUpperCase().slice(0, 32);
+        const msg = String(item.message || item.msg || '').slice(0, 2048);
+        if (msg) {
+          try {
+            await query(
+              `INSERT INTO device_logs (device_id, device_uid, log_level, tag, message, created_at)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+              [deviceId, deviceUid || device?.device_uid || 'ESP32', level, tag, msg]
+            );
+          } catch (_) {}
+        }
+      }
+    }
+    return { success: true, count: logs.length };
+  }
+
+  async getDeviceLogs(deviceId, { limit = 80, level = null, tag = null } = {}) {
+    let sql = `SELECT id, device_id, device_uid, log_level, tag, message, created_at FROM device_logs WHERE device_id = ?`;
+    const params = [deviceId];
+
+    if (level && level !== 'ALL') {
+      sql += ` AND log_level = ?`;
+      params.push(level);
+    }
+    if (tag && tag !== 'ALL') {
+      sql += ` AND tag = ?`;
+      params.push(tag);
+    }
+
+    sql += ` ORDER BY id DESC LIMIT ?`;
+    params.push(Math.min(parseInt(limit, 10) || 80, 200));
+
+    const rows = await query(sql, params);
+    return rows.reverse();
+  }
+
+  async clearDeviceLogs(deviceId) {
+    await query(`DELETE FROM device_logs WHERE device_id = ?`, [deviceId]);
+    return { success: true, message: 'Remote device logs cleared.' };
   }
 }
 

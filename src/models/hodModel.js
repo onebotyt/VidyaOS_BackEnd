@@ -1115,9 +1115,9 @@ class HodModel {
    */
   static async createDevice({ deviceUid, name, departmentId, year, semester, ayId, secretHash, secretKey }) {
     const result = await query(
-      `INSERT INTO devices (device_uuid, device_name, department_id, branch_id, year, semester, academic_year_id, secret_key, secret_hash, firmware_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'v3.0-AES256-GCM')`,
-      [deviceUid, name, departmentId, departmentId, year || 1, semester || 1, ayId, secretKey || secretHash, secretHash]
+      `INSERT INTO devices (device_uuid, device_name, department_id, year, semester, secret_key, secret_hash, firmware_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'v3.0-AES256-GCM')`,
+      [deviceUid, name, departmentId, year || 1, semester || 1, secretKey || secretHash, secretHash]
     );
     return result.insertId ?? result[0]?.insertId ?? result.lastID;
   }

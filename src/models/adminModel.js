@@ -524,8 +524,8 @@ class AdminModel {
    */
   static async createDevice({ deviceUid, name, departmentId, year, semester, ayId, secretHash }) {
     const result = await query(
-      `INSERT INTO devices (device_uuid, device_name, department_id, year, semester, academic_year_id, secret_hash) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [deviceUid, name, departmentId, year, semester, ayId, secretHash]
+      `INSERT INTO devices (device_uuid, device_name, department_id, year, semester, secret_hash) VALUES (?, ?, ?, ?, ?, ?)`,
+      [deviceUid, name, departmentId, year, semester, secretHash]
     );
     return result[0]?.insertId ?? result.lastInsertRowid;
   }

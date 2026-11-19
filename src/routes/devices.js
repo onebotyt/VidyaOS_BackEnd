@@ -34,6 +34,10 @@ router.post('/esp32/attendance', deviceWebhookLimiter, (req, res) => deviceContr
 // @desc    ESP32 Uploads Nearby Wi-Fi Scan Results
 router.post('/esp32/wifi-scan-report', deviceWebhookLimiter, (req, res) => deviceController.handleWifiScanReport(req, res));
 
+// @route   POST /api/v1/devices/esp32/logs
+// @desc    ESP32 Transmits Remote Diagnostic Logs Over Internet
+router.post('/esp32/logs', deviceWebhookLimiter, (req, res) => deviceController.handleDeviceLogs(req, res));
+
 // @route   POST /api/v1/devices/webhook/scan
 // @desc    Compatible ESP32 Hardware Webhook (Encrypted or JSON)
 router.post('/webhook/scan', deviceWebhookLimiter, (req, res) => deviceController.handleScanWebhook(req, res));
@@ -92,6 +96,14 @@ router.post('/hod/:device_id/wifi/fallback', auth, requireRole(...facultyRoles),
 // @route   POST /api/v1/devices/hod/:device_id/wifi/reset
 // @desc    Reset Wi-Fi Credentials on ESP32 to Factory Default
 router.post('/hod/:device_id/wifi/reset', auth, requireRole(...facultyRoles), (req, res) => deviceController.triggerWifiReset(req, res));
+
+// @route   GET /api/v1/devices/hod/:device_id/logs
+// @desc    Fetch Remote Diagnostic Logs Transmitted from ESP32 over Internet
+router.get('/hod/:device_id/logs', auth, requireRole(...facultyRoles), (req, res) => deviceController.getDeviceLogs(req, res));
+
+// @route   DELETE /api/v1/devices/hod/:device_id/logs
+// @desc    Clear Remote Diagnostic Logs for Terminal
+router.delete('/hod/:device_id/logs', auth, requireRole(...facultyRoles), (req, res) => deviceController.clearDeviceLogs(req, res));
 
 // @route   POST /api/v1/devices/hod/command
 // @desc    Queue Remote Command to ESP32 (ENROLL_STUDENT, SYNC_TEMPLATES, BUZZER_CHIME)

@@ -78,6 +78,36 @@ void onEnrollStageUpdate(const char* stageMsg) {
   ui.showEnrollmentScreen(activeEnrollName, activeEnrollRoll, stageMsg);
 }
 
+// ─── Remote Cloud Diagnostics & System Logging (Over the Internet) ──────────
+#define MAX_REMOTE_LOG_QUEUE 12
+
+struct RemoteLogEntry {
+  String level;
+  String tag;
+  String msg;
+};
+
+RemoteLogEntry remoteLogQueue[MAX_REMOTE_LOG_QUEUE];
+int remoteLogCount = 0;
+
+void queueRemoteLog(const char* level, const char* tag, const String& msg) {
+  Serial.printf("[%s][%s] %s\n", level, tag, msg.c_str());
+
+  if (remoteLogCount < MAX_REMOTE_LOG_QUEUE) {
+    remoteLogQueue[remoteLogCount].level = String(level);
+    remoteLogQueue[remoteLogCount].tag = String(tag);
+    remoteLogQueue[remoteLogCount].msg = msg;
+    remoteLogCount++;
+  } else {
+    for (int i = 0; i < MAX_REMOTE_LOG_QUEUE - 1; i++) {
+      remoteLogQueue[i] = remoteLogQueue[i + 1];
+    }
+    remoteLogQueue[MAX_REMOTE_LOG_QUEUE - 1].level = String(level);
+    remoteLogQueue[MAX_REMOTE_LOG_QUEUE - 1].tag = String(tag);
+    remoteLogQueue[MAX_REMOTE_LOG_QUEUE - 1].msg = msg;
+  }
+}
+
 static bool executeSinglePost(const String& fullUrl, const String& endpointPath, const String& plainJson, String& outDecryptedJson) {
   HTTPClient http;
   WiFiClientSecure secureClient;
@@ -604,12 +634,10 @@ void handleResetWifiCommand(JsonObject cmd) {
  */
 bool performOtaUpdate(const String& binUrl) {
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println(F("[OTA] Cannot update: Wi-Fi offline"));
+    queueRemoteLog("ERROR", "OTA", "Cannot perform OTA update: Wi-Fi offline");
     return false;
   }
-  Serial.println(F("[OTA] ========================================"));
-  Serial.println(F("[OTA] Starting Wireless OTA Firmware Update"));
-  Serial.print(F("[OTA] Source URL: ")); Serial.println(binUrl);
+  queueRemoteLog("INFO", "OTA", "Starting wireless OTA download from: " + binUrl);
 
   ui.showBootScreen("OTA FIRMWARE UPDATE", "Connecting to server...");
   ui.setWifiLed(true);
@@ -627,30 +655,30 @@ bool performOtaUpdate(const String& binUrl) {
   }
 
   if (!began) {
-    Serial.println(F("[OTA] Failed to initialize HTTP client"));
+    queueRemoteLog("ERROR", "OTA", "Failed to initialize HTTP client for: " + binUrl);
     ui.showAttendanceFailed("OTA Connect Failed", "Check server URL");
     return false;
   }
 
   int httpCode = http.GET();
   if (httpCode != 200) {
-    Serial.printf("[OTA] HTTP GET failed: code %d\n", httpCode);
+    queueRemoteLog("ERROR", "OTA", "HTTP GET failed with code: " + String(httpCode));
     ui.showAttendanceFailed("OTA HTTP Error", String(httpCode).c_str());
     http.end();
     return false;
   }
 
   int contentLength = http.getSize();
-  Serial.printf("[OTA] Firmware binary size: %d bytes\n", contentLength);
+  queueRemoteLog("INFO", "OTA", "Firmware binary located: " + String(contentLength) + " bytes. Flashing partition...");
   if (contentLength <= 0) {
-    Serial.println(F("[OTA] Invalid firmware content length"));
+    queueRemoteLog("ERROR", "OTA", "Invalid firmware content length (0 bytes)");
     http.end();
     return false;
   }
 
   bool canBegin = Update.begin(contentLength);
   if (!canBegin) {
-    Serial.println(F("[OTA] Update.begin failed: insufficient space"));
+    queueRemoteLog("ERROR", "OTA", "Update.begin failed: insufficient partition space");
     ui.showAttendanceFailed("OTA Space Error", "Flash partition full");
     http.end();
     return false;
@@ -659,21 +687,20 @@ bool performOtaUpdate(const String& binUrl) {
   ui.showBootScreen("OTA FLASHING", "Writing flash partition...");
   WiFiClient* stream = http.getStreamPtr();
   size_t written = Update.writeStream(*stream);
-  Serial.printf("[OTA] Successfully written: %u / %d bytes\n", (unsigned int)written, contentLength);
 
   if (Update.end()) {
     if (Update.isFinished()) {
-      Serial.println(F("[OTA] Flashing complete! Restarting ESP32..."));
+      queueRemoteLog("INFO", "OTA", "OTA flashing 100% complete (" + String((unsigned int)written) + " bytes)! Restarting ESP32...");
       ui.setSuccessLed(true);
       ui.showBootScreen("OTA UPDATE COMPLETE", "Restarting Node...");
       delay(1500);
       ESP.restart();
       return true;
     } else {
-      Serial.println(F("[OTA] Update not finished properly"));
+      queueRemoteLog("ERROR", "OTA", "Update did not finish properly");
     }
   } else {
-    Serial.printf("[OTA] Update error #: %u\n", Update.getError());
+    queueRemoteLog("ERROR", "OTA", "Update error #: " + String(Update.getError()));
     ui.showAttendanceFailed("OTA Write Error", "Checksum mismatch");
   }
 
@@ -1003,12 +1030,29 @@ void loop() {
       hbJson += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
       hbJson += "\"connected_ssid\":\"" + currentConnectedSsid + "\",";
       hbJson += "\"firmware_version\":\"" + String(FIRMWARE_VERSION) + "\"";
+
+      // Append buffered remote diagnostic logs for over-the-internet cloud feed
+      if (remoteLogCount > 0) {
+        hbJson += ",\"logs\":[";
+        for (int i = 0; i < remoteLogCount; i++) {
+          if (i > 0) hbJson += ",";
+          hbJson += "{\"level\":\"" + remoteLogQueue[i].level + "\",";
+          hbJson += "\"tag\":\"" + remoteLogQueue[i].tag + "\",";
+          String cleanMsg = remoteLogQueue[i].msg;
+          cleanMsg.replace("\"", "\\\"");
+          cleanMsg.replace("\n", " ");
+          cleanMsg.replace("\r", "");
+          hbJson += "\"message\":\"" + cleanMsg + "\"}";
+        }
+        hbJson += "]";
+      }
       hbJson += "}";
 
       publishMqttTelemetry(battVolts, battPct);
 
       String hbResp;
       if (postEncryptedToServer("/heartbeat", hbJson, hbResp)) {
+        remoteLogCount = 0; // Cleared successfully upon delivery
         StaticJsonDocument<2048> doc;
         if (deserializeJson(doc, hbResp) == DeserializationError::Ok) {
           uint16_t cloudCount = doc["cloud_template_count"] | 0;

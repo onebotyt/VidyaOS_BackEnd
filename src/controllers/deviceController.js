@@ -677,15 +677,16 @@ class DeviceController {
 
     try {
       const isSysAdmin = req.user?.roles?.includes('SYSTEM_ADMIN');
-      // For HOD / Faculty, strictly lock department_id to their own department
+      // For HOD / Faculty, automatically resolve and strictly lock to their department
       if (!isSysAdmin) {
-        let userDept = null;
-        if (req.user?.teacher_id) {
+        let userDept = req.user?.department_id || req.user?.hod_department_id || null;
+        if (!userDept && req.user?.teacher_id) {
           const tRows = await query('SELECT department_id FROM teachers WHERE id = ?', [req.user.teacher_id]);
           userDept = tRows[0]?.department_id || null;
         }
-        if (!userDept && req.user?.department_id) {
-          userDept = req.user.department_id;
+        if (!userDept && req.user?.id) {
+          const tRows = await query('SELECT department_id FROM teachers WHERE user_id = ?', [req.user.id]);
+          userDept = tRows[0]?.department_id || null;
         }
         if (userDept) {
           department_id = userDept;
@@ -1003,6 +1004,36 @@ class DeviceController {
       return res.json({ success: true, data: result, message: `Recorded ${result.recorded} scanned Wi-Fi network(s).` });
     } catch (err) {
       return res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  async handleDeviceLogs(req, res) {
+    const device_uid = req.body.device_uid || req.headers['x-device-uid'];
+    try {
+      const result = await deviceService.recordDeviceLogs(device_uid, req.body);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      return res.status(err.status || 500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  async getDeviceLogs(req, res) {
+    try {
+      const deviceId = parseInt(req.params.device_id, 10);
+      const logs = await deviceService.getDeviceLogs(deviceId, req.query);
+      return res.json({ success: true, data: logs });
+    } catch (err) {
+      return res.status(err.status || 500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  async clearDeviceLogs(req, res) {
+    try {
+      const deviceId = parseInt(req.params.device_id, 10);
+      const result = await deviceService.clearDeviceLogs(deviceId);
+      return res.json({ success: true, ...result });
+    } catch (err) {
+      return res.status(err.status || 500).json({ success: false, error: { message: err.message } });
     }
   }
 }
