@@ -338,6 +338,36 @@ async function ensureCompatibilityViews() {
         INDEX idx_stdoc_dept (department_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // 6. Ensure bug_reports table exists for website technical issue reporting
+    await query(`
+      CREATE TABLE IF NOT EXISTS bug_reports (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        report_id VARCHAR(30) NOT NULL UNIQUE,
+        user_id INT NOT NULL,
+        user_name VARCHAR(150) NOT NULL,
+        user_role VARCHAR(50) NOT NULL,
+        user_email VARCHAR(150) NULL,
+        department_id INT NULL,
+        department_name VARCHAR(150) NULL,
+        issue_title VARCHAR(255) NOT NULL,
+        issue_category VARCHAR(100) NOT NULL,
+        description TEXT NOT NULL,
+        screenshot_url VARCHAR(500) NOT NULL,
+        screenshot_filename VARCHAR(255) NOT NULL,
+        recording_url VARCHAR(500) NULL,
+        recording_filename VARCHAR(255) NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'New',
+        admin_response TEXT NULL,
+        rejection_reason TEXT NULL,
+        resolved_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_bug_user (user_id),
+        INDEX idx_bug_status (status),
+        INDEX idx_bug_created (created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
   } catch (err) {
     logger.warn(`Note on tables auto-provision check: ${err.message}`);
   }
