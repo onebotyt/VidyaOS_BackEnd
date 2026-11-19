@@ -69,11 +69,210 @@ class StudentRecordModel {
   }
 
   /**
+   * Parses freeform composite search query into structured tokens:
+   * e.g. "1 girdhardhami assinment java" -> { rollNo: 1, workType: 'ASSIGNMENT', subjectKeyword: 'java', nameTokens: ['girdhardhami'], isWorkSearch: true }
+   */
+  static parseSearchQuery(searchStr) {
+    if (!searchStr) return { raw: '', tokens: [], isWorkSearch: false };
+    const raw = String(searchStr).trim();
+    const tokens = raw.split(/\s+/).filter(Boolean);
+
+    let rollNo = null;
+    let workType = null;
+    let workTypeKeyword = null;
+    let subjectKeyword = null;
+    const nameTokens = [];
+
+    for (const token of tokens) {
+      const lower = token.toLowerCase();
+
+      // Pure digit token (e.g. 1, 01, 12)
+      if (/^\d+$/.test(lower) && rollNo === null && parseInt(lower, 10) < 500) {
+        rollNo = parseInt(lower, 10);
+        continue;
+      }
+
+      // Work type match (including assinment, assignment, lab, test, practical, finaldocs)
+      if (/^(assign|assin|asgn|asig|homework)/.test(lower)) {
+        workType = 'ASSIGNMENT';
+        workTypeKeyword = token;
+        continue;
+      }
+      if (/^(test|exam|quiz|mst|paper|question)/.test(lower)) {
+        workType = 'TEST';
+        workTypeKeyword = token;
+        continue;
+      }
+      if (/^(lab|practical|journal|manual|experiment)/.test(lower)) {
+        workType = 'PRACTICAL';
+        workTypeKeyword = token;
+        continue;
+      }
+      if (/^(finaldoc|finaldocs|viva|project|microproject)/.test(lower)) {
+        workType = 'FINAL_DOCS';
+        workTypeKeyword = token;
+        continue;
+      }
+
+      // Known subject keywords
+      if (/^(java|dbms|database|os|operating|system|systems|cn|network|networks|web|webtech|python|cpp|c|ds|dsa|linux|cloud|algorithms|software)/.test(lower)) {
+        subjectKeyword = lower;
+        continue;
+      }
+
+      // Student name / enrollment / registration token
+      nameTokens.push(lower);
+    }
+
+    return {
+      raw,
+      tokens,
+      rollNo,
+      workType,
+      workTypeKeyword,
+      subjectKeyword,
+      nameTokens,
+      isWorkSearch: Boolean(workType || subjectKeyword)
+    };
+  }
+
+  /**
+   * Retrieves specific student work items matching composite search criteria:
+   * e.g. Roll 1 + Girdhar Dhami + Assignment + Java
+   */
+  static async searchStudentWorkItems({ deptId, academicYearId, year, semester, batch, searchParsed }) {
+    const { rollNo, workType, subjectKeyword, nameTokens } = searchParsed;
+
+    let sql = `
+      SELECT 
+        st.id as student_id,
+        st.id as id,
+        st.user_id,
+        st.full_name,
+        COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+        st.official_enrollment_no,
+        st.registration_no,
+        e.semester as current_semester,
+        e.year as current_year,
+        e.department_id,
+        CONCAT(st.admission_year, ' - ', COALESCE(st.graduation_year, st.admission_year + COALESCE(d.degree_duration_years, 3))) as batch_label,
+        a.id as assessment_id,
+        a.title as assessment_title,
+        a.type as assessment_type,
+        a.max_marks,
+        a.due_date,
+        COALESCE(tg.subject_name, s.name, 'Department Subject') as subject_name,
+        COALESCE(tg.subject_code, s.code, 'IT500') as subject_code,
+        sub.id as submission_id,
+        sub.file_path,
+        sub.original_filename,
+        sub.marks_obtained,
+        COALESCE(sub.status, 'PENDING') as submission_status,
+        sub.submitted_at,
+        sub.feedback,
+        1 as is_work_item
+      FROM students st
+      JOIN users u ON st.user_id = u.id
+      JOIN enrollments e ON e.student_id = st.id
+      JOIN departments d ON e.department_id = d.id
+      JOIN assessments a ON (a.department_id = e.department_id AND a.semester = e.semester)
+      LEFT JOIN subjects s ON a.subject_id = s.id
+      LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+      LEFT JOIN assessment_submissions sub ON a.id = sub.assessment_id AND sub.student_id = st.id
+      WHERE e.department_id = ?
+        AND st.deleted_at IS NULL
+    `;
+
+    const params = [deptId];
+
+    if (academicYearId) {
+      sql += ` AND e.academic_year_id = ?`;
+      params.push(Number(academicYearId));
+    }
+    if (year) {
+      sql += ` AND e.year = ?`;
+      params.push(Number(year));
+    }
+    if (semester) {
+      sql += ` AND e.semester = ?`;
+      params.push(Number(semester));
+    }
+
+    // Roll number filter
+    if (rollNo !== null) {
+      sql += ` AND (COALESCE(st.class_roll_no, e.class_roll_no) = ? OR st.class_roll_no = ?)`;
+      params.push(rollNo, rollNo);
+    }
+
+    // Name tokens filter (supports no-space names like 'girdhardhami')
+    if (nameTokens.length > 0) {
+      for (const token of nameTokens) {
+        const term = `%${token}%`;
+        sql += ` AND (
+          LOWER(st.full_name) LIKE ? OR
+          REPLACE(LOWER(st.full_name), ' ', '') LIKE ? OR
+          LOWER(st.official_enrollment_no) LIKE ? OR
+          LOWER(st.registration_no) LIKE ? OR
+          LOWER(u.email) LIKE ?
+        )`;
+        params.push(term, term, term, term, term);
+      }
+    }
+
+    // Work type filter
+    if (workType === 'ASSIGNMENT') {
+      sql += ` AND a.type = 'ASSIGNMENT'`;
+    } else if (workType === 'TEST') {
+      sql += ` AND a.type IN ('TEST', 'CLASS_TEST', 'EXAM')`;
+    } else if (workType === 'PRACTICAL') {
+      sql += ` AND a.type IN ('PRACTICAL', 'LAB_EXPERIMENT')`;
+    } else if (workType === 'FINAL_DOCS') {
+      sql += ` AND (a.type = 'FINAL_DOCS' OR a.type = 'ASSIGNMENT')`;
+    }
+
+    // Subject keyword filter
+    if (subjectKeyword) {
+      const sTerm = `%${subjectKeyword}%`;
+      sql += ` AND (
+        LOWER(s.name) LIKE ? OR
+        LOWER(s.code) LIKE ? OR
+        LOWER(tg.subject_name) LIKE ? OR
+        LOWER(tg.subject_code) LIKE ? OR
+        LOWER(a.title) LIKE ?
+      )`;
+      params.push(sTerm, sTerm, sTerm, sTerm, sTerm);
+    }
+
+    sql += ` ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC, a.created_at ASC`;
+
+    return await query(sql, params);
+  }
+
+  /**
    * Retrieves list of students matching filter parameters
    * @param {Object} params Filter criteria
-   * @returns {Promise<Array>} List of students with aggregated attendance and academic summary
+   * @returns {Promise<Object>} List of students or matched work items
    */
   static async getStudents({ deptId, academicYearId, year, semester, batch, search, status = 'active', limit = 100, offset = 0 }) {
+    const searchParsed = StudentRecordModel.parseSearchQuery(search);
+
+    // If search is a work item query, delegate to searchStudentWorkItems
+    if (searchParsed.isWorkSearch) {
+      const workItems = await StudentRecordModel.searchStudentWorkItems({
+        deptId,
+        academicYearId,
+        year,
+        semester,
+        batch,
+        searchParsed
+      });
+      return {
+        isWorkSearch: true,
+        searchParsed,
+        rows: workItems
+      };
+    }
+
     let sql = `
       SELECT 
         st.id,
@@ -121,7 +320,8 @@ class StudentRecordModel {
           SELECT COUNT(sd.id) 
           FROM student_documents sd 
           WHERE sd.student_id = st.id
-        ) as document_count
+        ) as document_count,
+        0 as is_work_item
       FROM students st
       JOIN users u ON st.user_id = u.id
       JOIN enrollments e ON e.student_id = st.id
@@ -174,11 +374,29 @@ class StudentRecordModel {
       }
     }
 
-    // Search query
+    // Smart multi-token student search (handles roll, spaced and no-space names)
     if (search && search.trim()) {
-      const term = `%${search.trim()}%`;
-      sql += ` AND (st.full_name LIKE ? OR st.official_enrollment_no LIKE ? OR st.registration_no LIKE ? OR u.email LIKE ?)`;
-      params.push(term, term, term, term);
+      if (searchParsed.rollNo !== null) {
+        sql += ` AND (COALESCE(st.class_roll_no, e.class_roll_no) = ? OR st.class_roll_no = ?)`;
+        params.push(searchParsed.rollNo, searchParsed.rollNo);
+      }
+      if (searchParsed.nameTokens.length > 0) {
+        for (const token of searchParsed.nameTokens) {
+          const term = `%${token}%`;
+          sql += ` AND (
+            LOWER(st.full_name) LIKE ? OR
+            REPLACE(LOWER(st.full_name), ' ', '') LIKE ? OR
+            LOWER(st.official_enrollment_no) LIKE ? OR
+            LOWER(st.registration_no) LIKE ? OR
+            LOWER(u.email) LIKE ?
+          )`;
+          params.push(term, term, term, term, term);
+        }
+      } else if (searchParsed.rollNo === null) {
+        const term = `%${search.trim()}%`;
+        sql += ` AND (st.full_name LIKE ? OR REPLACE(LOWER(st.full_name), ' ', '') LIKE ? OR st.official_enrollment_no LIKE ? OR st.registration_no LIKE ? OR u.email LIKE ?)`;
+        params.push(term, term, term, term, term);
+      }
     }
 
     sql += ` ORDER BY e.year ASC, e.semester ASC, COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC LIMIT ? OFFSET ?`;
@@ -186,7 +404,7 @@ class StudentRecordModel {
 
     const rows = await query(sql, params);
 
-    return rows.map(r => {
+    const mapped = rows.map(r => {
       const total = Number(r.total_attendance_sessions) || 0;
       const attended = Number(r.total_attended_sessions) || 0;
       const pct = total > 0 ? Math.round((attended * 100) / total) : 100;
@@ -195,6 +413,12 @@ class StudentRecordModel {
         attendance_percentage: pct
       };
     });
+
+    return {
+      isWorkSearch: false,
+      searchParsed,
+      rows: mapped
+    };
   }
 
   /**

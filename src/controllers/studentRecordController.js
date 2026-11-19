@@ -53,7 +53,7 @@ class StudentRecordController {
 
       const offset = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
 
-      const students = await StudentRecordModel.getStudents({
+      const result = await StudentRecordModel.getStudents({
         deptId,
         academicYearId: academic_year_id ? Number(academic_year_id) : null,
         year: year ? Number(year) : null,
@@ -65,11 +65,19 @@ class StudentRecordController {
         offset
       });
 
+      const isWorkSearch = Boolean(result && result.isWorkSearch);
+      const rows = result.rows || result;
+
       res.json({
         success: true,
-        data: students,
+        data: rows,
         meta: {
-          count: students.length,
+          is_work_search: isWorkSearch,
+          work_type: result.searchParsed?.workType || null,
+          subject: result.searchParsed?.subjectKeyword || null,
+          roll_no: result.searchParsed?.rollNo || null,
+          search_query: search || '',
+          count: rows.length,
           page: parseInt(page, 10),
           limit: parseInt(limit, 10)
         }

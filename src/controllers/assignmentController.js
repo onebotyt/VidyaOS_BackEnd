@@ -2,9 +2,13 @@
  * Assignment Controller — HTTP request/response handlers for coursework assignments.
  */
 
+const fs = require('fs');
+const path = require('path');
 const assignmentModel = require('../models/assignmentModel');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
+const { formatSubmissionFilename } = require('../utils/filenameFormatter');
+const { query } = require('../config/db');
 const logger = require('../utils/logger');
 
 class AssignmentController {
@@ -145,12 +149,84 @@ class AssignmentController {
     if (!req.file) {
       return res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'Please select a file to upload' } });
     }
-    const filePath = `/uploads/submissions/${req.file.filename}`;
+
+    let formattedFilename = req.file.originalname;
+    let targetFilePath = req.file.path;
+    let filePath = `/uploads/submissions/${req.file.filename}`;
+
+    if (req.user?.student_id) {
+      try {
+        const stRows = await query(
+          `SELECT st.id, st.full_name, COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no
+           FROM students st
+           LEFT JOIN enrollments e ON e.student_id = st.id
+           WHERE st.id = ? LIMIT 1`,
+          [req.user.student_id]
+        );
+        const student = stRows[0] || { id: req.user.student_id, full_name: 'Student', class_roll_no: '0' };
+
+        let subjectName = req.body.subject_name || req.body.subject || '';
+        let subjectCode = req.body.subject_code || '';
+        let assessmentType = req.body.assessment_type || req.body.type || '';
+        let assessmentTitle = req.body.assessment_title || req.body.title || '';
+
+        if (req.body.assessment_id) {
+          const aRows = await query(
+            `SELECT a.type, a.title, COALESCE(tg.subject_name, s.name, '') as subject_name, COALESCE(tg.subject_code, s.code, '') as subject_code
+             FROM assessments a
+             LEFT JOIN subjects s ON a.subject_id = s.id
+             LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+             WHERE a.id = ? LIMIT 1`,
+            [req.body.assessment_id]
+          );
+          if (aRows && aRows.length > 0) {
+            assessmentType = aRows[0].type;
+            assessmentTitle = aRows[0].title;
+            subjectName = aRows[0].subject_name;
+            subjectCode = aRows[0].subject_code;
+          }
+        }
+
+        formattedFilename = formatSubmissionFilename({
+          rollNo: student.class_roll_no,
+          fullName: student.full_name,
+          checklistItem: req.body.checklist_item || req.body.item_label,
+          assessmentType,
+          assessmentTitle,
+          customWorkType: req.body.work_type,
+          subjectName,
+          subjectCode,
+          originalFilename: req.file.originalname
+        });
+
+        const targetDir = path.dirname(req.file.path);
+        targetFilePath = path.join(targetDir, formattedFilename);
+        if (fs.existsSync(targetFilePath) && targetFilePath !== req.file.path) {
+          try { fs.unlinkSync(targetFilePath); } catch (_) {}
+        }
+        fs.renameSync(req.file.path, targetFilePath);
+        filePath = `/uploads/submissions/${formattedFilename}`;
+      } catch (renameErr) {
+        logger.warn('[AssignmentController] uploadDocument rename notice:', renameErr.message);
+      }
+    }
+
+    try {
+      const storageService = require('../services/storageService');
+      const uploadRes = await storageService.uploadFile(targetFilePath, {
+        folder: 'submissions',
+        filename: formattedFilename
+      });
+      if (uploadRes && uploadRes.url) {
+        filePath = uploadRes.url;
+      }
+    } catch (_) {}
+
     return res.json({
       success: true,
       data: {
         file_path: filePath,
-        original_filename: req.file.originalname,
+        original_filename: formattedFilename,
         size: req.file.size
       }
     });
@@ -158,6 +234,7 @@ class AssignmentController {
 
   /**
    * Submits student file for an assignment assessment.
+   * Standardizes filename to: rollno_firstname_lastname_worktype_subject.ext
    * 
    * @route POST /api/v1/assignments/:id/submit (routes/assignments.js)
    * @access Protected (STUDENT)
@@ -176,18 +253,91 @@ class AssignmentController {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Work item not found' } });
       }
 
+      // Fetch student details for standardized naming
+      const stRows = await query(
+        `SELECT st.id, st.full_name, COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no
+         FROM students st
+         LEFT JOIN enrollments e ON e.student_id = st.id
+         WHERE st.id = ?
+         LIMIT 1`,
+        [req.user.student_id]
+      );
+      const student = stRows[0] || { id: req.user.student_id, full_name: 'Student', class_roll_no: '0' };
+
+      // Fetch subject and assessment info
+      const assessRows = await query(
+        `SELECT a.id, a.type, a.title,
+                COALESCE(tg.subject_name, s.name, '') as subject_name,
+                COALESCE(tg.subject_code, s.code, '') as subject_code
+         FROM assessments a
+         LEFT JOIN subjects s ON a.subject_id = s.id
+         LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+         WHERE a.id = ?
+         LIMIT 1`,
+        [req.params.id]
+      );
+      const assess = assessRows[0] || a;
+
+      const formattedFilename = formatSubmissionFilename({
+        rollNo: student.class_roll_no,
+        fullName: student.full_name,
+        checklistItem: req.body.checklist_item || req.body.item_label || req.query.checklist_item,
+        assessmentType: assess.type,
+        assessmentTitle: assess.title,
+        customWorkType: req.body.work_type,
+        subjectName: assess.subject_name,
+        subjectCode: assess.subject_code,
+        originalFilename: req.file.originalname
+      });
+
+      // Safely rename uploaded file on disk to standardized format
+      const oldFilePath = req.file.path;
+      const targetDir = path.dirname(oldFilePath);
+      const targetFilePath = path.join(targetDir, formattedFilename);
+
+      try {
+        if (fs.existsSync(targetFilePath) && targetFilePath !== oldFilePath) {
+          try { fs.unlinkSync(targetFilePath); } catch (_) {}
+        }
+        fs.renameSync(oldFilePath, targetFilePath);
+      } catch (renameErr) {
+        logger.warn('[AssignmentController] File rename warning:', renameErr.message);
+      }
+
+      let filePath = `/uploads/submissions/${formattedFilename}`;
+
+      // Upload to Cloudinary / storage provider if configured
+      try {
+        const storageService = require('../services/storageService');
+        const uploadRes = await storageService.uploadFile(targetFilePath, {
+          folder: 'submissions',
+          filename: formattedFilename
+        });
+        if (uploadRes && uploadRes.url) {
+          filePath = uploadRes.url;
+        }
+      } catch (storageErr) {
+        // Fallback to local filePath
+      }
+
       const isLate = a.due_date && new Date() > new Date(a.due_date);
-      const filePath = `/uploads/submissions/${req.file.filename}`;
 
       await assignmentModel.upsertSubmission({
         assessmentId: req.params.id,
         studentId: req.user.student_id,
         filePath,
-        originalFilename: req.file.originalname,
+        originalFilename: formattedFilename,
         status: isLate ? 'LATE' : 'SUBMITTED'
       });
 
-      return res.json({ success: true, message: 'Submission uploaded successfully.' });
+      return res.json({
+        success: true,
+        message: 'Submission uploaded successfully.',
+        data: {
+          file_path: filePath,
+          original_filename: formattedFilename
+        }
+      });
     } catch (err) {
       logger.error('[AssignmentController] submitAssignment error:', { error: err.message });
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -196,6 +346,7 @@ class AssignmentController {
 
   /**
    * Submits bundle of finalized documents for institutional evaluation.
+   * Enforces standardized checklist item filenames.
    * 
    * @route POST /api/v1/assignments/:id/submit-final-docs (routes/assignments.js)
    * @access Protected (STUDENT)
@@ -215,8 +366,52 @@ class AssignmentController {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Work item not found' } });
       }
 
+      // Fetch student details for standardized naming
+      const stRows = await query(
+        `SELECT st.id, st.full_name, COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no
+         FROM students st
+         LEFT JOIN enrollments e ON e.student_id = st.id
+         WHERE st.id = ?
+         LIMIT 1`,
+        [req.user.student_id]
+      );
+      const student = stRows[0] || { id: req.user.student_id, full_name: 'Student', class_roll_no: '0' };
+
+      const assessRows = await query(
+        `SELECT a.id, a.type, a.title,
+                COALESCE(tg.subject_name, s.name, '') as subject_name,
+                COALESCE(tg.subject_code, s.code, '') as subject_code
+         FROM assessments a
+         LEFT JOIN subjects s ON a.subject_id = s.id
+         LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+         WHERE a.id = ?
+         LIMIT 1`,
+        [req.params.id]
+      );
+      const assess = assessRows[0] || a;
+
+      // Standardize filenames in documents list
+      const normalizedDocs = documents.map(doc => {
+        const itemLabel = doc.checklist_item || doc.title || doc.label || '';
+        const stdName = formatSubmissionFilename({
+          rollNo: student.class_roll_no,
+          fullName: student.full_name,
+          checklistItem: itemLabel,
+          assessmentType: 'FINAL_DOCS',
+          assessmentTitle: assess.title,
+          subjectName: assess.subject_name,
+          subjectCode: assess.subject_code,
+          originalFilename: doc.original_filename || doc.file_name || 'document.pdf'
+        });
+        return {
+          ...doc,
+          original_filename: stdName,
+          checklist_item: itemLabel
+        };
+      });
+
       const isLate = a.due_date && new Date() > new Date(a.due_date);
-      const docsJson = JSON.stringify(documents);
+      const docsJson = JSON.stringify(normalizedDocs);
 
       await assignmentModel.upsertSubmission({
         assessmentId: req.params.id,
