@@ -250,6 +250,7 @@ class AuthModel {
     passwordHash,
     resolvedGoogleSub,
     officialEnrollmentNo,
+    enrollmentNoStatus = 'ASSIGNED',
     registrationNo,
     classRollNo = null,
     fullName,
@@ -271,11 +272,12 @@ class AuthModel {
       await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`, [createdUserId]);
 
       const [sRes] = await conn.execute(
-        `INSERT INTO students (user_id, official_enrollment_no, registration_no, class_roll_no, full_name, phone, parent_phone, parent_name, is_phone_verified, entry_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'self_registered')`,
+        `INSERT INTO students (user_id, official_enrollment_no, enrollment_no_status, registration_no, class_roll_no, full_name, phone, parent_phone, parent_name, is_phone_verified, entry_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'self_registered')`,
         [
           createdUserId,
-          officialEnrollmentNo.trim(),
+          officialEnrollmentNo ? officialEnrollmentNo.trim() : null,
+          enrollmentNoStatus || (officialEnrollmentNo ? 'ASSIGNED' : 'Not Assigned'),
           (registrationNo || '').trim() || null,
           classRollNo ? parseInt(classRollNo, 10) : null,
           fullName.trim(),

@@ -972,6 +972,53 @@ class HodController {
   }
 
   /**
+   * Update student details (Name, Enrollment No, Registration No, Class Roll No, Year/Semester)
+   * @route PUT /api/v1/hod/students/:id
+   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
+   */
+  static async updateStudent(req, res) {
+    try {
+      const studentId = parseInt(req.params.id, 10);
+      const { full_name, official_enrollment_no, enrollment_not_available, registration_no, class_roll_no, year, semester } = req.body;
+
+      if (!full_name || !full_name.trim()) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Student Full Name is required' } });
+      }
+
+      const isNotAvailable = Boolean(enrollment_not_available);
+      const enrollNo = (official_enrollment_no || '').trim();
+      if (!isNotAvailable && enrollNo && !/^\d{11}$/.test(enrollNo)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment Number must contain exactly 11 numeric digits (0–9)' } });
+      }
+      if (!isNotAvailable && !enrollNo) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment Number is required (or check "Enrollment Number Not Available")' } });
+      }
+
+      if (class_roll_no !== undefined && class_roll_no !== null && String(class_roll_no).trim() !== '') {
+        const rollStr = String(class_roll_no).trim();
+        if (!/^\d{1,2}$/.test(rollStr)) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Class Roll Number must be a maximum of 2 numeric digits' } });
+        }
+      }
+
+      const result = await HodModel.updateStudent(studentId, {
+        fullName: full_name,
+        officialEnrollmentNo: enrollNo,
+        enrollmentNotAvailable: isNotAvailable,
+        registrationNo: registration_no,
+        classRollNo: class_roll_no,
+        year,
+        semester
+      }, req.user?.id);
+
+      res.json({ success: true, message: 'Student details updated successfully', data: result });
+    } catch (err) {
+      const status = err.status || 500;
+      res.status(status).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
    * Reset student account password
    * @route POST /api/v1/hod/students/:id/reset-password (routes/hod.js)
    * @access Protected (HOD, SYSTEM_ADMIN)

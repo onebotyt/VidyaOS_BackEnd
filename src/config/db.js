@@ -241,6 +241,17 @@ async function ensureCompatibilityViews() {
         logger.info('✓ Added missing column fingerprint_slots.slot_id');
       }
     } catch (_) {}
+
+    // 1d. Ensure students.official_enrollment_no allows NULL and enrollment_no_status exists
+    try {
+      await query("ALTER TABLE students MODIFY official_enrollment_no VARCHAR(100) NULL DEFAULT NULL");
+      const statCols = await query("SHOW COLUMNS FROM students LIKE 'enrollment_no_status'");
+      if (!statCols || statCols.length === 0) {
+        await query("ALTER TABLE students ADD COLUMN enrollment_no_status VARCHAR(50) DEFAULT 'ASSIGNED' AFTER official_enrollment_no");
+        await query("UPDATE students SET enrollment_no_status = 'Not Assigned' WHERE official_enrollment_no IS NULL OR official_enrollment_no = '' OR official_enrollment_no = 'Not Assigned'");
+        logger.info('✓ Added missing column students.enrollment_no_status');
+      }
+    } catch (_) {}
   } catch (err) {
     logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
   }

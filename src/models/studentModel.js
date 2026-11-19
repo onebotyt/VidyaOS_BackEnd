@@ -567,16 +567,16 @@ class StudentModel {
 
       if (action === 'APPROVE') {
         resolvedEnrollNo = (officialEnrollmentNo || enrollmentNo || student.official_enrollment_no || '').trim();
-        if (!resolvedEnrollNo) {
-          throw { status: 400, code: 'VALIDATION_ERROR', message: 'Official Enrollment Number is required to approve student enrollment' };
-        }
-
-        const [conflict] = await conn.execute(
-          `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
-          [resolvedEnrollNo, actualStudentId]
-        );
-        if (conflict && conflict.length > 0) {
-          throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${resolvedEnrollNo}" is already assigned to another student.` };
+        if (!resolvedEnrollNo || resolvedEnrollNo.toLowerCase() === 'not assigned') {
+          resolvedEnrollNo = null;
+        } else {
+          const [conflict] = await conn.execute(
+            `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
+            [resolvedEnrollNo, actualStudentId]
+          );
+          if (conflict && conflict.length > 0) {
+            throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${resolvedEnrollNo}" is already assigned to another student.` };
+          }
         }
 
         const resolvedAyId = student.academic_year_id || (await StudentModel.getCurrentAcademicYearId()) || 1;
@@ -596,14 +596,18 @@ class StudentModel {
         }
 
         // Check if username is already in use by another user
-        const [userConflict] = await conn.execute(
-          `SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1`,
-          [resolvedEnrollNo, userId]
-        );
-        if (userConflict && userConflict.length > 0) {
-          await conn.execute(`UPDATE users SET status = 'ACTIVE' WHERE id = ?`, [userId]);
+        if (resolvedEnrollNo) {
+          const [userConflict] = await conn.execute(
+            `SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1`,
+            [resolvedEnrollNo, userId]
+          );
+          if (userConflict && userConflict.length > 0) {
+            await conn.execute(`UPDATE users SET status = 'ACTIVE' WHERE id = ?`, [userId]);
+          } else {
+            await conn.execute(`UPDATE users SET status = 'ACTIVE', username = ? WHERE id = ?`, [resolvedEnrollNo, userId]);
+          }
         } else {
-          await conn.execute(`UPDATE users SET status = 'ACTIVE', username = ? WHERE id = ?`, [resolvedEnrollNo, userId]);
+          await conn.execute(`UPDATE users SET status = 'ACTIVE' WHERE id = ?`, [userId]);
         }
 
         // Upsert or update enrollment record
@@ -624,9 +628,10 @@ class StudentModel {
           );
         }
 
+        const enrollNoStatus = resolvedEnrollNo ? 'ASSIGNED' : 'Not Assigned';
         await conn.execute(
-          `UPDATE students SET official_enrollment_no = ?, class_roll_no = ? WHERE id = ?`,
-          [resolvedEnrollNo, finalRollNo, actualStudentId]
+          `UPDATE students SET official_enrollment_no = ?, enrollment_no_status = ?, class_roll_no = ? WHERE id = ?`,
+          [resolvedEnrollNo, enrollNoStatus, finalRollNo, actualStudentId]
         );
 
         try {

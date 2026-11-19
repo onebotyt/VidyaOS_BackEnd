@@ -781,16 +781,36 @@ class AuthController {
         });
       }
 
-      const cleanEnroll = (official_enrollment_no || '').trim() || (registration_no || '').trim();
-      if (!cleanEnroll) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number or UBTER Registration number is required' } });
+      const isEnrollNotAvailable = Boolean(req.body.enrollment_not_available);
+      let cleanEnroll = (official_enrollment_no || '').trim();
+      let enrollmentStatus = 'ASSIGNED';
+
+      if (isEnrollNotAvailable || cleanEnroll.toLowerCase() === 'not assigned') {
+        cleanEnroll = null;
+        enrollmentStatus = 'Not Assigned';
+      } else {
+        if (!cleanEnroll) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number is required or check "Enrollment Number Not Available"' } });
+        }
+        if (!/^\d{11}$/.test(cleanEnroll)) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number must contain exactly 11 numeric digits (0–9)' } });
+        }
+        const existingEnroll = await AuthModel.findExistingEnrollment(cleanEnroll);
+        if (existingEnroll) {
+          return res.status(409).json({
+            success: false,
+            error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system.` }
+          });
+        }
       }
-      const existingEnroll = await AuthModel.findExistingEnrollment(cleanEnroll);
-      if (existingEnroll) {
-        return res.status(409).json({
-          success: false,
-          error: { code: 'CONFLICT', message: `Official Enrollment / Registration Number "${cleanEnroll}" already exists in the system.` }
-        });
+
+      let parsedRollNo = null;
+      if (class_roll_no !== undefined && class_roll_no !== null && String(class_roll_no).trim() !== '') {
+        const rollStr = String(class_roll_no).trim();
+        if (!/^\d{1,2}$/.test(rollStr)) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Class Roll Number must be a maximum of 2 numeric digits' } });
+        }
+        parsedRollNo = parseInt(rollStr, 10);
       }
 
       const cleanEmail = email.trim();
@@ -830,14 +850,13 @@ class AuthController {
       }
       const passwordHash = await bcrypt.hash(effPassword, 12);
 
-      const parsedRollNo = class_roll_no ? parseInt(class_roll_no, 10) : null;
-
       const result = await AuthModel.registerStudentTransaction({
         email: cleanEmail,
         cleanPhone,
         passwordHash,
         resolvedGoogleSub,
         officialEnrollmentNo: cleanEnroll,
+        enrollmentNoStatus: enrollmentStatus,
         registrationNo: (registration_no || '').trim() || null,
         classRollNo: parsedRollNo,
         fullName: full_name,

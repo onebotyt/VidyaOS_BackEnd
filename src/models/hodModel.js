@@ -456,7 +456,7 @@ class HodModel {
     const params = hasDept ? [deptId] : [];
 
     const students = await query(
-      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, st.registration_no,
+      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, st.enrollment_no_status, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               e.year, e.semester, COALESCE(e.status, 'ENROLLED') as enrollment_status,
               d.name as department_name, d.code as department_code
@@ -1237,7 +1237,7 @@ class HodModel {
     );
 
     const students = await query(
-      `SELECT st.id, st.user_id, st.official_enrollment_no, st.official_enrollment_no as enrollment_no,
+      `SELECT st.id, st.user_id, st.official_enrollment_no, st.enrollment_no_status, st.official_enrollment_no as enrollment_no,
               st.registration_no, st.registration_no as ubter_reg_no, st.full_name,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               st.admission_year, st.is_lateral_entry,
@@ -1625,6 +1625,104 @@ class HodModel {
     }
 
     return { deleted_count: count };
+  }
+
+  /**
+   * Update student details (Name, Enrollment No, Registration No, Class Roll No, Year/Semester)
+   * @param {number} studentId Student ID
+   * @param {Object} data Update fields
+   * @param {number} userId Acting user ID
+   * @returns {Promise<Object>} Updated student record
+   */
+  static async updateStudent(studentId, { fullName, officialEnrollmentNo, enrollmentNotAvailable, registrationNo, classRollNo, year, semester }, userId = 1) {
+    const sRows = await query(
+      `SELECT s.*, e.id as enrollment_id, e.department_id, e.academic_year_id, e.year, e.semester
+       FROM students s
+       LEFT JOIN enrollments e ON e.student_id = s.id
+       WHERE s.id = ? AND s.deleted_at IS NULL ORDER BY e.id DESC LIMIT 1`,
+      [studentId]
+    );
+    if (!sRows.length) {
+      throw { status: 404, code: 'NOT_FOUND', message: 'Student record not found or has been moved to Trash' };
+    }
+    const st = sRows[0];
+
+    const isNotAvailable = Boolean(enrollmentNotAvailable);
+    let cleanEnroll = (officialEnrollmentNo || '').trim();
+    let enrollmentStatus = 'ASSIGNED';
+
+    if (isNotAvailable || cleanEnroll.toLowerCase() === 'not assigned' || cleanEnroll === '') {
+      cleanEnroll = null;
+      enrollmentStatus = 'Not Assigned';
+    } else {
+      if (!/^\d{11}$/.test(cleanEnroll)) {
+        throw { status: 400, code: 'VALIDATION_ERROR', message: 'Enrollment Number must contain exactly 11 numeric digits (0–9)' };
+      }
+      const conflicts = await query(
+        `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
+        [cleanEnroll, studentId]
+      );
+      if (conflicts.length > 0) {
+        throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${cleanEnroll}" is already assigned to another student.` };
+      }
+    }
+
+    let parsedRollNo = null;
+    if (classRollNo !== undefined && classRollNo !== null && String(classRollNo).trim() !== '') {
+      const rollStr = String(classRollNo).trim();
+      if (!/^\d{1,2}$/.test(rollStr)) {
+        throw { status: 400, code: 'VALIDATION_ERROR', message: 'Class Roll Number must be a maximum of 2 numeric digits' };
+      }
+      parsedRollNo = parseInt(rollStr, 10);
+    }
+
+    const sem = semester ? parseInt(semester, 10) : (st.semester || 1);
+    const yr = year ? parseInt(year, 10) : (Math.ceil(sem / 2) || st.year || 1);
+    const cleanName = fullName ? fullName.trim() : st.full_name;
+    const cleanReg = registrationNo !== undefined ? (registrationNo ? String(registrationNo).trim() : null) : st.registration_no;
+
+    return await withTransaction(async (conn) => {
+      await conn.execute(
+        `UPDATE students SET full_name = ?, official_enrollment_no = ?, enrollment_no_status = ?, registration_no = ?, class_roll_no = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [cleanName, cleanEnroll, enrollmentStatus, cleanReg, parsedRollNo, studentId]
+      );
+
+      if (st.enrollment_id) {
+        await conn.execute(
+          `UPDATE enrollments SET year = ?, semester = ?, class_roll_no = ?, updated_at = CURRENT_TIMESTAMP WHERE student_id = ?`,
+          [yr, sem, parsedRollNo, studentId]
+        );
+      }
+
+      if (st.user_id && cleanEnroll) {
+        const [userConflict] = await conn.execute(
+          `SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1`,
+          [cleanEnroll, st.user_id]
+        );
+        if (!userConflict || userConflict.length === 0) {
+          await conn.execute(`UPDATE users SET username = ? WHERE id = ?`, [cleanEnroll, st.user_id]);
+        }
+      }
+
+      try {
+        await conn.execute(
+          `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json, created_at)
+           VALUES (?, 'STUDENT_UPDATED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
+          [userId || 1, String(studentId), JSON.stringify({ name: cleanName, enroll: cleanEnroll, roll: parsedRollNo, sem })]
+        );
+      } catch (_) {}
+
+      return {
+        id: studentId,
+        full_name: cleanName,
+        official_enrollment_no: cleanEnroll,
+        enrollment_no_status: enrollmentStatus,
+        registration_no: cleanReg,
+        class_roll_no: parsedRollNo,
+        year: yr,
+        semester: sem
+      };
+    });
   }
 
   /**

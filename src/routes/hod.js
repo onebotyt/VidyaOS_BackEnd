@@ -266,6 +266,11 @@ router.post('/students/bulk', requireHODOrClassTeacher(), [
   validate
 ], HodController.bulkCreateStudents);
 
+// @route   PUT /api/v1/hod/students/:id
+// @desc    Update student details (Name, Enrollment No, Reg No, Class Roll No, Year/Semester)
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+router.put('/students/:id', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.updateStudent);
+
 // @route   DELETE /api/v1/hod/students/:id
 // @desc    Delete student record, user account, attendance records, and reindex roll numbers
 // @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
@@ -296,6 +301,11 @@ router.get('/students/:id/documents', [param('id').isInt(), validate], HodContro
 // @desc    Upload an archived document or official record for a student
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
 router.post('/students/:id/documents', [param('id').isInt(), validate], uploadStudentDoc.single('file'), HodController.uploadStudentDocument);
+
+// @route   PUT /api/v1/hod/students/:id
+// @desc    Update student details (Name, Enrollment No, Reg No, Class Roll No, Year/Semester)
+// @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
+router.put('/students/:id', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.updateStudent);
 
 // @route   DELETE /api/v1/hod/students/:id/documents/:docId
 // @desc    Delete an archived student document
