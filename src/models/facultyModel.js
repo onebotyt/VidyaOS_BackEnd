@@ -223,7 +223,26 @@ class FacultyModel {
        WHERE ar.id = ?`,
       [registerId]
     );
-    return rows[0] || null;
+    if (rows[0]) {
+      if (!rows[0].group_id) {
+        const [tg] = await query(`SELECT id FROM teaching_groups WHERE id = ? OR name LIKE ? LIMIT 1`, [registerId, `%${rows[0].name || ''}%`]);
+        if (tg) rows[0].group_id = tg.id;
+      }
+      return rows[0];
+    }
+    // Fallback: check if registerId is a teaching_groups.id
+    const tgRows = await query(
+      `SELECT tg.id, tg.id as group_id, tg.name, tg.subject_name, tg.subject_code,
+              tg.component as session_type, tg.teacher_id, tg.department_id,
+              tg.academic_year_id, tg.semester, d.name as department_name,
+              ay.label as academic_year_label
+       FROM teaching_groups tg
+       LEFT JOIN departments d ON tg.department_id = d.id
+       LEFT JOIN academic_years ay ON tg.academic_year_id = ay.id
+       WHERE tg.id = ?`,
+      [registerId]
+    );
+    return tgRows[0] || null;
   }
 
   /**
