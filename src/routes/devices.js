@@ -45,6 +45,10 @@ const facultyRoles = ['TEACHER', 'HOD', 'DEPT_HEAD', 'FACULTY', 'CLASS_TEACHER',
 // @desc    Complete HOD Department ESP32 & Student Biometric Template Overview
 router.get('/hod/overview', auth, requireRole(...facultyRoles), (req, res) => deviceController.getHodEsp32Overview(req, res));
 
+// @route   GET /api/v1/devices/hod/detect
+// @desc    Auto-Detect Nearby or Active ESP32 Biometric Terminal
+router.get('/hod/detect', auth, requireRole(...facultyRoles), (req, res) => deviceController.detectNearbyDevice(req, res));
+
 // @route   GET /api/v1/devices/hod/:device_id/wifi
 // @desc    List Configured Wi-Fi Networks for Terminal
 router.get('/hod/:device_id/wifi', auth, requireRole(...facultyRoles), (req, res) => deviceController.getDeviceWifiNetworks(req, res));

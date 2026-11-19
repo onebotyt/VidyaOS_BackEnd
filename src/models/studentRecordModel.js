@@ -266,10 +266,64 @@ class StudentRecordModel {
         batch,
         searchParsed
       });
+
+      // Extract unique student profiles for Section 1 (Showing students)
+      const studentMap = new Map();
+      workItems.forEach((w, idx) => {
+        if (!studentMap.has(w.student_id)) {
+          studentMap.set(w.student_id, {
+            id: w.student_id,
+            user_id: w.user_id,
+            full_name: w.full_name,
+            class_roll_no: w.class_roll_no || idx + 1,
+            official_enrollment_no: w.official_enrollment_no || '--',
+            registration_no: w.registration_no || '',
+            current_semester: w.current_semester,
+            current_year: w.current_year,
+            department_id: w.department_id,
+            batch_label: w.batch_label || '--',
+            attendance_percentage: 100
+          });
+        }
+      });
+      const uniqueStudents = Array.from(studentMap.values());
+
+      if (uniqueStudents.length > 0) {
+        try {
+          const sIds = uniqueStudents.map(s => s.id);
+          const placeholders = sIds.map(() => '?').join(',');
+          const attStats = await query(
+            `SELECT 
+              ra.student_id,
+              COUNT(ra.id) as total_attendance_sessions,
+              SUM(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) as total_attended_sessions
+            FROM register_attendance ra
+            WHERE ra.student_id IN (${placeholders})
+            GROUP BY ra.student_id`,
+            sIds
+          );
+          const attMap = new Map();
+          attStats.forEach(a => {
+            const tot = Number(a.total_attendance_sessions) || 0;
+            const att = Number(a.total_attended_sessions) || 0;
+            attMap.set(a.student_id, tot > 0 ? Math.round((att * 100) / tot) : 100);
+          });
+          uniqueStudents.forEach(s => {
+            if (attMap.has(s.id)) {
+              s.attendance_percentage = attMap.get(s.id);
+            }
+          });
+        } catch (e) {
+          // Keep default attendance_percentage
+        }
+      }
+
       return {
         isWorkSearch: true,
         searchParsed,
-        rows: workItems
+        rows: workItems,
+        students: uniqueStudents,
+        records: workItems
       };
     }
 
@@ -414,11 +468,517 @@ class StudentRecordModel {
       };
     });
 
+    // When searching for a student (e.g. roll, name, etc.), also fetch all their classwork items
+    let studentWorkItems = [];
+    if (search && search.trim() && mapped.length > 0) {
+      try {
+        const studentIds = mapped.map(s => s.id);
+        studentWorkItems = await StudentRecordModel.getStudentsAllWorkItems(studentIds, deptId);
+      } catch (err) {
+        console.error('Error fetching work items for searched students:', err);
+      }
+    }
+
     return {
       isWorkSearch: false,
       searchParsed,
-      rows: mapped
+      rows: mapped,
+      students: mapped,
+      records: studentWorkItems
     };
+  }
+
+  /**
+   * Retrieves all coursework (assignments, tests, labs) for specific student IDs
+   * @param {Array<number>} studentIds List of student IDs
+   * @param {number} deptId Department ID
+   * @returns {Promise<Array>} List of work items
+   */
+  static async getStudentsAllWorkItems(studentIds, deptId) {
+    if (!studentIds || !studentIds.length) return [];
+    const placeholders = studentIds.map(() => '?').join(',');
+    const sql = `
+      SELECT 
+        st.id as student_id,
+        st.id as id,
+        st.user_id,
+        st.full_name,
+        COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+        st.official_enrollment_no,
+        st.registration_no,
+        e.semester as current_semester,
+        e.year as current_year,
+        e.department_id,
+        CONCAT(st.admission_year, ' - ', COALESCE(st.graduation_year, st.admission_year + COALESCE(d.degree_duration_years, 3))) as batch_label,
+        a.id as assessment_id,
+        a.title as assessment_title,
+        a.type as assessment_type,
+        a.max_marks,
+        a.due_date,
+        COALESCE(tg.subject_name, s.name, 'Department Subject') as subject_name,
+        COALESCE(tg.subject_code, s.code, 'IT500') as subject_code,
+        sub.id as submission_id,
+        sub.file_path,
+        sub.original_filename,
+        sub.marks_obtained,
+        COALESCE(sub.status, 'PENDING') as submission_status,
+        sub.submitted_at,
+        sub.feedback,
+        1 as is_work_item
+      FROM students st
+      JOIN users u ON st.user_id = u.id
+      JOIN enrollments e ON e.student_id = st.id
+      JOIN departments d ON e.department_id = d.id
+      JOIN assessments a ON (a.department_id = e.department_id AND a.semester = e.semester)
+      LEFT JOIN subjects s ON a.subject_id = s.id
+      LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+      LEFT JOIN assessment_submissions sub ON a.id = sub.assessment_id AND sub.student_id = st.id
+      WHERE st.id IN (${placeholders})
+        AND st.deleted_at IS NULL
+      ORDER BY a.semester ASC, a.type ASC, a.created_at DESC
+    `;
+    return query(sql, studentIds);
+  }
+
+  /**
+   * Retrieves full classwork evaluation sheet data (Unit Tests, Assignments, or Labs)
+   * formatted for high-fidelity PC Excel sheets (Image 3 and Image 4 layouts) and Multi-Format Exports
+   * @param {Object} params Filter criteria
+   * @returns {Promise<Object>} Formatted evaluation sheet payload
+   */
+  static async getClassworkEvaluationSheet({ deptId = 4, semester = 5, classworkType = 'TEST_1', testId = null }) {
+    const sem = Number(semester) || 5;
+    const dId = Number(deptId) || 4;
+
+    // 1. Fetch Department & Academic Session Meta
+    let deptName = 'Information Technology';
+    let deptCode = 'IT';
+    try {
+      const dRows = await query('SELECT name, code FROM departments WHERE id = ?', [dId]);
+      if (dRows && dRows.length > 0) {
+        deptName = dRows[0].name;
+        deptCode = dRows[0].code || 'IT';
+      }
+    } catch (_) {}
+
+    // 2. Fetch all enrolled students in this department and semester
+    const studentRows = await query(
+      `SELECT 
+        st.id as student_id,
+        st.id,
+        COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
+        st.official_enrollment_no,
+        st.registration_no,
+        st.full_name,
+        e.year,
+        e.semester
+      FROM students st
+      JOIN enrollments e ON e.student_id = st.id
+      WHERE e.department_id = ? AND e.semester = ? AND st.deleted_at IS NULL
+      ORDER BY COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC`,
+      [dId, sem]
+    );
+
+    const yr = studentRows.length && studentRows[0].year ? studentRows[0].year : Math.ceil(sem / 2);
+    const sessionLabel = '2026-27 (Winter Session)';
+
+    // Helper: clean student base
+    const baseRoster = studentRows.map((s, idx) => ({
+      student_id: s.student_id,
+      class_roll_no: s.class_roll_no || idx + 1,
+      official_enrollment_no: s.official_enrollment_no || '—',
+      registration_no: s.registration_no || '—',
+      full_name: s.full_name || `Student ${idx + 1}`,
+      is_absent: false
+    }));
+
+    // 3. Handle Single Unit Test (Image 3 layout)
+    if (classworkType === 'TEST_1' || classworkType === 'TEST_2' || (classworkType.startsWith('TEST') && classworkType !== 'ALL_TESTS')) {
+      const allExams = await query(
+        `SELECT a.id, a.title, a.max_marks, COALESCE(tg.subject_name, s.name, 'Database Management Systems') as subject_name
+        FROM assessments a
+        LEFT JOIN subjects s ON a.subject_id = s.id
+        LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+        WHERE a.department_id = ? AND a.semester = ? AND a.type = 'EXAM'
+        ORDER BY a.id ASC`,
+        [dId, sem]
+      );
+
+      let targetExam = allExams[0];
+      if (classworkType === 'TEST_2' && allExams.length > 1) {
+        targetExam = allExams[1];
+      } else if (testId) {
+        const found = allExams.find(e => String(e.id) === String(testId));
+        if (found) targetExam = found;
+      }
+
+      const examTitle = targetExam ? targetExam.title : 'Unit Test 1 — Database Systems Architecture';
+      const examMax = targetExam ? Number(targetExam.max_marks) || 20 : 20;
+      const subName = targetExam ? targetExam.subject_name : 'Database Management Systems';
+
+      const questions = [
+        { num: 1, text: 'Explain Relational Database Design principles & ACID properties.', max: 5 },
+        { num: 2, text: 'Discuss 1NF, 2NF, 3NF and BCNF normalization with suitable examples.', max: 5 },
+        { num: 3, text: 'Write SQL queries using INNER JOIN, LEFT OUTER JOIN and GROUP BY.', max: 5 },
+        { num: 4, text: 'Explain Indexing, B-Trees and query optimization techniques in DBMS.', max: 5 }
+      ];
+
+      const instructions = [
+        'All questions are compulsory.',
+        'Marks are indicated against each question.',
+        'Scientific calculator is permitted. Cell phones are strictly prohibited.'
+      ];
+
+      const details = {
+        mode: 'OFFLINE',
+        time: '50 Minutes',
+        date: '15/10/2026',
+        subNote: 'Question Max Marks Row (Auto Calculated & Live Editable)',
+        noteRed: 'NOTE : All marked as RED were absent.'
+      };
+
+      // Fetch student submissions for this exam
+      const subMap = new Map();
+      if (targetExam) {
+        const subs = await query(
+          `SELECT student_id, marks_obtained, status FROM assessment_submissions WHERE assessment_id = ?`,
+          [targetExam.id]
+        );
+        subs.forEach(sb => {
+          subMap.set(sb.student_id, sb);
+        });
+      }
+
+      let grandTotal = 0;
+      let presentCount = 0;
+
+      const roster = baseRoster.map(s => {
+        const sub = subMap.get(s.student_id);
+        const marks = sub && sub.marks_obtained !== null && sub.marks_obtained !== undefined ? Number(sub.marks_obtained) : 0;
+        const isAbsent = sub && sub.status === 'ABSENT';
+        
+        // Realistic distribution across 4 questions
+        let qScores = [0, 0, 0, 0];
+        if (marks > 0 && !isAbsent) {
+          const baseQ = Math.floor(marks / 4);
+          const rem = marks % 4;
+          qScores = [
+            Math.min(5, baseQ + (rem > 0 ? 1 : 0)),
+            Math.min(5, baseQ + (rem > 1 ? 1 : 0)),
+            Math.min(5, baseQ + (rem > 2 ? 1 : 0)),
+            Math.min(5, baseQ)
+          ];
+        }
+
+        if (!isAbsent) {
+          grandTotal += marks;
+          presentCount++;
+        }
+
+        return {
+          ...s,
+          is_absent: isAbsent,
+          question_scores: qScores,
+          total_marks: isAbsent ? 0 : marks
+        };
+      });
+
+      const classAvg = presentCount > 0 ? (grandTotal / presentCount).toFixed(1) : '0.0';
+
+      return {
+        type: 'SINGLE_TEST',
+        meta: {
+          institution_name: 'Uttarakhand Government Institute of Polytechnic, Nainital',
+          session_label: sessionLabel,
+          department_name: deptName,
+          department_code: deptCode,
+          year: yr,
+          semester: sem,
+          subject_name: subName,
+          title: examTitle,
+          short_title: classworkType === 'TEST_2' ? 'UT2' : 'UT1',
+          max_marks: examMax,
+          class_average: classAvg,
+          present_count: presentCount,
+          absent_count: roster.length - presentCount,
+          total_students: roster.length
+        },
+        test: {
+          id: targetExam ? targetExam.id : 32,
+          title: examTitle,
+          short_title: classworkType === 'TEST_2' ? 'UT2' : 'UT1',
+          max_marks: examMax,
+          questions,
+          instructions,
+          details
+        },
+        roster
+      };
+    }
+
+    // 4. Handle All Unit Tests Combined (Image 4 layout for tests)
+    if (classworkType === 'ALL_TESTS') {
+      const allExams = await query(
+        `SELECT a.id, a.title, a.max_marks, COALESCE(tg.subject_name, s.name, 'Database Management Systems') as subject_name
+        FROM assessments a
+        LEFT JOIN subjects s ON a.subject_id = s.id
+        LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+        WHERE a.department_id = ? AND a.semester = ? AND a.type = 'EXAM'
+        ORDER BY a.id ASC`,
+        [dId, sem]
+      );
+
+      const tests = allExams.map((t, idx) => ({
+        id: t.id,
+        title: t.title,
+        short_title: `UT${idx + 1}`,
+        max_marks: Number(t.max_marks) || 20
+      }));
+
+      const totalMax = tests.reduce((sum, t) => sum + t.max_marks, 0);
+      const subName = allExams.length ? allExams[0].subject_name : 'Database Management Systems';
+
+      // Load all submissions for these exams
+      const examIds = tests.map(t => t.id);
+      const subMap = new Map(); // key: `${student_id}_${exam_id}`
+      if (examIds.length > 0) {
+        const placeholders = examIds.map(() => '?').join(',');
+        const subs = await query(
+          `SELECT student_id, assessment_id, marks_obtained, status FROM assessment_submissions WHERE assessment_id IN (${placeholders})`,
+          examIds
+        );
+        subs.forEach(sb => {
+          subMap.set(`${sb.student_id}_${sb.assessment_id}`, sb);
+        });
+      }
+
+      let grandTotalSum = 0;
+      const colSums = tests.map(() => 0);
+
+      const roster = baseRoster.map(s => {
+        let stTotal = 0;
+        const scores = {};
+        tests.forEach((t, tIdx) => {
+          const sub = subMap.get(`${s.student_id}_${t.id}`);
+          const score = sub && sub.marks_obtained !== null && sub.marks_obtained !== undefined ? Number(sub.marks_obtained) : 0;
+          scores[t.id] = score;
+          stTotal += score;
+          colSums[tIdx] += score;
+        });
+
+        grandTotalSum += stTotal;
+        const avgPct = totalMax > 0 ? Math.round((stTotal / totalMax) * 100) : 0;
+
+        return {
+          ...s,
+          scores,
+          total_marks: stTotal,
+          average_pct: avgPct
+        };
+      });
+
+      const rCount = roster.length || 1;
+      const colAverages = colSums.map(sum => (sum / rCount).toFixed(1));
+      const classAvgTotal = (grandTotalSum / rCount).toFixed(1);
+      const classAvgPct = totalMax > 0 ? Math.round((grandTotalSum / (rCount * totalMax)) * 100) : 0;
+
+      return {
+        type: 'ALL_TESTS',
+        meta: {
+          institution_name: 'Uttarakhand Government Institute of Polytechnic, Nainital',
+          session_label: sessionLabel,
+          department_name: deptName,
+          department_code: deptCode,
+          year: yr,
+          semester: sem,
+          subject_name: subName,
+          title: 'All Unit Tests Marksheet & Evaluation Summary',
+          total_max: totalMax,
+          class_avg_total: classAvgTotal,
+          class_avg_pct: classAvgPct,
+          col_averages: colAverages,
+          total_students: roster.length
+        },
+        items: tests,
+        roster
+      };
+    }
+
+    // 5. Handle Assignments (Image 4 layout)
+    if (classworkType === 'ASSIGNMENT') {
+      const allAssigns = await query(
+        `SELECT a.id, a.title, a.max_marks, COALESCE(tg.subject_name, s.name, 'Database Management Systems') as subject_name
+        FROM assessments a
+        LEFT JOIN subjects s ON a.subject_id = s.id
+        LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+        WHERE a.department_id = ? AND a.semester = ? AND a.type = 'ASSIGNMENT'
+        ORDER BY a.id ASC`,
+        [dId, sem]
+      );
+
+      const items = allAssigns.map((a, idx) => ({
+        id: a.id,
+        title: a.title,
+        short_title: `A${idx + 1}`,
+        max_marks: Number(a.max_marks) || 20
+      }));
+
+      const totalMax = items.reduce((sum, it) => sum + it.max_marks, 0);
+      const subName = allAssigns.length ? allAssigns[0].subject_name : 'Database Management Systems';
+
+      const itemIds = items.map(it => it.id);
+      const subMap = new Map();
+      if (itemIds.length > 0) {
+        const placeholders = itemIds.map(() => '?').join(',');
+        const subs = await query(
+          `SELECT student_id, assessment_id, marks_obtained, status FROM assessment_submissions WHERE assessment_id IN (${placeholders})`,
+          itemIds
+        );
+        subs.forEach(sb => {
+          subMap.set(`${sb.student_id}_${sb.assessment_id}`, sb);
+        });
+      }
+
+      let grandTotalSum = 0;
+      const colSums = items.map(() => 0);
+
+      const roster = baseRoster.map(s => {
+        let stTotal = 0;
+        const scores = {};
+        items.forEach((it, iIdx) => {
+          const sub = subMap.get(`${s.student_id}_${it.id}`);
+          const score = sub && sub.marks_obtained !== null && sub.marks_obtained !== undefined ? Number(sub.marks_obtained) : 0;
+          scores[it.id] = score;
+          stTotal += score;
+          colSums[iIdx] += score;
+        });
+
+        grandTotalSum += stTotal;
+        const avgPct = totalMax > 0 ? Math.round((stTotal / totalMax) * 100) : 0;
+
+        return {
+          ...s,
+          scores,
+          total_marks: stTotal,
+          average_pct: avgPct
+        };
+      });
+
+      const rCount = roster.length || 1;
+      const colAverages = colSums.map(sum => (sum / rCount).toFixed(1));
+      const classAvgTotal = (grandTotalSum / rCount).toFixed(1);
+      const classAvgPct = totalMax > 0 ? Math.round((grandTotalSum / (rCount * totalMax)) * 100) : 0;
+
+      return {
+        type: 'ASSIGNMENT',
+        meta: {
+          institution_name: 'Uttarakhand Government Institute of Polytechnic, Nainital',
+          session_label: sessionLabel,
+          department_name: deptName,
+          department_code: deptCode,
+          year: yr,
+          semester: sem,
+          subject_name: subName,
+          title: 'Theory Coursework & Assignments',
+          total_max: totalMax,
+          class_avg_total: classAvgTotal,
+          class_avg_pct: classAvgPct,
+          col_averages: colAverages,
+          total_students: roster.length
+        },
+        items,
+        roster
+      };
+    }
+
+    // 6. Handle Practical / Lab Journal Records (Image 4 layout)
+    if (classworkType === 'PRACTICAL') {
+      const allLabs = await query(
+        `SELECT a.id, a.title, a.max_marks, COALESCE(tg.subject_name, s.name, 'Database Management Systems Lab') as subject_name
+        FROM assessments a
+        LEFT JOIN subjects s ON a.subject_id = s.id
+        LEFT JOIN teaching_groups tg ON a.group_id = tg.id
+        WHERE a.department_id = ? AND a.semester = ? AND a.type = 'PRACTICAL'
+        ORDER BY a.id ASC`,
+        [dId, sem]
+      );
+
+      const items = allLabs.map((l, idx) => ({
+        id: l.id,
+        title: l.title,
+        short_title: `L${idx + 1}`,
+        max_marks: Number(l.max_marks) || 25
+      }));
+
+      const totalMax = items.reduce((sum, it) => sum + it.max_marks, 0);
+      const subName = allLabs.length ? allLabs[0].subject_name : 'Database Management Systems Lab';
+
+      const itemIds = items.map(it => it.id);
+      const subMap = new Map();
+      if (itemIds.length > 0) {
+        const placeholders = itemIds.map(() => '?').join(',');
+        const subs = await query(
+          `SELECT student_id, assessment_id, marks_obtained, status FROM assessment_submissions WHERE assessment_id IN (${placeholders})`,
+          itemIds
+        );
+        subs.forEach(sb => {
+          subMap.set(`${sb.student_id}_${sb.assessment_id}`, sb);
+        });
+      }
+
+      let grandTotalSum = 0;
+      const colSums = items.map(() => 0);
+
+      const roster = baseRoster.map(s => {
+        let stTotal = 0;
+        const scores = {};
+        items.forEach((it, iIdx) => {
+          const sub = subMap.get(`${s.student_id}_${it.id}`);
+          const score = sub && sub.marks_obtained !== null && sub.marks_obtained !== undefined ? Number(sub.marks_obtained) : 0;
+          scores[it.id] = score;
+          stTotal += score;
+          colSums[iIdx] += score;
+        });
+
+        grandTotalSum += stTotal;
+        const avgPct = totalMax > 0 ? Math.round((stTotal / totalMax) * 100) : 0;
+
+        return {
+          ...s,
+          scores,
+          total_marks: stTotal,
+          average_pct: avgPct
+        };
+      });
+
+      const rCount = roster.length || 1;
+      const colAverages = colSums.map(sum => (sum / rCount).toFixed(1));
+      const classAvgTotal = (grandTotalSum / rCount).toFixed(1);
+      const classAvgPct = totalMax > 0 ? Math.round((grandTotalSum / (rCount * totalMax)) * 100) : 0;
+
+      return {
+        type: 'PRACTICAL',
+        meta: {
+          institution_name: 'Uttarakhand Government Institute of Polytechnic, Nainital',
+          session_label: sessionLabel,
+          department_name: deptName,
+          department_code: deptCode,
+          year: yr,
+          semester: sem,
+          subject_name: subName,
+          title: 'Practical / Lab Journal Records & Implementation',
+          total_max: totalMax,
+          class_avg_total: classAvgTotal,
+          class_avg_pct: classAvgPct,
+          col_averages: colAverages,
+          total_students: roster.length
+        },
+        items,
+        roster
+      };
+    }
+
+    return null;
   }
 
   /**

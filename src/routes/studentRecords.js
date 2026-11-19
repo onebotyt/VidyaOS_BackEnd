@@ -21,6 +21,10 @@ router.get('/filters', StudentRecordController.getFilters);
 // @desc    Retrieve cohort records for export (PDF, DOC, Excel)
 router.get('/export', StudentRecordController.exportCohort);
 
+// @route   GET /api/v1/student-records/classwork-sheet
+// @desc    Retrieve structured classwork evaluation sheet data for PC Excel view and multi-format export
+router.get('/classwork-sheet', StudentRecordController.getClassworkSheet);
+
 // @route   GET /api/v1/student-records/:id/dossier
 // @desc    Retrieve a single student's complete historical dossier (Profile, Tests, Assignments, Attendance, Documents)
 router.get('/:id/dossier', StudentRecordController.getStudentDossier);

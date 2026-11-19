@@ -67,10 +67,14 @@ class StudentRecordController {
 
       const isWorkSearch = Boolean(result && result.isWorkSearch);
       const rows = result.rows || result;
+      const students = result.students || (isWorkSearch ? [] : rows);
+      const records = result.records || (isWorkSearch ? rows : []);
 
       res.json({
         success: true,
         data: rows,
+        students,
+        records,
         meta: {
           is_work_search: isWorkSearch,
           work_type: result.searchParsed?.workType || null,
@@ -78,6 +82,8 @@ class StudentRecordController {
           roll_no: result.searchParsed?.rollNo || null,
           search_query: search || '',
           count: rows.length,
+          students_count: students.length,
+          records_count: records.length,
           page: parseInt(page, 10),
           limit: parseInt(limit, 10)
         }
@@ -105,6 +111,33 @@ class StudentRecordController {
       res.json({ success: true, data: dossier });
     } catch (err) {
       console.error('Error in getStudentDossier:', err);
+      res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  /**
+   * Retrieves structured classwork evaluation sheet data for PC Excel view and multi-format export
+   * @route GET /api/v1/student-records/classwork-sheet
+   */
+  static async getClassworkSheet(req, res) {
+    try {
+      const deptId = resolveDeptId(req);
+      const { semester = 5, classwork_type = 'TEST_1', test_id } = req.query;
+
+      const sheetData = await StudentRecordModel.getClassworkEvaluationSheet({
+        deptId,
+        semester: Number(semester) || 5,
+        classworkType: classwork_type,
+        testId: test_id || null
+      });
+
+      if (!sheetData) {
+        return res.status(404).json({ success: false, error: { message: 'Evaluation sheet data not found' } });
+      }
+
+      res.json({ success: true, data: sheetData });
+    } catch (err) {
+      console.error('Error in getClassworkSheet:', err);
       res.status(500).json({ success: false, error: { message: err.message } });
     }
   }
