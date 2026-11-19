@@ -84,7 +84,7 @@ class DeviceModel {
 
     const res = await query(
       `INSERT INTO devices
-        (device_uid, name, department_id, branch_id, year, semester, assigned_years, assigned_semesters, academic_year_id, secret_key, secret_hash, firmware_version, is_active)
+        (device_uuid, device_name, department_id, branch_id, year, semester, assigned_years, assigned_semesters, academic_year_id, secret_key, secret_hash, firmware_version, is_active)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v3.0-AES256-GCM', 1)`,
       [
         deviceUid,

@@ -53,6 +53,14 @@ router.get('/hod/detect', auth, requireRole(...facultyRoles), (req, res) => devi
 // @desc    List Configured Wi-Fi Networks for Terminal
 router.get('/hod/:device_id/wifi', auth, requireRole(...facultyRoles), (req, res) => deviceController.getDeviceWifiNetworks(req, res));
 
+// @route   GET /api/v1/devices/hod/:device_id/ping
+// @desc    Check Live Connection and Telemetry of ESP32
+router.get('/hod/:device_id/ping', auth, requireRole(...facultyRoles), (req, res) => deviceController.pingDevice(req, res));
+
+// @route   POST /api/v1/devices/hod/:device_id/ota-update
+// @desc    Trigger Over-The-Air (OTA) Firmware Update on ESP32
+router.post('/hod/:device_id/ota-update', auth, requireRole(...facultyRoles), (req, res) => deviceController.triggerOtaUpdate(req, res));
+
 // @route   POST /api/v1/devices/hod/:device_id/wifi
 // @desc    Add New Wi-Fi Network & Queue to ESP32
 router.post('/hod/:device_id/wifi', auth, requireRole(...facultyRoles), (req, res) => deviceController.addDeviceWifiNetwork(req, res));

@@ -28,6 +28,7 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
+#include <Update.h>
 #include <esp_sleep.h>
 #include <string.h>
 #include <stdio.h>
@@ -543,6 +544,89 @@ void handleResetWifiCommand(JsonObject cmd) {
   ui.setFailLed(false);
 }
 
+/**
+ * Wireless Over-The-Air (OTA) Firmware Flasher
+ * Downloads compiled binary from server, flashes standby partition, and restarts.
+ */
+bool performOtaUpdate(const String& binUrl) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("[OTA] Cannot update: Wi-Fi offline"));
+    return false;
+  }
+  Serial.println(F("[OTA] ========================================"));
+  Serial.println(F("[OTA] Starting Wireless OTA Firmware Update"));
+  Serial.print(F("[OTA] Source URL: ")); Serial.println(binUrl);
+
+  ui.showBootScreen("OTA FIRMWARE UPDATE", "Connecting to server...");
+  ui.setWifiLed(true);
+
+  HTTPClient http;
+  WiFiClientSecure secureClient;
+  WiFiClient plainClient;
+  bool began = false;
+  http.setTimeout(35000);
+  if (binUrl.startsWith("https://")) {
+    secureClient.setInsecure();
+    began = http.begin(secureClient, binUrl);
+  } else {
+    began = http.begin(plainClient, binUrl);
+  }
+
+  if (!began) {
+    Serial.println(F("[OTA] Failed to initialize HTTP client"));
+    ui.showAttendanceFailed("OTA Connect Failed", "Check server URL");
+    return false;
+  }
+
+  int httpCode = http.GET();
+  if (httpCode != 200) {
+    Serial.printf("[OTA] HTTP GET failed: code %d\n", httpCode);
+    ui.showAttendanceFailed("OTA HTTP Error", String(httpCode).c_str());
+    http.end();
+    return false;
+  }
+
+  int contentLength = http.getSize();
+  Serial.printf("[OTA] Firmware binary size: %d bytes\n", contentLength);
+  if (contentLength <= 0) {
+    Serial.println(F("[OTA] Invalid firmware content length"));
+    http.end();
+    return false;
+  }
+
+  bool canBegin = Update.begin(contentLength);
+  if (!canBegin) {
+    Serial.println(F("[OTA] Update.begin failed: insufficient space"));
+    ui.showAttendanceFailed("OTA Space Error", "Flash partition full");
+    http.end();
+    return false;
+  }
+
+  ui.showBootScreen("OTA FLASHING", "Writing flash partition...");
+  WiFiClient* stream = http.getStreamPtr();
+  size_t written = Update.writeStream(*stream);
+  Serial.printf("[OTA] Successfully written: %u / %d bytes\n", (unsigned int)written, contentLength);
+
+  if (Update.end()) {
+    if (Update.isFinished()) {
+      Serial.println(F("[OTA] Flashing complete! Restarting ESP32..."));
+      ui.setSuccessLed(true);
+      ui.showBootScreen("OTA UPDATE COMPLETE", "Restarting Node...");
+      delay(1500);
+      ESP.restart();
+      return true;
+    } else {
+      Serial.println(F("[OTA] Update not finished properly"));
+    }
+  } else {
+    Serial.printf("[OTA] Update error #: %u\n", Update.getError());
+    ui.showAttendanceFailed("OTA Write Error", "Checksum mismatch");
+  }
+
+  http.end();
+  return false;
+}
+
 void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   DynamicJsonDocument doc(2048);
   if (deserializeJson(doc, payload, length) == DeserializationError::Ok) {
@@ -552,6 +636,10 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     else if (cmdType == "SWITCH_WIFI") handleSwitchWifiCommand(cmd);
     else if (cmdType == "FALLBACK_WIFI") handleFallbackWifiCommand(cmd);
     else if (cmdType == "RESET_WIFI") handleResetWifiCommand(cmd);
+    else if (cmdType == "CMD_OTA_UPDATE" || cmdType == "OTA_UPDATE") {
+      String otaUrl = cmd["url"] | cmd["payload"]["url"] | "";
+      if (otaUrl.length() > 0) performOtaUpdate(otaUrl);
+    }
   }
 }
 
@@ -858,6 +946,11 @@ void loop() {
               handleFallbackWifiCommand(cmd);
             } else if (cmdType == "RESET_WIFI") {
               handleResetWifiCommand(cmd);
+            } else if (cmdType == "CMD_OTA_UPDATE" || cmdType == "OTA_UPDATE") {
+              String otaUrl = String((const char*)(cmd["url"] | cmd["payload"]["url"] | ""));
+              if (otaUrl.length() > 0) {
+                performOtaUpdate(otaUrl);
+              }
             }
           }
         }

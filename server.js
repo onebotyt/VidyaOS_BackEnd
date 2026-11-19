@@ -157,7 +157,16 @@ app.get(['/student/todo.html', '/student/todo'], (req, res) => res.redirect(301,
 const staticOptions = {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
   etag: true,
-  lastModified: true
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.js')) {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    } else if (filePath.endsWith('.css')) {
+      res.setHeader('Content-Type', 'text/css; charset=utf-8');
+    } else if (filePath.endsWith('.html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    }
+  }
 };
 
 // Resolve Frontend directory (Default: ../frontend, Configurable for Collab Preview: process.env.FRONTEND_DIR)
@@ -247,7 +256,7 @@ app.get('/:section/:page.css', (req, res, next) => {
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) {
-      res.setHeader('Content-Type', 'text/css');
+      res.setHeader('Content-Type', 'text/css; charset=utf-8');
       return res.sendFile(c);
     }
   }
@@ -262,7 +271,7 @@ app.get('/:section/:page.js', (req, res, next) => {
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) {
-      res.setHeader('Content-Type', 'application/javascript');
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
       return res.sendFile(c);
     }
   }
