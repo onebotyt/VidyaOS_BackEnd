@@ -109,36 +109,36 @@ class HodController {
   }
 
   /**
-   * Update teacher full name, phone number, or employee ID
+   * Update teacher full name, phone number, employee ID, designation, email, status, or role
    * @route PUT /api/v1/hod/teachers/:id (routes/hod.js)
    * @access Protected (HOD, SYSTEM_ADMIN)
    * @usesModel HodModel.updateTeacher() (models/hodModel.js)
    */
   static async updateTeacher(req, res) {
-    const { full_name, employee_id, phone } = req.body;
+    const { full_name, employee_id, phone, designation, email, status, role } = req.body;
     try {
       const teacherRows = await query(
-        `SELECT id, user_id FROM teachers WHERE id = ? AND department_id = ?`,
-        [req.params.id, req.hod_department_id]
+        `SELECT id, user_id FROM teachers WHERE id = ? ${req.hod_department_id ? 'AND department_id = ?' : ''}`,
+        req.hod_department_id ? [req.params.id, req.hod_department_id] : [req.params.id]
       );
       if (!teacherRows.length) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teacher not found in your department' } });
       }
 
-      if (!full_name && employee_id === undefined && phone === undefined) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'No fields to update' } });
-      }
-
       await HodModel.updateTeacher(req.params.id, req.hod_department_id, {
         fullName: full_name,
         employeeId: employee_id,
-        phone
+        phone,
+        designation,
+        email,
+        status,
+        role
       });
 
-      res.json({ success: true, message: 'Teacher profile updated' });
+      res.json({ success: true, message: 'Faculty profile updated successfully' });
     } catch (err) {
-      if (err.message?.includes('UNIQUE')) {
-        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Employee ID already assigned to another teacher' } });
+      if (err.message?.includes('UNIQUE') || err.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Employee ID or email already assigned to another user' } });
       }
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }

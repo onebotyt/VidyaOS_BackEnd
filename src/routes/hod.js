@@ -58,6 +58,10 @@ router.put('/teachers/:id', requireHOD(), [
   body('full_name').optional().trim().notEmpty(),
   body('employee_id').optional().trim(),
   body('phone').optional().trim(),
+  body('designation').optional().trim(),
+  body('email').optional().trim().isEmail().withMessage('Valid email required'),
+  body('status').optional().trim(),
+  body('role').optional().trim(),
   validate
 ], HodController.updateTeacher);
 

@@ -199,35 +199,34 @@ class HodModel {
    */
   static async getTeacherById(id, deptId) {
     const teacherRows = await query(
-      `SELECT t.id, t.employee_id, t.full_name, t.phone, t.department_id,
+      `SELECT t.id, t.employee_id, t.full_name, t.designation, t.phone, t.department_id,
+              d.name as department_name, d.code as department_code,
               u.id as user_id, u.username as gmail, u.email, u.status, u.must_change_password,
+              (SELECT GROUP_CONCAT(DISTINCT role) FROM user_roles WHERE user_id = u.id) as roles,
               CASE WHEN u.google_sub IS NOT NULL THEN 1 ELSE 0 END as google_linked,
               t.created_at
-       FROM teachers t JOIN users u ON t.user_id = u.id
-       WHERE t.id = ? AND t.department_id = ?`,
-      [id, deptId]
+       FROM teachers t 
+       JOIN users u ON t.user_id = u.id
+       LEFT JOIN departments d ON t.department_id = d.id
+       WHERE t.id = ? ${deptId ? 'AND t.department_id = ?' : ''}`,
+      deptId ? [id, deptId] : [id]
     );
     if (!teacherRows.length) return null;
 
-    const assignments = await query(
-      `SELECT ta.*, s.name as subject_name, s.code as subject_code,
-              d.name as department_name, ay.label as academic_year_label,
-              ar.id as register_id, ar.name as register_name
-       FROM teacher_assignments ta
-       LEFT JOIN subjects s ON ta.subject_id = s.id
-       JOIN departments d ON ta.department_id = d.id
-       JOIN academic_years ay ON ta.academic_year_id = ay.id
-       LEFT JOIN attendance_registers ar ON ar.assignment_id = ta.id
-       WHERE ta.teacher_id = ? AND ta.is_active = 1
-       ORDER BY ta.assignment_type, ta.created_at DESC`,
+    const classes = await query(
+      `SELECT tg.id, tg.name as class_name, tg.subject_name, tg.subject_short_name, tg.subject_code,
+              tg.component, tg.semester, tg.year, tg.start_date, tg.end_date, tg.status
+       FROM teaching_groups tg
+       WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE'
+       ORDER BY tg.semester ASC, tg.id ASC`,
       [id]
     );
 
-    return { ...teacherRows[0], assignments };
+    return { ...teacherRows[0], classes, subjects: classes };
   }
 
   /**
-   * Update teacher name, phone, or employee ID
+   * Update teacher full profile, phone, employee ID, designation, email, status, or role
    * @calledBy HodController.updateTeacher() (controllers/hodController.js)
    * @route PUT /api/v1/hod/teachers/:id (routes/hod.js)
    * @param {number} id Teacher ID
@@ -235,15 +234,49 @@ class HodModel {
    * @param {Object} fields Fields to update
    * @returns {Promise<boolean>}
    */
-  static async updateTeacher(id, deptId, { fullName, phone, employeeId }) {
+  static async updateTeacher(id, deptId, { fullName, phone, employeeId, designation, email, status, role }) {
     const sets = [], params = [];
     if (fullName) { sets.push('full_name = ?'); params.push(fullName.trim()); }
     if (phone !== undefined) { sets.push('phone = ?'); params.push(phone ? phone.trim() : null); }
     if (employeeId !== undefined) { sets.push('employee_id = ?'); params.push(employeeId ? employeeId.trim() : null); }
-    if (!sets.length) return false;
+    if (designation !== undefined) { sets.push('designation = ?'); params.push(designation ? designation.trim() : 'Lecturer'); }
 
-    params.push(id, deptId);
-    await query(`UPDATE teachers SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND department_id = ?`, params);
+    if (sets.length) {
+      const qParams = [...params, id];
+      let sql = `UPDATE teachers SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+      if (deptId) {
+        sql += ` AND department_id = ?`;
+        qParams.push(deptId);
+      }
+      await query(sql, qParams);
+    }
+
+    // Also update users table if email or status is modified
+    const tRow = await query(`SELECT user_id FROM teachers WHERE id = ?`, [id]);
+    if (tRow && tRow[0]?.user_id) {
+      const uid = tRow[0].user_id;
+      const uSets = [], uParams = [];
+      if (email !== undefined && email.trim()) {
+        uSets.push('email = ?');
+        uParams.push(email.trim());
+      }
+      if (status !== undefined && status.trim()) {
+        uSets.push('status = ?');
+        uParams.push(status.trim().toUpperCase());
+      }
+      if (uSets.length) {
+        uParams.push(uid);
+        await query(`UPDATE users SET ${uSets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, uParams);
+      }
+
+      if (role !== undefined && role.trim()) {
+        const cleanRole = role.trim().toUpperCase();
+        await query(`DELETE FROM user_roles WHERE user_id = ? AND role NOT IN ('HOD', 'SYSTEM_ADMIN')`, [uid]);
+        if (cleanRole !== 'HOD') {
+          await query(`INSERT IGNORE INTO user_roles (user_id, role) VALUES (?, ?)`, [uid, cleanRole]);
+        }
+      }
+    }
     return true;
   }
 
@@ -409,36 +442,40 @@ class HodModel {
    */
   static async getFacultyRoster(deptId) {
     const teachers = await query(
-      `SELECT t.id, t.employee_id, t.full_name, t.phone,
-              u.email, u.status, u.username as gmail,
+      `SELECT t.id, t.employee_id, t.full_name, t.designation, t.phone, t.department_id,
+              d.name as department_name, d.code as department_code,
+              u.id as user_id, u.email, u.status, u.username as gmail, t.created_at,
+              (SELECT GROUP_CONCAT(DISTINCT role) FROM user_roles WHERE user_id = u.id) as roles,
               (SELECT COUNT(*) FROM teacher_assignments ta WHERE ta.teacher_id = t.id AND ta.is_active = 1) as assignment_count,
               (SELECT COUNT(*) FROM teaching_groups tg WHERE tg.teacher_id = t.id AND tg.status = 'ACTIVE') as active_groups_count
        FROM teachers t
        JOIN users u ON t.user_id = u.id
+       LEFT JOIN departments d ON t.department_id = d.id
        WHERE t.department_id = ? AND t.deleted_at IS NULL
-       ORDER BY t.full_name ASC`,
+       ORDER BY CASE WHEN t.employee_id LIKE '%HOD%' OR t.designation LIKE '%Head%' THEN 0 ELSE 1 END, t.full_name ASC`,
       [deptId]
     );
 
     const teacherIds = teachers.map(t => t.id);
-    let assignedSubjects = [];
+    let assignedClasses = [];
     if (teacherIds.length) {
-      assignedSubjects = await query(
-        `SELECT ta.teacher_id, s.name as subject_name, s.code as subject_code, ta.session_type_scope,
-                ta.year, ta.semester
-         FROM teacher_assignments ta
-         JOIN subjects s ON ta.subject_id = s.id
-         WHERE ta.teacher_id IN (${teacherIds.map(() => '?').join(',')}) AND ta.is_active = 1`,
+      assignedClasses = await query(
+        `SELECT tg.teacher_id, tg.id, tg.name as class_name, tg.subject_name, tg.subject_short_name, tg.subject_code,
+                tg.component, tg.semester, tg.year, tg.start_date, tg.end_date
+         FROM teaching_groups tg
+         WHERE tg.teacher_id IN (${teacherIds.map(() => '?').join(',')}) AND tg.status = 'ACTIVE'
+         ORDER BY tg.semester ASC, tg.id ASC`,
         teacherIds
       );
     }
 
     return teachers.map(t => {
-      const subs = assignedSubjects.filter(s => s.teacher_id === t.id);
+      const classes = assignedClasses.filter(c => c.teacher_id === t.id);
       return {
         ...t,
-        teaching_load: (t.assignment_count || 0) + (t.active_groups_count || 0),
-        subjects: subs
+        teaching_load: classes.length,
+        subjects: classes,
+        classes: classes
       };
     });
   }

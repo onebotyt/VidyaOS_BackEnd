@@ -243,7 +243,17 @@ async function ensureCompatibilityViews() {
       logger.info('✓ Added missing columns attendance_registers.start_date and end_date');
     }
 
-    // 1b. Ensure students.deleted_at exists for trash management
+    // 1b. Ensure teachers.designation exists
+    try {
+      const desigCols = await query("SHOW COLUMNS FROM teachers LIKE 'designation'");
+      if (!desigCols || desigCols.length === 0) {
+        await query("ALTER TABLE teachers ADD COLUMN designation VARCHAR(100) NULL DEFAULT 'Lecturer' AFTER full_name");
+        await query("UPDATE teachers SET designation = 'Head of Department' WHERE employee_id LIKE '%HOD%'");
+        logger.info('✓ Added missing column teachers.designation');
+      }
+    } catch (_) {}
+
+    // 1c. Ensure students.deleted_at exists for trash management
     const stuCols = await query("SHOW COLUMNS FROM students LIKE 'deleted_at'");
     if (!stuCols || stuCols.length === 0) {
       await query("ALTER TABLE students ADD COLUMN deleted_at DATETIME NULL DEFAULT NULL AFTER updated_at");
