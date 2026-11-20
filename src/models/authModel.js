@@ -219,8 +219,10 @@ class AuthModel {
     const rows = await query(
       `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)
        UNION
+       SELECT id FROM students WHERE LOWER(TRIM(COALESCE(ubter_roll_no, ''))) = LOWER(?)
+       UNION
        SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)`,
-      [cleanEnroll, cleanEnroll]
+      [cleanEnroll, cleanEnroll, cleanEnroll]
     );
     return rows.length > 0;
   }
@@ -271,13 +273,15 @@ class AuthModel {
 
       await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`, [createdUserId]);
 
+      const cleanEnrlVal = officialEnrollmentNo ? officialEnrollmentNo.trim() : null;
       const [sRes] = await conn.execute(
-        `INSERT INTO students (user_id, official_enrollment_no, enrollment_no_status, registration_no, class_roll_no, full_name, phone, parent_phone, parent_name, is_phone_verified, entry_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'self_registered')`,
+        `INSERT INTO students (user_id, official_enrollment_no, ubter_roll_no, enrollment_no_status, registration_no, class_roll_no, full_name, phone, parent_phone, parent_name, is_phone_verified, entry_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'self_registered')`,
         [
           createdUserId,
-          officialEnrollmentNo ? officialEnrollmentNo.trim() : null,
-          enrollmentNoStatus || (officialEnrollmentNo ? 'ASSIGNED' : 'Not Assigned'),
+          cleanEnrlVal,
+          cleanEnrlVal,
+          enrollmentNoStatus || (cleanEnrlVal ? 'ASSIGNED' : 'Not Assigned'),
           (registrationNo || '').trim() || null,
           classRollNo ? parseInt(classRollNo, 10) : null,
           fullName.trim(),

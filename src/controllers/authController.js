@@ -739,7 +739,7 @@ class AuthController {
    * @usesService authService.verifyGoogleToken() (services/authService.js)
    */
   static async registerStudent(req, res) {
-    const { full_name, official_enrollment_no, registration_no, class_roll_no, email, password, phone, parent_phone, parent_name, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
+    const { full_name, official_enrollment_no, ubter_roll_no, registration_no, class_roll_no, email, password, phone, parent_phone, parent_name, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
     const effDeptId = department_id || branch_id;
     if (!effDeptId) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Department is required' } });
@@ -797,7 +797,7 @@ class AuthController {
       }
 
       const isEnrollNotAvailable = Boolean(req.body.enrollment_not_available);
-      let cleanEnroll = (official_enrollment_no || '').trim();
+      let cleanEnroll = (ubter_roll_no || official_enrollment_no || '').trim();
       let enrollmentStatus = 'ASSIGNED';
 
       if (isEnrollNotAvailable || cleanEnroll.toLowerCase() === 'not assigned') {
@@ -805,16 +805,16 @@ class AuthController {
         enrollmentStatus = 'Not Assigned';
       } else {
         if (!cleanEnroll) {
-          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number is required or check "Enrollment Number Not Available"' } });
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number is required or check "UBTER Roll Number Not Available"' } });
         }
         if (!/^\d{11}$/.test(cleanEnroll)) {
-          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number must contain exactly 11 numeric digits (0–9)' } });
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0–9)' } });
         }
         const existingEnroll = await AuthModel.findExistingEnrollment(cleanEnroll);
         if (existingEnroll) {
           return res.status(409).json({
             success: false,
-            error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system.` }
+            error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system.` }
           });
         }
       }
