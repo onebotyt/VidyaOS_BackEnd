@@ -1478,7 +1478,7 @@ class TeachingGroupModel {
    */
   static async getStudentIdentifiers(studentIds) {
     return await query(
-      `SELECT id, official_enrollment_no, registration_no
+      `SELECT id, official_enrollment_no, COALESCE(ubter_roll_no, official_enrollment_no) as ubter_roll_no, registration_no
        FROM students WHERE id IN (${studentIds.map(() => '?').join(',')})
        LIMIT 200`,
       studentIds
