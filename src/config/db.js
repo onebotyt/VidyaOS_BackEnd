@@ -225,6 +225,24 @@ async function ensureCompatibilityViews() {
       logger.info('✓ Added missing column teaching_groups.subject_code');
     }
 
+    // 1a. Ensure teaching_groups.start_date and end_date exist
+    const tgDateCols = await query("SHOW COLUMNS FROM teaching_groups LIKE 'start_date'");
+    if (!tgDateCols || tgDateCols.length === 0) {
+      await query("ALTER TABLE teaching_groups ADD COLUMN start_date DATE NULL AFTER semester");
+      await query("ALTER TABLE teaching_groups ADD COLUMN end_date DATE NULL AFTER start_date");
+      await query("UPDATE teaching_groups SET start_date = DATE(created_at) WHERE start_date IS NULL");
+      logger.info('✓ Added missing columns teaching_groups.start_date and end_date');
+    }
+
+    // 1a-reg. Ensure attendance_registers.start_date and end_date exist
+    const arDateCols = await query("SHOW COLUMNS FROM attendance_registers LIKE 'start_date'");
+    if (!arDateCols || arDateCols.length === 0) {
+      await query("ALTER TABLE attendance_registers ADD COLUMN start_date DATE NULL AFTER semester");
+      await query("ALTER TABLE attendance_registers ADD COLUMN end_date DATE NULL AFTER start_date");
+      await query("UPDATE attendance_registers SET start_date = DATE(created_at) WHERE start_date IS NULL");
+      logger.info('✓ Added missing columns attendance_registers.start_date and end_date');
+    }
+
     // 1b. Ensure students.deleted_at exists for trash management
     const stuCols = await query("SHOW COLUMNS FROM students LIKE 'deleted_at'");
     if (!stuCols || stuCols.length === 0) {

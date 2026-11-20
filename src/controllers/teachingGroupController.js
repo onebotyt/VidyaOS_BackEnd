@@ -55,6 +55,12 @@ class TeachingGroupController {
         user: req.user,
         statusFilter
       });
+
+      // Background non-blocking check for semester end notifications for active teacher
+      if (req.user?.id && req.user?.teacher_id) {
+        TeachingGroupModel.checkSemesterEndNotifications(req.user.id, req.user.teacher_id).catch(() => {});
+      }
+
       res.status(200).json({ success: true, data: groups });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
@@ -71,7 +77,7 @@ class TeachingGroupController {
    * @usesModel TeachingGroupModel.createGroupTransaction() (models/teachingGroupModel.js)
    */
   static async createGroup(req, res) {
-    const { name, subject_name, subject_short_name, subject_code, component = 'THEORY', semester, year, enrollment_mode = 'INVITE_CODE', department_id, total_units } = req.body;
+    const { name, subject_name, subject_short_name, subject_code, component = 'THEORY', semester, year, start_date, end_date, enrollment_mode = 'INVITE_CODE', department_id, total_units } = req.body;
     try {
       let ayId = req.body.academic_year_id;
       if (!ayId) {
@@ -109,6 +115,8 @@ class TeachingGroupController {
         ayId,
         semester,
         year: computedYear,
+        startDate: start_date,
+        endDate: end_date,
         inviteCode,
         targetDeptId,
         enrollmentMode: enrollment_mode,
@@ -129,6 +137,8 @@ class TeachingGroupController {
           total_units: finalUnits,
           semester,
           year: computedYear,
+          start_date: start_date || new Date().toISOString().split('T')[0],
+          end_date: end_date || null,
           academic_year_id: ayId,
           invite_code: result.inviteCode,
           register_id: result.registerId,
@@ -512,6 +522,8 @@ class TeachingGroupController {
         academic_year_id = g.academic_year_id,
         semester = g.semester,
         year = g.year,
+        start_date,
+        end_date,
         total_units = g.total_units,
         syllabus_units
       } = req.body;
@@ -526,6 +538,8 @@ class TeachingGroupController {
         academic_year_id,
         semester,
         year,
+        start_date,
+        end_date,
         total_units: finalUnits,
         syllabus_units
       });

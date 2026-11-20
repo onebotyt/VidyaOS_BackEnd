@@ -161,6 +161,10 @@ class TeachingGroupModel {
       const alters = [
         "ALTER TABLE teaching_groups ADD COLUMN year INT NULL",
         "ALTER TABLE teaching_groups ADD COLUMN subject_short_name VARCHAR(100) NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN start_date DATE NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN end_date DATE NULL",
+        "ALTER TABLE attendance_registers ADD COLUMN start_date DATE NULL",
+        "ALTER TABLE attendance_registers ADD COLUMN end_date DATE NULL",
         "ALTER TABLE teaching_groups ADD COLUMN deleted_at DATETIME NULL",
         "ALTER TABLE teaching_groups ADD COLUMN department_id INT NULL",
         "ALTER TABLE teaching_groups ADD COLUMN syllabus_units LONGTEXT NULL",
@@ -175,6 +179,8 @@ class TeachingGroupModel {
       }
 
       await query("UPDATE teaching_groups SET year = CASE WHEN semester IN (1, 2) THEN 1 WHEN semester IN (3, 4) THEN 2 ELSE 3 END WHERE year IS NULL").catch(() => { });
+      await query("UPDATE teaching_groups SET start_date = DATE(created_at) WHERE start_date IS NULL").catch(() => { });
+      await query("UPDATE attendance_registers SET start_date = DATE(created_at) WHERE start_date IS NULL").catch(() => { });
     } catch (_) { }
   }
 
@@ -224,8 +230,8 @@ class TeachingGroupModel {
 
     let sql = `
       SELECT tg.id, tg.name, tg.subject_name, ${shortNameExpr}, tg.subject_code, ${componentExpr}, ${totalUnitsExpr}, ${syllabusUnitsExpr}, tg.teacher_id,
-             tg.academic_year_id, ay.label as academic_year_label,
-             tg.semester, ${yearExpr}, tg.invite_code, tg.status, tg.created_at, ${archivedAtExpr}, ${deletedAtExpr},
+             tg.academic_year_id, ay.label as academic_year_label, ay.end_date as academic_year_end_date,
+             tg.semester, ${yearExpr}, tg.start_date, tg.end_date, tg.invite_code, tg.status, tg.created_at, ${archivedAtExpr}, ${deletedAtExpr},
              t.full_name as teacher_name, t.department_id as teacher_department_id,
              d.name as department_name, d.code as department_code,
              ar.id as register_id,
@@ -309,6 +315,8 @@ class TeachingGroupModel {
     ayId,
     semester,
     year: inputYear,
+    startDate,
+    endDate,
     inviteCode,
     targetDeptId,
     enrollmentMode,
@@ -319,11 +327,14 @@ class TeachingGroupModel {
       const finalCode = (subjectCode || '').trim() || (subjectName || '').split(/[\s-]+/).map(w => w[0]).join('').toUpperCase().slice(0, 8);
       const computedYear = inputYear ? Number(inputYear) : Math.ceil(semester / 2);
       const finalShort = (subjectShortName || '').trim() || finalCode;
+      const finalStartDate = (startDate && String(startDate).trim()) ? String(startDate).trim() : new Date().toISOString().split('T')[0];
+      const finalEndDate = (endDate && String(endDate).trim()) ? String(endDate).trim() : null;
+
       const groupInsert = await conn.query(
         `INSERT INTO teaching_groups 
-          (name, subject_name, subject_short_name, subject_code, component, total_units, teacher_id, academic_year_id, semester, year, invite_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
-        [name, subjectName, finalShort, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, computedYear, inviteCode]
+          (name, subject_name, subject_short_name, subject_code, component, total_units, teacher_id, academic_year_id, semester, year, start_date, end_date, invite_code, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
+        [name, subjectName, finalShort, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, computedYear, finalStartDate, finalEndDate, inviteCode]
       );
       const groupId = (groupInsert.insertId || groupInsert[0]?.insertId) || groupInsert.lastInsertRowid;
 
@@ -357,23 +368,23 @@ class TeachingGroupModel {
       if (isDual) {
         const reg1 = await conn.query(
           `INSERT INTO attendance_registers 
-            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'THEORY', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [effTeacherId, `${subjectName || name} (Theory)`, targetSubjectId, targetDeptId, year, semester, ayId, groupId]
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, start_date, end_date, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'THEORY', ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [effTeacherId, `${subjectName || name} (Theory)`, targetSubjectId, targetDeptId, year, semester, ayId, finalStartDate, finalEndDate, groupId]
         );
         registerId = reg1.insertId || reg1.lastInsertRowid;
         await conn.query(
           `INSERT INTO attendance_registers 
-            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'PRACTICAL', 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [effTeacherId, `${subjectName || name} (Practical)`, targetSubjectId, targetDeptId, year, semester, ayId, groupId]
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, start_date, end_date, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'PRACTICAL', ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [effTeacherId, `${subjectName || name} (Practical)`, targetSubjectId, targetDeptId, year, semester, ayId, finalStartDate, finalEndDate, groupId]
         );
       } else {
         const regInsert = await conn.query(
           `INSERT INTO attendance_registers 
-            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, is_official, is_active, group_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [effTeacherId, name, targetSubjectId, targetDeptId, year, semester, ayId, component, groupId]
+            (teacher_id, name, subject_id, department_id, year, semester, academic_year_id, session_type_scope, start_date, end_date, is_official, is_active, group_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [effTeacherId, name, targetSubjectId, targetDeptId, year, semester, ayId, component, finalStartDate, finalEndDate, groupId]
         );
         registerId = (regInsert.insertId || regInsert[0]?.insertId) || regInsert.lastInsertRowid;
       }
@@ -422,9 +433,9 @@ class TeachingGroupModel {
    */
   static async getGroupById(groupId) {
     const rows = await query(
-      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
-              tg.academic_year_id, ay.label as academic_year_label,
-              tg.semester, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
+      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_short_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
+              tg.academic_year_id, ay.label as academic_year_label, ay.end_date as academic_year_end_date,
+              tg.semester, tg.year, tg.start_date, tg.end_date, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
               COALESCE(t.full_name, 'Faculty Teacher') as teacher_name, t.department_id as teacher_department_id,
               COALESCE(d.name, 'Information Technology') as department_name, COALESCE(d.code, 'IT') as department_code,
               (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND (tgm.status IN ('ENROLLED', 'ACTIVE') OR tgm.status IS NULL)) as member_count,
@@ -824,7 +835,7 @@ class TeachingGroupModel {
    * @param {Object} fields - Updated attributes
    * @returns {Promise<void>}
    */
-  static async updateGroup(groupId, { name, subject_name, subject_short_name, subject_code, component, academic_year_id, semester, year, total_units, syllabus_units }) {
+  static async updateGroup(groupId, { name, subject_name, subject_short_name, subject_code, component, academic_year_id, semester, year, start_date, end_date, total_units, syllabus_units }) {
     const updates = ['name = ?', 'subject_name = ?', 'subject_code = ?', 'component = ?'];
     const params = [name, subject_name, subject_code, component];
 
@@ -844,6 +855,14 @@ class TeachingGroupModel {
       updates.push('year = ?');
       params.push(computedYear);
     }
+    if (start_date !== undefined) {
+      updates.push('start_date = ?');
+      params.push(start_date ? String(start_date).trim() : null);
+    }
+    if (end_date !== undefined) {
+      updates.push('end_date = ?');
+      params.push(end_date ? String(end_date).trim() : null);
+    }
     if (total_units !== undefined) {
       updates.push('total_units = ?');
       params.push(Number(total_units));
@@ -855,6 +874,24 @@ class TeachingGroupModel {
     }
     params.push(groupId);
     await query(`UPDATE teaching_groups SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    // Synchronize register start/end dates
+    if (start_date !== undefined || end_date !== undefined) {
+      const regUpdates = [];
+      const regParams = [];
+      if (start_date !== undefined) {
+        regUpdates.push('start_date = ?');
+        regParams.push(start_date ? String(start_date).trim() : null);
+      }
+      if (end_date !== undefined) {
+        regUpdates.push('end_date = ?');
+        regParams.push(end_date ? String(end_date).trim() : null);
+      }
+      if (regUpdates.length > 0) {
+        regParams.push(groupId);
+        await query(`UPDATE attendance_registers SET ${regUpdates.join(', ')} WHERE group_id = ?`, regParams).catch(() => {});
+      }
+    }
 
     const isDual = (component === 'THEORY_PRACTICAL' || component === 'THEORY + PRACTICAL' || component === 'BOTH');
     if (isDual) {
@@ -1499,6 +1536,46 @@ class TeachingGroupModel {
       archivedCount++;
     }
     return archivedCount;
+  }
+
+  /**
+   * Proactively checks active teaching groups with no end_date where the semester/academic year
+   * is reaching completion (within 14 days or past), sending an in-app reminder notification
+   * to the teacher to set the final class ending date.
+   */
+  static async checkSemesterEndNotifications(userId, teacherId) {
+    try {
+      if (!userId || !teacherId) return;
+      const groups = await query(
+        `SELECT tg.id, tg.name, tg.subject_name, tg.start_date, ay.label as ay_label, ay.end_date as ay_end_date
+         FROM teaching_groups tg
+         JOIN academic_years ay ON tg.academic_year_id = ay.id
+         WHERE tg.teacher_id = ? AND tg.status = 'ACTIVE' AND tg.end_date IS NULL
+           AND ay.end_date IS NOT NULL AND (ay.end_date <= DATE_ADD(CURDATE(), INTERVAL 14 DAY))`,
+        [teacherId]
+      );
+
+      if (!groups || groups.length === 0) return;
+
+      const { sendNotification, NOTIFICATION_TYPES } = require('../services/notificationService');
+      for (const g of groups) {
+        const notifTitle = `Set Ending Date: ${g.subject_name || g.name} [#${g.id}]`;
+        const existing = await query(
+          `SELECT id FROM notifications WHERE user_id = ? AND title = ? AND is_read = 0 LIMIT 1`,
+          [userId, notifTitle]
+        );
+        if (!existing || existing.length === 0) {
+          const className = g.subject_name || g.name;
+          await sendNotification({
+            userId,
+            type: NOTIFICATION_TYPES.ADMIN_NOTICE,
+            title: notifTitle,
+            message: `The academic semester for "${className}" is reaching completion (${g.ay_label}). Please set the official ending date for your class to finalize attendance records.`,
+            linkUrl: `/faculty/classes/index.html?classId=${g.id}&action=edit`
+          });
+        }
+      }
+    } catch (_) { }
   }
 }
 
