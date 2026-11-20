@@ -50,6 +50,13 @@ function setAuthCookies(res, result) {
 function clearAuthCookies(res) {
   res.clearCookie('accessToken', { path: '/' });
   res.clearCookie('refreshToken', { path: '/' });
+  res.clearCookie('token', { path: '/' });
+  res.clearCookie('sessionId', { path: '/' });
+  // Instruct modern browsers to immediately purge cache, cookies, and storage on logout
+  res.setHeader('Clear-Site-Data', '"cache", "cookies", "storage"');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
 }
 
 class AuthController {
