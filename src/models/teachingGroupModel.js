@@ -1459,6 +1459,7 @@ class TeachingGroupModel {
   static async getTestRosterScores(testId, groupId) {
     return await query(
       `SELECT s.id as student_id, s.class_roll_no, s.registration_no, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
               s.full_name,
               sub.marks_obtained, sub.status, sub.feedback
        FROM teaching_group_members gm

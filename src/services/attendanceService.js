@@ -299,7 +299,7 @@ class AttendanceService {
   async getSelfAttendanceRequests(sessionId) {
     return await query(
       `SELECT ssa.id as request_id, ssa.student_id, ssa.verification_method, ssa.request_status, ssa.submitted_at,
-              s.official_enrollment_no, s.registration_no, s.full_name, COALESCE(s.class_roll_no, ass.class_roll_no) as class_roll_no
+              s.official_enrollment_no, COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no, s.registration_no, s.full_name, COALESCE(s.class_roll_no, ass.class_roll_no) as class_roll_no
        FROM student_self_attendance ssa
        JOIN students s ON ssa.student_id = s.id
        JOIN attendance_session_students ass ON ass.session_id = ssa.session_id AND ass.student_id = ssa.student_id
@@ -541,7 +541,7 @@ class AttendanceService {
     return await query(
       `SELECT ac.id, ac.session_id, ac.student_id, ac.original_status, ac.new_status, ac.reason,
               ac.changed_by, ac.created_at,
-              s.full_name, s.official_enrollment_no, s.registration_no,
+              s.full_name, s.official_enrollment_no, COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no, s.registration_no,
               COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
               u.username as changed_by_username
        FROM attendance_corrections ac
