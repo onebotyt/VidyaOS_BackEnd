@@ -756,11 +756,11 @@ class HodController {
       const existingUser = await query(
         `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)
          UNION
-         SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)`,
-        [cleanEnroll, cleanEnroll]
+         SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?) OR LOWER(TRIM(ubter_roll_no)) = LOWER(?)`,
+        [cleanEnroll, cleanEnroll, cleanEnroll]
       );
       if (existingUser.length > 0) {
-        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` } });
+        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system. UBTER Roll Numbers are uniquely assigned once upon admission.` } });
       }
 
       if (email && email.trim()) {

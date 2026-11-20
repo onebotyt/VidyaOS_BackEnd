@@ -456,7 +456,7 @@ class HodModel {
     const params = hasDept ? [deptId] : [];
 
     const students = await query(
-      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, st.enrollment_no_status, st.registration_no,
+      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no, st.enrollment_no_status, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               e.year, e.semester, COALESCE(e.status, 'ENROLLED') as enrollment_status,
               d.name as department_name, d.code as department_code
@@ -1289,9 +1289,9 @@ class HodModel {
       await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`, [userId]);
 
       const [sRes] = await conn.execute(
-        `INSERT INTO students (user_id, official_enrollment_no, registration_no, full_name, entry_mode, is_lateral_entry, admission_year)
-         VALUES (?, ?, ?, ?, 'hod_provisioned', ?, ?)`,
-        [userId, cleanEnroll, (registrationNo || '').trim() || null, cleanName, isLateralEntry ? 1 : 0, new Date().getFullYear()]
+        `INSERT INTO students (user_id, ubter_roll_no, official_enrollment_no, registration_no, full_name, entry_mode, is_lateral_entry, admission_year)
+         VALUES (?, ?, ?, ?, ?, 'hod_provisioned', ?, ?)`,
+        [userId, cleanEnroll, cleanEnroll, (registrationNo || '').trim() || null, cleanName, isLateralEntry ? 1 : 0, new Date().getFullYear()]
       );
       const studentId = sRes.insertId ?? sRes.lastInsertRowid;
 
@@ -1309,6 +1309,7 @@ class HodModel {
 
       return {
         student_id: studentId,
+        ubter_roll_no: cleanEnroll,
         official_enrollment_no: cleanEnroll,
         enrollment_no: cleanEnroll,
         registration_no: (registrationNo || '').trim() || null,
@@ -1504,7 +1505,7 @@ class HodModel {
     }
 
     return await query(
-      `SELECT st.id, st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+      `SELECT st.id, st.id as student_id, st.full_name, st.official_enrollment_no, COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               e.year, e.semester,
               u.id as user_id, u.email,

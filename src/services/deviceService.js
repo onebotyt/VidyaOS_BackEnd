@@ -226,7 +226,9 @@ class DeviceService {
 
     // Verify student exists and fetch their Name + Roll No for OLED display
     const studentRows = await query(
-      `SELECT s.id, s.full_name, s.official_enrollment_no, s.registration_no,
+      `SELECT s.id, s.full_name, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.registration_no,
               COALESCE(e.class_roll_no, s.class_roll_no) as class_roll_no,
               COALESCE(e.department_id, ?) as department_id,
               e.year, e.semester
@@ -341,7 +343,9 @@ class DeviceService {
 
     const templates = await query(
       `SELECT sbt.student_id, sbt.finger_index, sbt.template_base64, sbt.template_sha256, sbt.quality_score,
-              s.full_name, s.official_enrollment_no, s.registration_no,
+              s.full_name, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.registration_no,
               COALESCE(e.class_roll_no, s.class_roll_no, 0) as class_roll_no,
               e.year, e.semester
        FROM student_biometric_templates sbt
@@ -486,7 +490,9 @@ class DeviceService {
 
       // Fetch Student Full Name, Roll Number & Cohort for OLED Display + Auto Session Marking
       const stRows = await query(
-        `SELECT s.id, s.full_name, s.official_enrollment_no, s.registration_no,
+        `SELECT s.id, s.full_name, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.registration_no,
                 COALESCE(e.class_roll_no, s.class_roll_no, 0) as class_roll_no,
                 COALESCE(e.department_id, ?) as department_id,
                 e.year, e.semester
@@ -649,7 +655,9 @@ class DeviceService {
     });
 
     const students = await query(
-      `SELECT s.id as student_id, s.full_name, s.official_enrollment_no, s.registration_no,
+      `SELECT s.id as student_id, s.full_name, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.registration_no,
               COALESCE(e.class_roll_no, s.class_roll_no) as class_roll_no,
               e.year, e.semester,
               sbt.finger_index, sbt.template_sha256, sbt.quality_score,

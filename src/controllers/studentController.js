@@ -299,7 +299,7 @@ class StudentController {
       if (enrollConflict) {
         return res.status(409).json({
           success: false,
-          error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` }
+          error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system. UBTER Roll Numbers are uniquely assigned once upon admission.` }
         });
       }
 
@@ -406,7 +406,7 @@ class StudentController {
         if (enrollConflict) {
           results.errors.push({
             enrollment_no: cleanEnroll,
-            reason: `Official Enrollment Number "${cleanEnroll}" already exists in the institution.`
+            reason: `UBTER Roll Number "${cleanEnroll}" already exists in the institution.`
           });
           continue;
         }

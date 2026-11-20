@@ -249,6 +249,7 @@ class DeviceController {
         }
         const stRows = await query(
           `SELECT s.id, s.full_name, s.official_enrollment_no,
+                  COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
                   COALESCE(e.class_roll_no, s.class_roll_no, 0) as class_roll_no,
                   COALESCE(e.department_id, ?) as department_id,
                   d.name as department_name,
@@ -267,6 +268,7 @@ class DeviceController {
           student_id: st.id,
           full_name: st.full_name,
           class_roll_no: st.class_roll_no,
+          ubter_roll_no: st.ubter_roll_no || st.official_enrollment_no,
           official_enrollment_no: st.official_enrollment_no,
           department_id: st.department_id || device.department_id,
           department_name: st.department_name || '',
