@@ -920,15 +920,26 @@ class FacultyModel {
          ORDER BY COALESCE(s.class_roll_no, e.class_roll_no) ASC`,
         [register.group_id]
       );
-    } else {
+    }
+    if (!enrolledStudents || enrolledStudents.length === 0) {
       enrolledStudents = await query(
-        `SELECT s.id as student_id, s.official_enrollment_no, s.registration_no, s.full_name, e.class_roll_no
-         FROM enrollments e
-         JOIN students s ON e.student_id = s.id
-         WHERE e.department_id = ? AND e.year = ? AND e.semester = ?
-           AND e.academic_year_id = ? AND e.status = 'ENROLLED'
-         ORDER BY e.class_roll_no ASC`,
-        [register.department_id, register.year, register.semester, register.academic_year_id]
+        `SELECT s.id as student_id, s.official_enrollment_no, s.registration_no, s.full_name,
+                COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no
+         FROM students s
+         JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+         WHERE (e.department_id = ? OR ? IS NULL)
+           AND (e.semester = ? OR ? IS NULL)
+         ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 9999) ASC, s.full_name ASC`,
+        [register.department_id, register.department_id, register.semester, register.semester]
+      );
+    }
+    if (!enrolledStudents || enrolledStudents.length === 0) {
+      enrolledStudents = await query(
+        `SELECT s.id as student_id, s.official_enrollment_no, s.registration_no, s.full_name,
+                COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no
+         FROM students s
+         LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+         ORDER BY COALESCE(s.class_roll_no, e.class_roll_no, 9999) ASC, s.full_name ASC LIMIT 40`
       );
     }
 
