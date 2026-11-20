@@ -89,3 +89,4 @@ router.get('/admin/:id', requireRole('ADMIN', 'SYSTEM_ADMIN'), (req, res) => bug
 router.put('/admin/:id/status', requireRole('ADMIN', 'SYSTEM_ADMIN'), (req, res) => bugReportController.adminUpdateStatus(req, res));
 
 module.exports = router;
+

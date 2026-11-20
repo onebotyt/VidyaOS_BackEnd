@@ -252,3 +252,4 @@ class BugReportModel {
 }
 
 module.exports = new BugReportModel();
+

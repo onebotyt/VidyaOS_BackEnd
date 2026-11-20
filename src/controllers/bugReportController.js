@@ -412,3 +412,4 @@ class BugReportController {
 }
 
 module.exports = new BugReportController();
+
