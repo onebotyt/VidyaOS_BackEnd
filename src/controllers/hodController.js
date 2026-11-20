@@ -1232,7 +1232,7 @@ class HodController {
           title: '🎓 Semester Promoted',
           message: `Congratulations! You have been promoted to Year ${ps.nextYr}, Semester ${ps.nextSem}.`,
           link: '/student/dashboard.html'
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       for (const gs of result.graduatedStudents || []) {
@@ -1242,7 +1242,7 @@ class HodController {
           title: '🎉 Curriculum Completed',
           message: 'Congratulations! You have successfully completed your academic program and graduated as Alumni.',
           link: '/student/profile.html'
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       for (const ds of result.detainedStudents || []) {
@@ -1252,7 +1252,7 @@ class HodController {
           title: '⚠️ Semester Detention Notice',
           message: `You have been detained in Semester ${ds.sem}. Please consult your Department HOD for guidance.`,
           link: '/student/dashboard.html'
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       res.json({
@@ -1360,7 +1360,7 @@ class HodController {
         title: 'Faculty Registration Approved',
         message: 'Welcome to the faculty portal! Your registration for Department has been approved by the HOD.',
         linkUrl: '/faculty/registers.html'
-      }).catch(() => {});
+      }).catch(() => { });
 
       res.status(200).json({
         success: true,
