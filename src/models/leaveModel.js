@@ -15,7 +15,7 @@ class LeaveModel {
    */
   async createApplication({ studentId, fromDate, toDate, reason }) {
     const res = await query(
-      `INSERT INTO leave_applications (student_id, from_date, to_date, reason, status)
+      `INSERT INTO leave_applications (student_id, start_date, end_date, reason, status)
        VALUES (?, ?, ?, ?, 'PENDING')`,
       [studentId, fromDate, toDate, reason]
     );
@@ -71,8 +71,8 @@ class LeaveModel {
     return await query(
       `SELECT la.*,
               la.start_date as from_date,
-              la.end_date as to_date,
-              COALESCE(la.leave_type, 'Medical') as leave_type,
+              la.end_date as \`to_date\`,
+              'Medical' as leave_type,
               s.official_enrollment_no,
               s.full_name as student_name,
               e.class_roll_no,

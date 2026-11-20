@@ -58,3 +58,6 @@ scratch/
 
 backups/
 *.sqlite
+
+*.db
+

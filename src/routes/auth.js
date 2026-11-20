@@ -225,16 +225,16 @@ router.post(
     body('full_name').trim().notEmpty().withMessage('Full name is required'),
     body('enrollment_not_available').optional().toBoolean(),
     body('official_enrollment_no').custom((val, { req }) => {
-      const isNotAvailable = Boolean(req.body.enrollment_not_available);
+      const isNotAvailable = Boolean(req.body.enrollment_not_available || req.body.roll_no_not_available || req.body.ubter_roll_not_available);
       if (isNotAvailable) {
         return true;
       }
-      const enroll = (val || '').trim();
+      const enroll = (val || req.body.ubter_roll_no || '').trim();
       if (!enroll) {
-        throw new Error('Enrollment number is required (or check "Enrollment Number Not Available")');
+        throw new Error('UBTER Roll Number is required (or check "Roll number not available yet")');
       }
       if (!/^\d{11}$/.test(enroll)) {
-        throw new Error('Enrollment number must contain exactly 11 numeric digits (0–9)');
+        throw new Error('UBTER Roll Number must contain exactly 11 numeric digits (0–9)');
       }
       return true;
     }),
@@ -262,7 +262,17 @@ router.post(
       }
       return true;
     }),
-    body('phone').optional().trim(),
+    body('phone')
+      .trim()
+      .notEmpty().withMessage('Mobile number is required')
+      .customSanitizer(val => {
+        if (!val) return '';
+        let cleaned = String(val).trim().replace(/[^\d+]/g, '');
+        if (cleaned.startsWith('+91')) cleaned = cleaned.slice(3);
+        else if (cleaned.startsWith('0') && cleaned.length === 11) cleaned = cleaned.slice(1);
+        return cleaned.length >= 10 ? cleaned.slice(-10) : cleaned;
+      })
+      .matches(/^[6-9]\d{9}$/).withMessage('Mobile number must be a valid 10-digit Indian number (starts with 6–9)'),
     body('parent_phone').optional().trim(),
     body('parent_name').optional().trim(),
     body('department_id').optional().isInt(),

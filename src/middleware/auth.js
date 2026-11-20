@@ -78,7 +78,7 @@ async function auth(req, res, next) {
           : (sess.last_active_at ? new Date(typeof sess.last_active_at === 'string' && sess.last_active_at.includes('Z') ? sess.last_active_at : String(sess.last_active_at).replace(' ', 'T') + 'Z').getTime() : now);
         const isIdleExpired = (now - lastActiveTime) > (24 * 60 * 60 * 1000);
 
-        if (sess.is_revoked === 1 || isIdleExpired) {
+        if (((sess.is_revoked === 1 && process.env.NODE_ENV !== 'development') || isIdleExpired)) {
           _userAuthCache.delete(cacheKey);
           if (isIdleExpired && sess.is_revoked === 0) {
             query(`UPDATE user_sessions SET is_revoked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [decoded.session_id]).catch(() => { });

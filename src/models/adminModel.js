@@ -65,13 +65,13 @@ class AdminModel {
         (SELECT COUNT(CASE WHEN ar.attendance_status IN ('PRESENT', 'LATE') THEN 1 END) 
          FROM register_attendance ar
          JOIN attendance_sessions s ON ar.session_id = s.id
-         LEFT JOIN attendance_registers reg ON s.register_id = reg.id
-         WHERE COALESCE(s.department_id, reg.department_id) = d.id AND s.session_date = CURDATE()) as dept_present,
+         JOIN attendance_registers reg ON s.register_id = reg.id
+         WHERE reg.department_id = d.id AND s.session_date = CURDATE()) as dept_present,
         (SELECT COUNT(ar.id) 
          FROM register_attendance ar
          JOIN attendance_sessions s ON ar.session_id = s.id
-         LEFT JOIN attendance_registers reg ON s.register_id = reg.id
-         WHERE COALESCE(s.department_id, reg.department_id) = d.id AND s.session_date = CURDATE()) as dept_total
+         JOIN attendance_registers reg ON s.register_id = reg.id
+         WHERE reg.department_id = d.id AND s.session_date = CURDATE()) as dept_total
       FROM departments d
       WHERE d.is_active = 1
       ORDER BY d.id ASC
@@ -546,11 +546,11 @@ class AdminModel {
    */
   static async getDevices() {
     return await query(
-      `SELECT dv.*, d.name as department_name, d.name as branch_name, d.code as branch_code, ay.label as academic_year_label
+      `SELECT dv.*, d.name as department_name, d.name as branch_name, d.code as branch_code,
+              (SELECT label FROM academic_years WHERE is_current = 1 LIMIT 1) as academic_year_label
        FROM devices dv
-       JOIN departments d ON dv.department_id = d.id
-       JOIN academic_years ay ON dv.academic_year_id = ay.id
-       ORDER BY dv.name`
+       LEFT JOIN departments d ON dv.department_id = d.id
+       ORDER BY dv.id ASC`
     );
   }
 

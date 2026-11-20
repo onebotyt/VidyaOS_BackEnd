@@ -105,11 +105,11 @@ class ReportService {
        FROM attendance_sessions s
        JOIN attendance_registers r ON s.register_id = r.id
        LEFT JOIN teaching_groups tg ON r.group_id = tg.id
-       LEFT JOIN subjects sub ON s.subject_id = sub.id
+       LEFT JOIN subjects sub ON r.subject_id = sub.id
        JOIN attendance_session_students ass ON ass.session_id = s.id AND ass.student_id = ? AND ass.included = TRUE
        LEFT JOIN register_attendance ra ON ra.session_id = s.id AND ra.student_id = ?
        WHERE s.state = 'FINALIZED'
-       GROUP BY r.id, r.session_type_scope, tg.id, tg.subject_name, sub.id, sub.name, r.name, sub.code
+       GROUP BY r.id, r.session_type, tg.id, tg.subject_name, sub.id, sub.name, r.name, sub.code
        ORDER BY subject_name ASC`,
       [studentId, studentId]
     );
@@ -143,7 +143,7 @@ class ReportService {
     const params = [studentId];
 
     if (subjectId) {
-      filter += ' AND (s.subject_id = ? OR r.group_id = ? OR r.id = ?)';
+      filter += ' AND (r.subject_id = ? OR r.group_id = ? OR r.id = ?)';
       params.push(subjectId, subjectId, subjectId);
     }
     if (fromDate) {
@@ -158,7 +158,7 @@ class ReportService {
     params.push(limit);
 
     return await query(
-      `SELECT s.id as session_id, s.subject_id, s.label, s.session_type, s.start_time,
+      `SELECT s.id as session_id, r.subject_id, s.label, s.session_type, s.start_time,
               COALESCE(tg.subject_name, sub.name, r.name) as subject_name,
               sub.code as subject_code,
               t.full_name as teacher_name,
@@ -166,8 +166,8 @@ class ReportService {
        FROM attendance_sessions s
        JOIN attendance_registers r ON s.register_id = r.id
        LEFT JOIN teaching_groups tg ON r.group_id = tg.id
-       LEFT JOIN subjects sub ON s.subject_id = sub.id
-       JOIN teachers t ON s.teacher_id = t.id
+       LEFT JOIN subjects sub ON r.subject_id = sub.id
+       JOIN teachers t ON r.teacher_id = t.id
        JOIN attendance_session_students ass ON ass.session_id = s.id AND ass.student_id = ?
        LEFT JOIN register_attendance ra ON ra.session_id = s.id AND ra.student_id = ass.student_id
        WHERE s.state = 'FINALIZED' ${filter}

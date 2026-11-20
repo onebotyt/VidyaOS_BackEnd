@@ -151,7 +151,7 @@ async function generateClassTestExcel(data) {
   ws.getCell(4, 1).value = 'SR. NO.';
   ws.getCell(4, 2).value = 'ROLL NO.';
   ws.getCell(4, 3).value = 'REG. NO.';
-  ws.getCell(4, 4).value = 'ENROLLMENT NO.';
+  ws.getCell(4, 4).value = 'UBTER ROLL NO.';
   ws.getCell(4, 5).value = 'STUDENT NAME';
 
   // Merge over questions and Total for Exam Title
@@ -519,7 +519,7 @@ async function generateInternalEvaluationExcel(data) {
   const vertHeaders = [
     { col: 1, text: 'ROLL NO' },
     { col: 2, text: 'REG NO' },
-    { col: 3, text: 'ENROLLMENT NO' },
+    { col: 3, text: 'UBTER ROLL NO' },
     { col: 4, text: 'STUDENT NAME' }
   ];
 
@@ -984,7 +984,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
   r4.height = 24;
   ws.getCell(4, 1).value = 'ROLL NO.';
   ws.getCell(4, 2).value = 'REGISTRATION NO.';
-  ws.getCell(4, 3).value = 'ENROLLMENT NO.';
+  ws.getCell(4, 3).value = 'UBTER ROLL NO.';
   ws.getCell(4, 4).value = 'STUDENT NAME';
 
   exams.forEach((ex, idx) => {
@@ -1226,7 +1226,7 @@ function buildClassTestMarksheetHtml(data) {
         <th rowspan="2" style="padding:5px 3px;vertical-align:middle;">SR. NO.</th>
         <th rowspan="2" style="padding:5px 3px;vertical-align:middle;">ROLL NO.</th>
         <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">REG. NO.</th>
-        <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">ENROLLMENT NO.</th>
+        <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">UBTER ROLL NO.</th>
         <th rowspan="2" style="padding:5px 6px;vertical-align:middle;">STUDENT NAME</th>
         <th colspan="${qCount}" style="padding:5px 3px;">${examTitle} (Total Marks : ${maxMarks})</th>
         <th style="padding:5px 3px;">Total</th>
@@ -1822,7 +1822,7 @@ async function generateDepartmentReportsExcel(data) {
   wsLogs.getRow(1).height = 24;
 
   const logHeaders = [
-    'SCAN ID', 'SCAN TIME', 'ROLL NO', 'ENROLLMENT NO', 'STUDENT NAME',
+    'SCAN ID', 'SCAN TIME', 'ROLL NO', 'UBTER ROLL NO', 'STUDENT NAME',
     'DEPARTMENT', 'YEAR', 'SEMESTER', 'TERMINAL UID', 'TERMINAL NAME', 'STATUS'
   ];
   const lr3 = wsLogs.getRow(3);
@@ -1980,7 +1980,7 @@ async function generateAttendanceRegisterExcel(data) {
     const r4 = wsOverview.getRow(4);
     r4.height = 24;
     const overviewHeaders = [
-      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'ENROLLMENT NO.', 'STUDENT NAME',
+      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'UBTER ROLL NO.', 'STUDENT NAME',
       ...months.map(m => `${m.label}\n(P/Held)`),
       'TOTAL PRESENT', 'TOTAL ABSENT', 'TOTAL CLASSES', '% ATTENDED'
     ];
@@ -2177,7 +2177,7 @@ async function generateAttendanceRegisterExcel(data) {
     const r4 = ws.getRow(4);
     r4.height = 24;
     const detailHeaders = [
-      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'ENROLLMENT NO.', 'STUDENT NAME',
+      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'UBTER ROLL NO.', 'STUDENT NAME',
       ...days.map(d => d.day_name && dCount <= 7 ? d.day_name : String(d.day)),
       'TOTAL PRESENT', 'TOTAL ABSENT', 'TOTAL CLASSES', '% ATTENDED'
     ];
@@ -2393,7 +2393,7 @@ function buildAttendanceRegisterHtml(data) {
             <th style="width:28px; text-align:center;">SR.</th>
             <th style="width:48px; text-align:center;">ROLL NO.</th>
             <th style="width:85px; text-align:center;">REGISTRATION NO.</th>
-            <th style="width:78px; text-align:center;">ENROLLMENT NO.</th>
+            <th style="width:78px; text-align:center;">UBTER ROLL NO.</th>
             <th style="text-align:left; min-width:120px;">STUDENT NAME</th>
             ${theadMonths}
             <th style="width:50px; text-align:center;">PRESENT</th>

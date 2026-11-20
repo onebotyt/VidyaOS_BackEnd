@@ -111,7 +111,7 @@ class AuthController {
    * @usesService authService.studentLogin() (services/authService.js)
    */
   static async studentLogin(req, res) {
-    const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.enrollment_no || req.body.official_enrollment_no || req.body.registration_no || '').trim();
+    const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.ubter_roll_no || req.body.enrollment_no || req.body.official_enrollment_no || req.body.registration_no || '').trim();
     if (!credential) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' } });
     }
@@ -141,7 +141,7 @@ class AuthController {
    * @usesService authService.studentLogin() (services/authService.js)
    */
   static async login(req, res) {
-    const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.enrollment_no || req.body.official_enrollment_no || req.body.registration_no || '').trim();
+    const credential = (req.body.email || req.body.phone || req.body.credential || req.body.identifier || req.body.username || req.body.ubter_roll_no || req.body.enrollment_no || req.body.official_enrollment_no || req.body.registration_no || '').trim();
     if (!credential) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'invalid credentials check id and password ' } });
     }
@@ -739,7 +739,7 @@ class AuthController {
    * @usesService authService.verifyGoogleToken() (services/authService.js)
    */
   static async registerStudent(req, res) {
-    const { full_name, official_enrollment_no, registration_no, class_roll_no, email, password, phone, parent_phone, parent_name, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
+    const { full_name, official_enrollment_no, ubter_roll_no, registration_no, class_roll_no, email, password, phone, parent_phone, parent_name, department_id, branch_id, year, semester, google_sub, google_id_token } = req.body;
     const effDeptId = department_id || branch_id;
     if (!effDeptId) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Department is required' } });
@@ -796,8 +796,8 @@ class AuthController {
         });
       }
 
-      const isEnrollNotAvailable = Boolean(req.body.enrollment_not_available);
-      let cleanEnroll = (official_enrollment_no || '').trim();
+      const isEnrollNotAvailable = Boolean(req.body.enrollment_not_available || req.body.roll_no_not_available || req.body.ubter_roll_not_available);
+      let cleanEnroll = (ubter_roll_no || official_enrollment_no || '').trim();
       let enrollmentStatus = 'ASSIGNED';
 
       if (isEnrollNotAvailable || cleanEnroll.toLowerCase() === 'not assigned') {
@@ -805,16 +805,16 @@ class AuthController {
         enrollmentStatus = 'Not Assigned';
       } else {
         if (!cleanEnroll) {
-          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number is required or check "Enrollment Number Not Available"' } });
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number is required (or check "Roll number not available yet")' } });
         }
         if (!/^\d{11}$/.test(cleanEnroll)) {
-          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment number must contain exactly 11 numeric digits (0–9)' } });
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0–9)' } });
         }
         const existingEnroll = await AuthModel.findExistingEnrollment(cleanEnroll);
         if (existingEnroll) {
           return res.status(409).json({
             success: false,
-            error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system.` }
+            error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system.` }
           });
         }
       }
@@ -845,16 +845,16 @@ class AuthController {
         });
       }
 
-      let cleanPhone = null;
-      if (phone && phone.trim()) {
-        cleanPhone = normalizePhone(phone);
-        if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
-          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mobile number must be a valid 10-digit Indian number.' } });
-        }
-        const existingPhone = await AuthModel.findExistingPhone(cleanPhone);
-        if (existingPhone) {
-          return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'An account with this Mobile number already exists.' } });
-        }
+      if (!phone || !String(phone).trim()) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mobile number is required to register.' } });
+      }
+      const cleanPhone = normalizePhone(phone);
+      if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Mobile number must be a valid 10-digit Indian number.' } });
+      }
+      const existingPhone = await AuthModel.findExistingPhone(cleanPhone);
+      if (existingPhone) {
+        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'An account with this Mobile number already exists.' } });
       }
 
       let resolvedGoogleSub = (google_sub && typeof google_sub === 'string') ? google_sub.trim() : null;
