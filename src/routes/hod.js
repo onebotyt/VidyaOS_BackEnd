@@ -11,12 +11,9 @@ const auth = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
 const { requireHOD, requireHODOrClassTeacher } = require('../middleware/requireScope');
 const validate = require('../middleware/validate');
-const { makeUploader } = require('../middleware/upload');
 const HodController = require('../controllers/hodController');
 const StudentController = require('../controllers/studentController');
 const AuthController = require('../controllers/authController');
-
-const uploadStudentDoc = makeUploader('student-documents', 50);
 
 // All HOD/Department routes require authenticated faculty or administrator
 router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN', 'ADMIN', 'HOD', 'FACULTY'), requireHODOrClassTeacher());
@@ -292,25 +289,10 @@ router.post('/students/:id/withdraw', requireHODOrClassTeacher(), [param('id').i
 // @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
 router.post('/students/:id/reactivate', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.reactivateStudent);
 
-// @route   GET /api/v1/hod/students/:id/documents
-// @desc    Retrieve all archived academic records and uploaded documents for a student (accessible anytime)
-// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-router.get('/students/:id/documents', [param('id').isInt(), validate], HodController.getStudentDocuments);
-
-// @route   POST /api/v1/hod/students/:id/documents
-// @desc    Upload an archived document or official record for a student
-// @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-router.post('/students/:id/documents', [param('id').isInt(), validate], uploadStudentDoc.single('file'), HodController.uploadStudentDocument);
-
 // @route   PUT /api/v1/hod/students/:id
 // @desc    Update student details (Name, Enrollment No, Reg No, Class Roll No, Year/Semester)
 // @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
 router.put('/students/:id', requireHODOrClassTeacher(), [param('id').isInt(), validate], HodController.updateStudent);
-
-// @route   DELETE /api/v1/hod/students/:id/documents/:docId
-// @desc    Delete an archived student document
-// @access  Protected (HOD, SYSTEM_ADMIN)
-router.delete('/students/:id/documents/:docId', requireHOD(), [param('id').isInt(), param('docId').isInt(), validate], HodController.deleteStudentDocument);
 
 // @route   GET /api/v1/hod/trash/students
 // @desc    Retrieve soft-deleted students for HOD department currently in Trash

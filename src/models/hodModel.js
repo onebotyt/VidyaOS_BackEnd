@@ -1403,7 +1403,7 @@ class HodModel {
              VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
             [studentId, deptId, stYear, stSem, ayId, tempRoll]
           );
-        } catch (_) {}
+        } catch (_) { }
 
         createdList.push({ student_id: studentId, official_enrollment_no: enrollNo, full_name: name });
         cohortsToReindex.add(`${stYear}:${stSem}`);
@@ -1710,7 +1710,7 @@ class HodModel {
            VALUES (?, 'STUDENT_UPDATED', 'students', ?, ?, CURRENT_TIMESTAMP)`,
           [userId || 1, String(studentId), JSON.stringify({ name: cleanName, enroll: cleanEnroll, roll: parsedRollNo, sem })]
         );
-      } catch (_) {}
+      } catch (_) { }
 
       return {
         id: studentId,
@@ -1859,86 +1859,6 @@ class HodModel {
       success: true,
       message: `${student.full_name} has been re-activated into active enrollment.`
     };
-  }
-
-  /**
-   * Get all archived documents & records for a student (accessible anytime)
-   */
-  static async getStudentDocuments(studentId, deptId) {
-    const sRows = await query(
-      `SELECT s.id, s.full_name, s.official_enrollment_no, s.registration_no, s.class_roll_no,
-              e.status as enrollment_status, e.year, e.semester, d.name as department_name
-       FROM students s
-       LEFT JOIN enrollments e ON e.student_id = s.id
-       LEFT JOIN departments d ON d.id = e.department_id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''}`,
-      deptId ? [studentId, deptId] : [studentId]
-    );
-    if (!sRows.length) return null;
-
-    // 1. Custom uploaded student documents
-    let documents = [];
-    try {
-      documents = await query(
-        `SELECT id, student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploader_name, notes, created_at
-         FROM student_documents
-         WHERE student_id = ?
-         ORDER BY created_at DESC`,
-        [studentId]
-      );
-    } catch (_) { }
-
-    // 2. Academic assignment submissions & coursework files
-    let submissions = [];
-    try {
-      submissions = await query(
-        `SELECT asub.id, asub.assessment_id, asub.original_filename, asub.file_path, asub.marks_obtained, asub.status, asub.submitted_at,
-                a.title as assessment_title, a.type as assessment_type,
-                s.name as subject_name, s.code as subject_code
-         FROM assessment_submissions asub
-         JOIN assessments a ON a.id = asub.assessment_id
-         LEFT JOIN subjects s ON s.id = a.subject_id
-         WHERE asub.student_id = ?
-         ORDER BY asub.submitted_at DESC`,
-        [studentId]
-      );
-    } catch (_) { }
-
-    // 3. Leave applications & records
-    let leaves = [];
-    try {
-      leaves = await query(
-        `SELECT id, start_date, end_date, reason, status, reviewed_at, review_notes, created_at
-         FROM leave_applications
-         WHERE student_id = ?
-         ORDER BY created_at DESC`,
-        [studentId]
-      );
-    } catch (_) { }
-
-    return {
-      student: sRows[0],
-      documents,
-      submissions,
-      leaves
-    };
-  }
-
-  static async addStudentDocument({ student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploaded_by, uploader_name, notes }) {
-    const result = await query(
-      `INSERT INTO student_documents (student_id, department_id, title, document_type, file_path, file_name, file_size, mime_type, uploaded_by, uploader_name, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [student_id, department_id, title, document_type || 'ACADEMIC_RECORD', file_path, file_name, file_size, mime_type, uploaded_by, uploader_name, notes || null]
-    );
-    return { id: result.insertId, title, file_path };
-  }
-
-  static async deleteStudentDocument(docId, studentId, deptId) {
-    await query(
-      `DELETE FROM student_documents WHERE id = ? AND student_id = ? ${deptId ? 'AND (department_id = ? OR department_id IS NULL)' : ''}`,
-      deptId ? [docId, studentId, deptId] : [docId, studentId]
-    );
-    return true;
   }
 
   /**
