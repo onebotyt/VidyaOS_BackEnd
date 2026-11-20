@@ -364,7 +364,7 @@ def generate_native_excel(data):
     ws3.merge_range("A1:K1", f"{inst_name.upper()} — BIOMETRIC HARDWARE SCANNED LOGS", fmt_title)
 
     log_headers = [
-        "SCAN ID", "SCAN TIME", "ROLL NO", "ENROLLMENT NO", "STUDENT NAME",
+        "SCAN ID", "SCAN TIME", "ROLL NO", "UBTER ROLL NO", "STUDENT NAME",
         "DEPARTMENT", "YEAR", "SEMESTER", "TERMINAL UID", "TERMINAL NAME", "STATUS"
     ]
     ws3.set_row(2, 22)

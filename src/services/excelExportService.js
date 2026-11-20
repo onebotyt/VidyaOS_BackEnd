@@ -87,7 +87,7 @@ async function generateClassTestExcel(data) {
       ];
 
   const qCount = questions.length;
-  // Columns: Col 1: SR NO, Col 2: ROLL NO, Col 3: REG. NO., Col 4: ENROLLMENT NO., Col 5: STUDENT NAME, Cols 6..(5+qCount): Questions, Col (6+qCount): Total, Col (7+qCount): Details Side Panel
+  // Columns: Col 1: SR NO, Col 2: ROLL NO, Col 3: REG. NO., Col 4: UBTER ROLL NO., Col 5: STUDENT NAME, Cols 6..(5+qCount): Questions, Col (6+qCount): Total, Col (7+qCount): Details Side Panel
   const nameColIdx = 5;                    // STUDENT NAME
   const firstQColIdx = 6;                  // First question column
   const totalColIdx = firstQColIdx + qCount;  // Total
@@ -98,7 +98,7 @@ async function generateClassTestExcel(data) {
   ws.getColumn(1).width = 8;   // SR. NO.
   ws.getColumn(2).width = 12;  // ROLL NO.
   ws.getColumn(3).width = 18;  // REG. NO.
-  ws.getColumn(4).width = 18;  // ENROLLMENT NO.
+  ws.getColumn(4).width = 18;  // UBTER ROLL NO.
   ws.getColumn(5).width = 24;  // STUDENT NAME
   for (let i = 0; i < qCount; i++) {
     ws.getColumn(firstQColIdx + i).width = 8; // Q1..QN
@@ -151,7 +151,7 @@ async function generateClassTestExcel(data) {
   ws.getCell(4, 1).value = 'SR. NO.';
   ws.getCell(4, 2).value = 'ROLL NO.';
   ws.getCell(4, 3).value = 'REG. NO.';
-  ws.getCell(4, 4).value = 'ENROLLMENT NO.';
+  ws.getCell(4, 4).value = 'UBTER ROLL NO.';
   ws.getCell(4, 5).value = 'STUDENT NAME';
 
   // Merge over questions and Total for Exam Title
@@ -174,7 +174,7 @@ async function generateClassTestExcel(data) {
   const r5 = ws.getRow(5);
   r5.height = 22;
 
-  // Vertically merge columns 1 to nameColIdx (SR. NO., ROLL NO., REG. NO., ENROLLMENT NO., STUDENT NAME) across Rows 4 & 5
+  // Vertically merge columns 1 to nameColIdx (SR. NO., ROLL NO., REG. NO., UBTER ROLL NO., STUDENT NAME) across Rows 4 & 5
   for (let c = 1; c <= nameColIdx; c++) {
     ws.mergeCells(4, c, 5, c);
   }
@@ -257,7 +257,7 @@ async function generateClassTestExcel(data) {
     cReg.value = String(st.registration_no || '-');
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 4. ENROLLMENT NO. (dedicated column)
+    // 4. UBTER ROLL NO. (dedicated column)
     const cEnrl = ws.getCell(currentRow, 4);
     cEnrl.value = String(st.official_enrollment_no || '-');
     cEnrl.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -454,7 +454,7 @@ async function generateInternalEvaluationExcel(data) {
   // Column widths
   ws.getColumn(1).width = 9;   // ROLL NO
   ws.getColumn(2).width = 16;  // REG NO
-  ws.getColumn(3).width = 16;  // ENROLLMENT NO
+  ws.getColumn(3).width = 16;  // UBTER ROLL NO
   ws.getColumn(4).width = 28;  // STUDENT NAME
   for (let c = assignStartCol; c <= assignEndCol; c++) ws.getColumn(c).width = 6;
   ws.getColumn(assignAvgCol).width = 13; // Assignment Avg
@@ -519,7 +519,7 @@ async function generateInternalEvaluationExcel(data) {
   const vertHeaders = [
     { col: 1, text: 'ROLL NO' },
     { col: 2, text: 'REG NO' },
-    { col: 3, text: 'ENROLLMENT NO' },
+    { col: 3, text: 'UBTER ROLL NO' },
     { col: 4, text: 'STUDENT NAME' }
   ];
 
@@ -684,7 +684,7 @@ async function generateInternalEvaluationExcel(data) {
     cReg.value = String(st.registration_no || '—');
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 3. ENROLLMENT NO (added)
+    // 3. UBTER ROLL NO (added)
     const cEnr = ws.getCell(currentRow, 3);
     cEnr.value = String(st.official_enrollment_no || '—');
     cEnr.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -924,7 +924,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
   const exams = Array.isArray(data.exams) ? data.exams : [];
   const eCount = exams.length;
 
-  // Cols: 1: ROLL NO, 2: REGISTRATION NO, 3: ENROLLMENT NO, 4: STUDENT NAME,
+  // Cols: 1: ROLL NO, 2: REGISTRATION NO, 3: UBTER ROLL NO, 4: STUDENT NAME,
   // 5..(4+eCount): Unit Tests, (5+eCount): UT Total Sum, (6+eCount): UT Total Marks (Avg - [targetAvgMax])
   const utStartCol = 5;
   const utEndCol = 4 + eCount;
@@ -934,7 +934,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
 
   ws.getColumn(1).width = 12; // ROLL NO
   ws.getColumn(2).width = 18; // REGISTRATION NO
-  ws.getColumn(3).width = 16; // ENROLLMENT NO
+  ws.getColumn(3).width = 16; // UBTER ROLL NO
   ws.getColumn(4).width = 28; // STUDENT NAME
   for (let i = 0; i < eCount; i++) {
     ws.getColumn(utStartCol + i).width = 16;
@@ -984,7 +984,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
   r4.height = 24;
   ws.getCell(4, 1).value = 'ROLL NO.';
   ws.getCell(4, 2).value = 'REGISTRATION NO.';
-  ws.getCell(4, 3).value = 'ENROLLMENT NO.';
+  ws.getCell(4, 3).value = 'UBTER ROLL NO.';
   ws.getCell(4, 4).value = 'STUDENT NAME';
 
   exams.forEach((ex, idx) => {
@@ -1226,7 +1226,7 @@ function buildClassTestMarksheetHtml(data) {
         <th rowspan="2" style="padding:5px 3px;vertical-align:middle;">SR. NO.</th>
         <th rowspan="2" style="padding:5px 3px;vertical-align:middle;">ROLL NO.</th>
         <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">REG. NO.</th>
-        <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">ENROLLMENT NO.</th>
+        <th rowspan="2" style="padding:5px 4px;vertical-align:middle;">UBTER ROLL NO.</th>
         <th rowspan="2" style="padding:5px 6px;vertical-align:middle;">STUDENT NAME</th>
         <th colspan="${qCount}" style="padding:5px 3px;">${examTitle} (Total Marks : ${maxMarks})</th>
         <th style="padding:5px 3px;">Total</th>
@@ -1822,7 +1822,7 @@ async function generateDepartmentReportsExcel(data) {
   wsLogs.getRow(1).height = 24;
 
   const logHeaders = [
-    'SCAN ID', 'SCAN TIME', 'ROLL NO', 'ENROLLMENT NO', 'STUDENT NAME',
+    'SCAN ID', 'SCAN TIME', 'ROLL NO', 'UBTER ROLL NO', 'STUDENT NAME',
     'DEPARTMENT', 'YEAR', 'SEMESTER', 'TERMINAL UID', 'TERMINAL NAME', 'STATUS'
   ];
   const lr3 = wsLogs.getRow(3);
@@ -1933,7 +1933,7 @@ async function generateAttendanceRegisterExcel(data) {
     wsOverview.getColumn(1).width = 7;   // SR. NO.
     wsOverview.getColumn(2).width = 10;  // ROLL NO.
     wsOverview.getColumn(3).width = 18;  // REGISTRATION NO.
-    wsOverview.getColumn(4).width = 16;  // ENROLLMENT NO.
+    wsOverview.getColumn(4).width = 16;  // UBTER ROLL NO.
     wsOverview.getColumn(5).width = 26;  // STUDENT NAME
     for (let i = 0; i < mCount; i++) {
       wsOverview.getColumn(baseColsCount + 1 + i).width = 14;
@@ -1980,7 +1980,7 @@ async function generateAttendanceRegisterExcel(data) {
     const r4 = wsOverview.getRow(4);
     r4.height = 24;
     const overviewHeaders = [
-      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'ENROLLMENT NO.', 'STUDENT NAME',
+      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'UBTER ROLL NO.', 'STUDENT NAME',
       ...months.map(m => `${m.label}\n(P/Held)`),
       'TOTAL PRESENT', 'TOTAL ABSENT', 'TOTAL CLASSES', '% ATTENDED'
     ];
@@ -2130,7 +2130,7 @@ async function generateAttendanceRegisterExcel(data) {
     ws.getColumn(1).width = 6;   // SR. NO.
     ws.getColumn(2).width = 9;   // ROLL NO.
     ws.getColumn(3).width = 16;  // REGISTRATION NO.
-    ws.getColumn(4).width = 15;  // ENROLLMENT NO.
+    ws.getColumn(4).width = 15;  // UBTER ROLL NO.
     ws.getColumn(5).width = 24;  // STUDENT NAME
     for (let i = 0; i < dCount; i++) {
       ws.getColumn(dayStartCol + i).width = dCount <= 7 ? 12 : 4.2;
@@ -2177,7 +2177,7 @@ async function generateAttendanceRegisterExcel(data) {
     const r4 = ws.getRow(4);
     r4.height = 24;
     const detailHeaders = [
-      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'ENROLLMENT NO.', 'STUDENT NAME',
+      'SR. NO.', 'ROLL NO.', 'REGISTRATION NO.', 'UBTER ROLL NO.', 'STUDENT NAME',
       ...days.map(d => d.day_name && dCount <= 7 ? d.day_name : String(d.day)),
       'TOTAL PRESENT', 'TOTAL ABSENT', 'TOTAL CLASSES', '% ATTENDED'
     ];
@@ -2393,7 +2393,7 @@ function buildAttendanceRegisterHtml(data) {
             <th style="width:28px; text-align:center;">SR.</th>
             <th style="width:48px; text-align:center;">ROLL NO.</th>
             <th style="width:85px; text-align:center;">REGISTRATION NO.</th>
-            <th style="width:78px; text-align:center;">ENROLLMENT NO.</th>
+            <th style="width:78px; text-align:center;">UBTER ROLL NO.</th>
             <th style="text-align:left; min-width:120px;">STUDENT NAME</th>
             ${theadMonths}
             <th style="width:50px; text-align:center;">PRESENT</th>

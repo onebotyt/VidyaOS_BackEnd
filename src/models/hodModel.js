@@ -1656,14 +1656,14 @@ class HodModel {
       enrollmentStatus = 'Not Assigned';
     } else {
       if (!/^\d{11}$/.test(cleanEnroll)) {
-        throw { status: 400, code: 'VALIDATION_ERROR', message: 'Enrollment Number must contain exactly 11 numeric digits (0–9)' };
+        throw { status: 400, code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0–9)' };
       }
       const conflicts = await query(
-        `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
-        [cleanEnroll, studentId]
+        `SELECT id FROM students WHERE (official_enrollment_no = ? OR ubter_roll_no = ?) AND id != ? LIMIT 1`,
+        [cleanEnroll, cleanEnroll, studentId]
       );
       if (conflicts.length > 0) {
-        throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${cleanEnroll}" is already assigned to another student.` };
+        throw { status: 409, code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" is already assigned to another student.` };
       }
     }
 
@@ -1683,8 +1683,8 @@ class HodModel {
 
     return await withTransaction(async (conn) => {
       await conn.execute(
-        `UPDATE students SET full_name = ?, official_enrollment_no = ?, enrollment_no_status = ?, registration_no = ?, class_roll_no = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [cleanName, cleanEnroll, enrollmentStatus, cleanReg, parsedRollNo, studentId]
+        `UPDATE students SET full_name = ?, official_enrollment_no = ?, ubter_roll_no = ?, enrollment_no_status = ?, registration_no = ?, class_roll_no = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [cleanName, cleanEnroll, cleanEnroll, enrollmentStatus, cleanReg, parsedRollNo, studentId]
       );
 
       if (st.enrollment_id) {

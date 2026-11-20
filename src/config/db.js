@@ -252,6 +252,19 @@ async function ensureCompatibilityViews() {
         logger.info('✓ Added missing column students.enrollment_no_status');
       }
     } catch (_) {}
+
+    // 1e. Ensure students.ubter_roll_no exists and is backfilled from official_enrollment_no
+    try {
+      const ubterCols = await query("SHOW COLUMNS FROM students LIKE 'ubter_roll_no'");
+      if (!ubterCols || ubterCols.length === 0) {
+        await query("ALTER TABLE students ADD COLUMN ubter_roll_no VARCHAR(100) NULL AFTER class_roll_no");
+        await query("UPDATE students SET ubter_roll_no = official_enrollment_no WHERE ubter_roll_no IS NULL AND official_enrollment_no IS NOT NULL");
+        try {
+          await query("CREATE INDEX idx_students_ubter_roll_no ON students (ubter_roll_no)");
+        } catch (_) {}
+        logger.info('✓ Added column students.ubter_roll_no & backfilled from official_enrollment_no');
+      }
+    } catch (_) {}
   } catch (err) {
     logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
   }

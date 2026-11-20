@@ -219,6 +219,7 @@ CREATE TABLE students (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL UNIQUE,
   official_enrollment_no VARCHAR(100) NOT NULL UNIQUE,
+  ubter_roll_no VARCHAR(100) NULL,
   full_name VARCHAR(150) NOT NULL,
   registration_no VARCHAR(100) NULL,
   class_roll_no INT NULL,
@@ -244,6 +245,7 @@ CREATE TABLE students (
   deleted_at DATETIME NULL DEFAULT NULL,
   INDEX idx_students_user (user_id),
   INDEX idx_students_enrollment (official_enrollment_no),
+  INDEX idx_students_ubter_roll (ubter_roll_no),
   INDEX idx_students_roll (class_roll_no),
   INDEX idx_students_reg (registration_no),
   CONSTRAINT fk_students_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

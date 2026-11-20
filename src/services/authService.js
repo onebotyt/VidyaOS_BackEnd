@@ -512,7 +512,7 @@ class AuthService {
   }
 
   // ─────────────────────────────────────────────────────────
-  // STUDENT LOGIN (Gmail, Phone, Enrollment No, or UBTER Reg No)
+  // STUDENT LOGIN (Gmail, Phone, UBTER Roll No, or UBTER Reg No)
   // ─────────────────────────────────────────────────────────
   async studentLogin(credential, password, clientInfo = {}) {
     const cred = parseLoginCredential(credential, false);
@@ -538,9 +538,10 @@ class AuthService {
          FROM users u 
          JOIN students s ON u.id = s.user_id
          WHERE LOWER(s.official_enrollment_no) = LOWER(?)
+            OR LOWER(s.ubter_roll_no) = LOWER(?)
             OR LOWER(s.registration_no) = LOWER(?)
             OR LOWER(u.username) = LOWER(?)`,
-        [cred.value, cred.value, cred.value]
+        [cred.value, cred.value, cred.value, cred.value]
       );
     }
 
@@ -566,7 +567,7 @@ class AuthService {
     }
 
     const student = (await query(
-      `SELECT id, official_enrollment_no, registration_no, 
+      `SELECT id, official_enrollment_no, COALESCE(ubter_roll_no, official_enrollment_no) as ubter_roll_no, registration_no, 
               COALESCE(class_roll_no, (SELECT class_roll_no FROM enrollments WHERE student_id = students.id LIMIT 1)) as class_roll_no, 
               full_name,
               address, aadhar_number, father_name, mother_name, dob, gender, category,
@@ -587,6 +588,7 @@ class AuthService {
         student: {
           id: student?.id,
           official_enrollment_no: student?.official_enrollment_no || user.username,
+          ubter_roll_no: student?.ubter_roll_no || student?.official_enrollment_no || user.username,
           registration_no: student?.registration_no || null,
           class_roll_no: student?.class_roll_no || null,
           full_name: student?.full_name || ''
@@ -621,6 +623,7 @@ class AuthService {
         username: user.username,
         email: user.email,
         official_enrollment_no: student?.official_enrollment_no || user.username,
+        ubter_roll_no: student?.ubter_roll_no || student?.official_enrollment_no || user.username,
         registration_no: student?.registration_no || null,
         class_roll_no: student?.class_roll_no || null,
         full_name: student?.full_name || '',
