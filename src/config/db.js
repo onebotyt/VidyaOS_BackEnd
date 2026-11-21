@@ -293,6 +293,53 @@ async function ensureCompatibilityViews() {
         logger.info('✓ Added column students.ubter_roll_no & backfilled from official_enrollment_no');
       }
     } catch (_) {}
+
+    // 1f. Ensure assessments has questions, instructions, unit_name
+    try {
+      const qCol = await query("SHOW COLUMNS FROM assessments LIKE 'questions'");
+      if (!qCol || qCol.length === 0) {
+        await query("ALTER TABLE assessments ADD COLUMN questions LONGTEXT NULL AFTER max_marks");
+      }
+      const insCol = await query("SHOW COLUMNS FROM assessments LIKE 'instructions'");
+      if (!insCol || insCol.length === 0) {
+        await query("ALTER TABLE assessments ADD COLUMN instructions TEXT NULL AFTER questions");
+      }
+      const unCol = await query("SHOW COLUMNS FROM assessments LIKE 'unit_name'");
+      if (!unCol || unCol.length === 0) {
+        await query("ALTER TABLE assessments ADD COLUMN unit_name VARCHAR(150) NULL AFTER instructions");
+      }
+    } catch (_) {}
+
+    // 1g. Ensure attendance_sessions has cohort & period columns
+    try {
+      const sessCols = [
+        { name: "teacher_id", type: "INT NULL AFTER register_id" },
+        { name: "subject_id", type: "INT NULL AFTER teacher_id" },
+        { name: "department_id", type: "INT NULL AFTER subject_id" },
+        { name: "year", type: "INT NULL AFTER department_id" },
+        { name: "semester", type: "INT NULL AFTER year" },
+        { name: "academic_year_id", type: "INT NULL AFTER semester" },
+        { name: "period_number", type: "INT NULL DEFAULT 1 AFTER session_type" }
+      ];
+      for (const c of sessCols) {
+        const cExists = await query(`SHOW COLUMNS FROM attendance_sessions LIKE '${c.name}'`);
+        if (!cExists || cExists.length === 0) {
+          await query(`ALTER TABLE attendance_sessions ADD COLUMN ${c.name} ${c.type}`);
+        }
+      }
+    } catch (_) {}
+
+    // 1h. Ensure classroom_posts has attachment_path and attachment_name
+    try {
+      const apCol = await query("SHOW COLUMNS FROM classroom_posts LIKE 'attachment_path'");
+      if (!apCol || apCol.length === 0) {
+        await query("ALTER TABLE classroom_posts ADD COLUMN attachment_path VARCHAR(500) NULL AFTER content");
+      }
+      const anCol = await query("SHOW COLUMNS FROM classroom_posts LIKE 'attachment_name'");
+      if (!anCol || anCol.length === 0) {
+        await query("ALTER TABLE classroom_posts ADD COLUMN attachment_name VARCHAR(255) NULL AFTER attachment_path");
+      }
+    } catch (_) {}
   } catch (err) {
     logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
   }
