@@ -171,6 +171,7 @@ class TeachingGroupModel {
         "ALTER TABLE teaching_groups ADD COLUMN total_units INT NULL DEFAULT 5",
         "ALTER TABLE teaching_groups ADD COLUMN component VARCHAR(50) NULL DEFAULT 'THEORY'",
         "ALTER TABLE teaching_groups ADD COLUMN archived_at DATETIME NULL",
+        "ALTER TABLE teaching_groups ADD COLUMN theme_image VARCHAR(255) NULL",
         "ALTER TABLE teaching_groups MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'"
       ];
 
@@ -231,7 +232,7 @@ class TeachingGroupModel {
     let sql = `
       SELECT tg.id, tg.name, tg.subject_name, ${shortNameExpr}, tg.subject_code, ${componentExpr}, ${totalUnitsExpr}, ${syllabusUnitsExpr}, tg.teacher_id,
              tg.academic_year_id, ay.label as academic_year_label, ay.end_date as academic_year_end_date,
-             tg.semester, ${yearExpr}, tg.start_date, tg.end_date, tg.invite_code, tg.status, tg.created_at, ${archivedAtExpr}, ${deletedAtExpr},
+             tg.semester, ${yearExpr}, tg.start_date, tg.end_date, tg.invite_code, tg.theme_image, tg.status, tg.created_at, ${archivedAtExpr}, ${deletedAtExpr},
              t.full_name as teacher_name, t.department_id as teacher_department_id,
              d.name as department_name, d.code as department_code,
              ar.id as register_id,
@@ -321,7 +322,8 @@ class TeachingGroupModel {
     targetDeptId,
     enrollmentMode,
     userId,
-    totalUnits
+    totalUnits,
+    themeImage
   }) {
     return await withTransaction(async (conn) => {
       const finalCode = (subjectCode || '').trim() || (subjectName || '').split(/[\s-]+/).map(w => w[0]).join('').toUpperCase().slice(0, 8);
@@ -340,9 +342,9 @@ class TeachingGroupModel {
 
       const groupInsert = await conn.query(
         `INSERT INTO teaching_groups 
-          (name, subject_name, subject_short_name, subject_code, component, total_units, syllabus_units, teacher_id, academic_year_id, semester, year, start_date, end_date, invite_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
-        [name, subjectName, finalShort, finalCode, component, unitsCount, syllabusUnitsJson, effTeacherId, ayId, semester, computedYear, finalStartDate, finalEndDate, inviteCode]
+          (name, subject_name, subject_short_name, subject_code, component, total_units, syllabus_units, teacher_id, academic_year_id, semester, year, start_date, end_date, invite_code, theme_image, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
+        [name, subjectName, finalShort, finalCode, component, unitsCount, syllabusUnitsJson, effTeacherId, ayId, semester, computedYear, finalStartDate, finalEndDate, inviteCode, themeImage || null]
       );
       const groupId = (groupInsert.insertId || groupInsert[0]?.insertId) || groupInsert.lastInsertRowid;
 
@@ -443,7 +445,7 @@ class TeachingGroupModel {
     const rows = await query(
       `SELECT tg.id, tg.name, tg.subject_name, tg.subject_short_name, tg.subject_code, tg.component, tg.total_units, tg.syllabus_units, tg.teacher_id,
               tg.academic_year_id, ay.label as academic_year_label, ay.end_date as academic_year_end_date,
-              tg.semester, tg.year, tg.start_date, tg.end_date, tg.invite_code, tg.status, tg.created_at, tg.archived_at,
+              tg.semester, tg.year, tg.start_date, tg.end_date, tg.invite_code, tg.theme_image, tg.status, tg.created_at, tg.archived_at,
               COALESCE(t.full_name, 'Faculty Teacher') as teacher_name, t.department_id as teacher_department_id,
               COALESCE(d.name, 'Information Technology') as department_name, COALESCE(d.code, 'IT') as department_code,
               (SELECT COUNT(*) FROM teaching_group_members tgm WHERE tgm.group_id = tg.id AND (tgm.status IN ('ENROLLED', 'ACTIVE') OR tgm.status IS NULL)) as member_count,
@@ -681,7 +683,7 @@ class TeachingGroupModel {
    */
   static async getStudentEnrolledGroups(studentId) {
     return await query(
-      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.semester,
+      `SELECT tg.id, tg.name, tg.subject_name, tg.subject_code, tg.component, tg.semester, tg.theme_image,
               ay.label as academic_year_label, tg.status, tgm.joined_at,
               t.full_name as teacher_name, d.name as department_name, d.code as department_code,
               (SELECT COUNT(*) FROM assessments a WHERE a.group_id = tg.id AND a.type IN ('ASSIGNMENT', 'PRACTICAL', 'FINAL_DOCS')) as assignment_count,

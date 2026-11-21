@@ -316,7 +316,7 @@ app.use('/uploads', (req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox");
   const ext = path.extname(req.path).toLowerCase();
-  const inlineSafe = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.webm'];
+  const inlineSafe = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg', '.mp4', '.webm'];
   if (!inlineSafe.includes(ext)) {
     res.setHeader('Content-Disposition', 'attachment');
   }
@@ -537,6 +537,15 @@ async function startServer() {
     await teachingGroupModel.ensureColumns();
   } catch (err) {
     logger.warn(`Failed to auto-migrate teaching_groups columns: ${err.message}`);
+  }
+
+  // Auto-generate Google Classroom style banners for any teaching groups missing them
+  try {
+    const { backfillClassroomThemes } = require('./src/utils/classroomThemeGenerator');
+    const { query } = require('./src/config/db');
+    await backfillClassroomThemes(query);
+  } catch (err) {
+    logger.warn(`Failed to backfill classroom themes: ${err.message}`);
   }
 
   // Bootstrap or synchronize administrator from environment (Render/Cloud initial setup)

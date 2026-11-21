@@ -16,6 +16,7 @@ const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
 const excelExportService = require('../services/excelExportService');
 const { query } = require('../config/db');
+const { generateClassroomBanner } = require('../utils/classroomThemeGenerator');
 
 function generateInviteCode(prefix = '') {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -105,6 +106,12 @@ class TeachingGroupController {
       const finalUnits = Math.min(20, Math.max(1, parseInt(total_units) || 5));
       const computedYear = year ? Number(year) : Math.ceil(Number(semester || 1) / 2);
 
+      const themeImage = generateClassroomBanner({
+        name: finalName,
+        subject_name,
+        subject_code
+      });
+
       const result = await TeachingGroupModel.createGroupTransaction({
         name: finalName,
         subjectName: subject_name,
@@ -121,7 +128,8 @@ class TeachingGroupController {
         targetDeptId,
         enrollmentMode: enrollment_mode,
         userId: req.user.id,
-        totalUnits: finalUnits
+        totalUnits: finalUnits,
+        themeImage
       });
 
       res.status(201).json({
@@ -143,6 +151,7 @@ class TeachingGroupController {
           invite_code: result.inviteCode,
           register_id: result.registerId,
           auto_enrolled_count: result.autoEnrolledCount,
+          theme_image: themeImage,
           status: 'ACTIVE'
         }
       });
