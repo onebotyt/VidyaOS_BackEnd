@@ -106,11 +106,13 @@ class TeachingGroupController {
       const finalUnits = Math.min(20, Math.max(1, parseInt(total_units) || 5));
       const computedYear = year ? Number(year) : Math.ceil(Number(semester || 1) / 2);
 
-      const themeImage = generateClassroomBanner({
-        name: finalName,
-        subject_name,
-        subject_code
-      });
+      const themeImage = (req.body.theme_image && typeof req.body.theme_image === 'string' && req.body.theme_image.trim())
+        ? req.body.theme_image.trim()
+        : generateClassroomBanner({
+            name: finalName,
+            subject_name,
+            subject_code
+          });
 
       const result = await TeachingGroupModel.createGroupTransaction({
         name: finalName,
