@@ -154,7 +154,9 @@ class TheoryClassModel {
    */
   async getGroupStudentsWithAttendance(group) {
     const stRows = await query(
-      `SELECT s.id, s.full_name, s.official_enrollment_no, s.registration_no,
+      `SELECT s.id, s.full_name, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.registration_no,
               COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no
        FROM teaching_group_members tgm
        JOIN students s ON tgm.student_id = s.id

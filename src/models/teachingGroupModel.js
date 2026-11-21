@@ -516,6 +516,7 @@ class TeachingGroupModel {
       `SELECT tgm.id as membership_id, tgm.status as membership_status, tgm.joined_at,
               s.id as student_id, s.full_name, s.full_name as student_name,
               s.official_enrollment_no, s.official_enrollment_no as enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
               s.registration_no,
               COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
               d.id as department_id, d.name as department_name, d.code as department_code
@@ -540,6 +541,7 @@ class TeachingGroupModel {
           `SELECT NULL as membership_id, 'ENROLLED' as membership_status, CURRENT_TIMESTAMP as joined_at,
                   s.id as student_id, s.full_name, s.full_name as student_name,
                   s.official_enrollment_no, s.official_enrollment_no as enrollment_no,
+                  COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
                   s.registration_no,
                   COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no,
                   d.id as department_id, d.name as department_name, d.code as department_code
@@ -556,6 +558,7 @@ class TeachingGroupModel {
           `SELECT NULL as membership_id, 'ENROLLED' as membership_status, CURRENT_TIMESTAMP as joined_at,
                   s.id as student_id, s.full_name, s.full_name as student_name,
                   s.official_enrollment_no, s.official_enrollment_no as enrollment_no,
+                  COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
                   s.registration_no,
                   COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no,
                   d.id as department_id, d.name as department_name, d.code as department_code
@@ -640,8 +643,8 @@ class TeachingGroupModel {
    */
   static async findStudentIdByEnrollment(eno) {
     const rows = await query(
-      `SELECT id FROM students WHERE UPPER(official_enrollment_no) = UPPER(?) OR UPPER(registration_no) = UPPER(?) LIMIT 1`,
-      [eno, eno]
+      `SELECT id FROM students WHERE UPPER(official_enrollment_no) = UPPER(?) OR UPPER(COALESCE(ubter_roll_no, '')) = UPPER(?) OR UPPER(registration_no) = UPPER(?) LIMIT 1`,
+      [eno, eno, eno]
     );
     return rows[0]?.id || null;
   }
@@ -967,6 +970,7 @@ class TeachingGroupModel {
     let sql = `
       SELECT sub.* FROM (
         SELECT DISTINCT s.id as student_id, s.full_name, s.official_enrollment_no, s.official_enrollment_no as enrollment_no,
+               COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
                s.registration_no,
                COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no,
                e.semester, e.year,
@@ -986,8 +990,8 @@ class TeachingGroupModel {
     params.push(group.semester, Math.ceil(group.semester / 2));
 
     if (search) {
-      sql += ` AND (s.full_name LIKE ? OR s.official_enrollment_no LIKE ? OR s.registration_no LIKE ?)`;
-      params.push(search, search, search);
+      sql += ` AND (s.full_name LIKE ? OR s.official_enrollment_no LIKE ? OR s.ubter_roll_no LIKE ? OR s.registration_no LIKE ?)`;
+      params.push(search, search, search, search);
     }
 
     sql += `
@@ -1256,7 +1260,9 @@ class TeachingGroupModel {
   static async getAssessmentSubmissionsRoster(assignmentId, groupId) {
     return await query(
       `SELECT COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no,
-              s.id as student_id, s.full_name, s.official_enrollment_no, s.registration_no,
+              s.id as student_id, s.full_name, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.registration_no,
               sub.id as submission_id, sub.status as submission_status, sub.file_path, sub.original_filename,
               sub.submitted_at, sub.marks_obtained, sub.feedback
        FROM teaching_group_members tgm
@@ -1490,6 +1496,7 @@ class TeachingGroupModel {
   static async getTestRosterScores(testId, groupId) {
     return await query(
       `SELECT s.id as student_id, s.class_roll_no, s.registration_no, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
               s.full_name,
               sub.marks_obtained, sub.status, sub.feedback
        FROM teaching_group_members gm
@@ -1508,7 +1515,7 @@ class TeachingGroupModel {
    */
   static async getStudentIdentifiers(studentIds) {
     return await query(
-      `SELECT id, official_enrollment_no, registration_no
+      `SELECT id, official_enrollment_no, COALESCE(ubter_roll_no, official_enrollment_no) as ubter_roll_no, registration_no
        FROM students WHERE id IN (${studentIds.map(() => '?').join(',')})
        LIMIT 200`,
       studentIds

@@ -109,7 +109,9 @@ class FacultyModel {
     if (teacherId) {
       studentRows = await query(
         `SELECT sub.* FROM (
-           SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+           SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no,
+                  COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no,
+                  st.registration_no,
                   COALESCE(st.class_roll_no, e.class_roll_no, 0) as class_roll_no,
                   u.email, u.phone,
                   e.year, e.semester,
@@ -131,7 +133,9 @@ class FacultyModel {
     if (!studentRows.length && teacherId) {
       studentRows = await query(
         `SELECT sub.* FROM (
-           SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+           SELECT DISTINCT st.id as student_id, st.full_name, st.official_enrollment_no,
+                  COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no,
+                  st.registration_no,
                   COALESCE(st.class_roll_no, e.class_roll_no, 0) as class_roll_no,
                   u.email, u.phone,
                   e.year, e.semester,
@@ -157,6 +161,7 @@ class FacultyModel {
           student_id: r.student_id,
           full_name: r.full_name,
           official_enrollment_no: r.official_enrollment_no || '—',
+          ubter_roll_no: r.ubter_roll_no || r.official_enrollment_no || '—',
           registration_no: r.registration_no || '—',
           class_roll_no: r.class_roll_no,
           email: r.email || '—',
@@ -498,7 +503,9 @@ class FacultyModel {
   static async getRegisterStudents(register) {
     if (register.group_id) {
       return await query(
-        `SELECT st.id as student_id, st.official_enrollment_no, st.registration_no, st.full_name,
+        `SELECT st.id as student_id, st.official_enrollment_no,
+                COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no,
+                st.registration_no, st.full_name,
                 COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
                 COALESCE(e.status, 'ENROLLED') as enrollment_status
          FROM teaching_group_members tgm
@@ -510,7 +517,9 @@ class FacultyModel {
       );
     }
     return await query(
-      `SELECT st.id as student_id, st.official_enrollment_no, st.registration_no, st.full_name,
+      `SELECT st.id as student_id, st.official_enrollment_no,
+              COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no,
+              st.registration_no, st.full_name,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               COALESCE(e.status, 'ENROLLED') as enrollment_status
        FROM enrollments e JOIN students st ON e.student_id = st.id
@@ -776,7 +785,9 @@ class FacultyModel {
    */
   static async getCohortStudents(effDeptId, year, semester, ayId) {
     return await query(
-      `SELECT s.id as student_id, s.official_enrollment_no, s.full_name,
+      `SELECT s.id as student_id, s.official_enrollment_no,
+              COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+              s.full_name,
               e.id as enrollment_id, e.class_roll_no, e.status as enrollment_status,
               u.email, u.status as user_status
        FROM enrollments e JOIN students s ON e.student_id = s.id JOIN users u ON s.user_id = u.id
@@ -911,7 +922,9 @@ class FacultyModel {
     let enrolledStudents;
     if (register.group_id) {
       enrolledStudents = await query(
-        `SELECT s.id as student_id, s.official_enrollment_no, s.registration_no, s.full_name,
+        `SELECT s.id as student_id, s.official_enrollment_no,
+                COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+                s.registration_no, s.full_name,
                 COALESCE(s.class_roll_no, e.class_roll_no) as class_roll_no
          FROM teaching_group_members tgm
          JOIN students s ON tgm.student_id = s.id
@@ -923,7 +936,9 @@ class FacultyModel {
     }
     if (!enrolledStudents || enrolledStudents.length === 0) {
       enrolledStudents = await query(
-        `SELECT s.id as student_id, s.official_enrollment_no, s.registration_no, s.full_name,
+        `SELECT s.id as student_id, s.official_enrollment_no,
+                COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+                s.registration_no, s.full_name,
                 COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no
          FROM students s
          JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
@@ -935,7 +950,9 @@ class FacultyModel {
     }
     if (!enrolledStudents || enrolledStudents.length === 0) {
       enrolledStudents = await query(
-        `SELECT s.id as student_id, s.official_enrollment_no, s.registration_no, s.full_name,
+        `SELECT s.id as student_id, s.official_enrollment_no,
+                COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+                s.registration_no, s.full_name,
                 COALESCE(s.class_roll_no, e.class_roll_no, 0) as class_roll_no
          FROM students s
          LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
@@ -1070,7 +1087,8 @@ class FacultyModel {
         class_roll_no: st.class_roll_no,
         registration_no: st.registration_no,
         official_enrollment_no: st.official_enrollment_no,
-        enrollment_no: st.official_enrollment_no,
+        ubter_roll_no: st.ubter_roll_no || st.official_enrollment_no,
+        enrollment_no: st.ubter_roll_no || st.official_enrollment_no,
         full_name: st.full_name,
         assignment_scores: aScores,
         exam_scores: eScores,

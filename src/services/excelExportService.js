@@ -15,9 +15,9 @@ const { query } = require('../config/db');
 
 // Institutional Palette
 const COLOR_BLUE_HEADER = 'FFB4C6E7'; // Soft institutional blue (Header rows 1-3)
-const COLOR_TAN_HEADER  = 'FFFFF2CC'; // Soft tan/gold (Table top headers)
-const COLOR_GRAY_BG     = 'FFF2F2F2'; // Subtle zebra/summary background
-const COLOR_ABSENT_RED  = 'FFFF0000'; // Bold red for absent students
+const COLOR_TAN_HEADER = 'FFFFF2CC'; // Soft tan/gold (Table top headers)
+const COLOR_GRAY_BG = 'FFF2F2F2'; // Subtle zebra/summary background
+const COLOR_ABSENT_RED = 'FFFF0000'; // Bold red for absent students
 const COLOR_BORDER_GRAY = 'FF000000'; // Standard black gridlines
 
 const THIN_BORDER = {
@@ -34,7 +34,7 @@ async function getDefaultInstitutionName() {
   try {
     const rows = await query("SELECT setting_value FROM system_settings WHERE setting_key = 'institution_name'");
     if (rows && rows[0]?.setting_value) return rows[0].setting_value;
-  } catch (e) {}
+  } catch (e) { }
   return 'Government Polytechnic';
 }
 
@@ -80,14 +80,14 @@ async function generateClassTestExcel(data) {
   const questions = Array.isArray(data.questions) && data.questions.length > 0
     ? data.questions
     : [
-        { num: 1, label: 'Q1', max: maxMarks / 4 },
-        { num: 2, label: 'Q2', max: maxMarks / 4 },
-        { num: 3, label: 'Q3', max: maxMarks / 4 },
-        { num: 4, label: 'Q4', max: maxMarks / 4 }
-      ];
+      { num: 1, label: 'Q1', max: maxMarks / 4 },
+      { num: 2, label: 'Q2', max: maxMarks / 4 },
+      { num: 3, label: 'Q3', max: maxMarks / 4 },
+      { num: 4, label: 'Q4', max: maxMarks / 4 }
+    ];
 
   const qCount = questions.length;
-  // Columns: Col 1: SR NO, Col 2: ROLL NO, Col 3: REG. NO., Col 4: ENROLLMENT NO., Col 5: STUDENT NAME, Cols 6..(5+qCount): Questions, Col (6+qCount): Total, Col (7+qCount): Details Side Panel
+  // Columns: Col 1: SR NO, Col 2: ROLL NO, Col 3: REG. NO., Col 4: UBTER ROLL NO., Col 5: STUDENT NAME, Cols 6..(5+qCount): Questions, Col (6+qCount): Total, Col (7+qCount): Details Side Panel
   const nameColIdx = 5;                    // STUDENT NAME
   const firstQColIdx = 6;                  // First question column
   const totalColIdx = firstQColIdx + qCount;  // Total
@@ -98,7 +98,7 @@ async function generateClassTestExcel(data) {
   ws.getColumn(1).width = 8;   // SR. NO.
   ws.getColumn(2).width = 12;  // ROLL NO.
   ws.getColumn(3).width = 18;  // REG. NO.
-  ws.getColumn(4).width = 18;  // ENROLLMENT NO.
+  ws.getColumn(4).width = 18;  // UBTER ROLL NO.
   ws.getColumn(5).width = 24;  // STUDENT NAME
   for (let i = 0; i < qCount; i++) {
     ws.getColumn(firstQColIdx + i).width = 8; // Q1..QN
@@ -174,7 +174,7 @@ async function generateClassTestExcel(data) {
   const r5 = ws.getRow(5);
   r5.height = 22;
 
-  // Vertically merge columns 1 to nameColIdx (SR. NO., ROLL NO., REG. NO., ENROLLMENT NO., STUDENT NAME) across Rows 4 & 5
+  // Vertically merge columns 1 to nameColIdx (SR. NO., ROLL NO., REG. NO., UBTER ROLL NO., STUDENT NAME) across Rows 4 & 5
   for (let c = 1; c <= nameColIdx; c++) {
     ws.mergeCells(4, c, 5, c);
   }
@@ -213,15 +213,15 @@ async function generateClassTestExcel(data) {
   const rawInstructions = Array.isArray(data.instructions) && data.instructions.length > 0
     ? data.instructions
     : (typeof data.instructions === 'string' && data.instructions.trim().length > 0
-        ? data.instructions.split('\n').map(s => s.trim()).filter(Boolean)
-        : defaultInstructions);
+      ? data.instructions.split('\n').map(s => s.trim()).filter(Boolean)
+      : defaultInstructions);
 
   const cleanInstructions = rawInstructions
     .filter(i => !i.startsWith('Instructions'))
     .map((ins, i) => `${i + 1}. ${ins.replace(/^\d+\.\s*/, '')}`)
     .join('\n');
 
-  const cleanQuestions = questions.map(q => 
+  const cleanQuestions = questions.map(q =>
     `• ${q.label}: ${q.text ? q.text + ' ' : ''}Max ${q.max} marks`
   ).join('\n');
 
@@ -257,9 +257,9 @@ async function generateClassTestExcel(data) {
     cReg.value = String(st.registration_no || '-');
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 4. ENROLLMENT NO. (dedicated column)
+    // 4. UBTER ROLL NO. (dedicated column)
     const cEnrl = ws.getCell(currentRow, 4);
-    cEnrl.value = String(st.official_enrollment_no || '-');
+    cEnrl.value = String(st.ubter_roll_no || st.official_enrollment_no || '-');
     cEnrl.alignment = { horizontal: 'center', vertical: 'middle' };
 
     // 5. STUDENT NAME
@@ -454,7 +454,7 @@ async function generateInternalEvaluationExcel(data) {
   // Column widths
   ws.getColumn(1).width = 9;   // ROLL NO
   ws.getColumn(2).width = 16;  // REG NO
-  ws.getColumn(3).width = 16;  // ENROLLMENT NO
+  ws.getColumn(3).width = 16;  // UBTER ROLL NO
   ws.getColumn(4).width = 28;  // STUDENT NAME
   for (let c = assignStartCol; c <= assignEndCol; c++) ws.getColumn(c).width = 6;
   ws.getColumn(assignAvgCol).width = 13; // Assignment Avg
@@ -684,9 +684,9 @@ async function generateInternalEvaluationExcel(data) {
     cReg.value = String(st.registration_no || '—');
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 3. ENROLLMENT NO (added)
+    // 3. UBTER ROLL NO (added)
     const cEnr = ws.getCell(currentRow, 3);
-    cEnr.value = String(st.official_enrollment_no || '—');
+    cEnr.value = String(st.ubter_roll_no || st.official_enrollment_no || '—');
     cEnr.alignment = { horizontal: 'center', vertical: 'middle' };
 
     // 4. STUDENT NAME (renamed from CNAME)
@@ -732,7 +732,7 @@ async function generateInternalEvaluationExcel(data) {
     const aFirstColLetter = ws.getColumn(assignStartCol).letter;
     const aLastColLetter = ws.getColumn(assignEndCol).letter;
     assignAvgCell.value = {
-      formula: `IFERROR(ROUND(${assignAvgMax}*(SUM(${aFirstColLetter}${currentRow}:${aLastColLetter}${currentRow})/SUMPRODUCT((${assignments.map((a,i) => ws.getColumn(assignStartCol+i).letter + currentRow + '<>""').join(',')})*{${assignments.map(a => a.max_marks || 25).join(',')}})),1),0)`,
+      formula: `IFERROR(ROUND(${assignAvgMax}*(SUM(${aFirstColLetter}${currentRow}:${aLastColLetter}${currentRow})/SUMPRODUCT((${assignments.map((a, i) => ws.getColumn(assignStartCol + i).letter + currentRow + '<>""').join(',')})*{${assignments.map(a => a.max_marks || 25).join(',')}})),1),0)`,
       result: computedAssignAvg
     };
     assignAvgCell.font = { name: 'Calibri', size: 9, bold: true };
@@ -785,7 +785,7 @@ async function generateInternalEvaluationExcel(data) {
     const uFirstColLetter = ws.getColumn(utStartCol).letter;
     const uLastColLetter = ws.getColumn(utEndCol).letter;
     utAvgCell.value = {
-      formula: `IFERROR(ROUND(${examAvgMax}*(SUMIF(${uFirstColLetter}${currentRow}:${uLastColLetter}${currentRow},"<>AB")/SUMPRODUCT((${exams.map((ex,i) => ws.getColumn(utStartCol+i).letter + currentRow + '<>"AB"').join(',')})*{${exams.map(ex => ex.max_marks || 25).join(',')}})),1),0)`,
+      formula: `IFERROR(ROUND(${examAvgMax}*(SUMIF(${uFirstColLetter}${currentRow}:${uLastColLetter}${currentRow},"<>AB")/SUMPRODUCT((${exams.map((ex, i) => ws.getColumn(utStartCol + i).letter + currentRow + '<>"AB"').join(',')})*{${exams.map(ex => ex.max_marks || 25).join(',')}})),1),0)`,
       result: computedUtAvg
     };
     utAvgCell.font = { name: 'Calibri', size: 9, bold: true };
@@ -924,7 +924,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
   const exams = Array.isArray(data.exams) ? data.exams : [];
   const eCount = exams.length;
 
-  // Cols: 1: ROLL NO, 2: REGISTRATION NO, 3: ENROLLMENT NO, 4: STUDENT NAME,
+  // Cols: 1: ROLL NO, 2: REGISTRATION NO, 3: UBTER ROLL NO, 4: STUDENT NAME,
   // 5..(4+eCount): Unit Tests, (5+eCount): UT Total Sum, (6+eCount): UT Total Marks (Avg - [targetAvgMax])
   const utStartCol = 5;
   const utEndCol = 4 + eCount;
@@ -934,7 +934,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
 
   ws.getColumn(1).width = 12; // ROLL NO
   ws.getColumn(2).width = 18; // REGISTRATION NO
-  ws.getColumn(3).width = 16; // ENROLLMENT NO
+  ws.getColumn(3).width = 16; // UBTER ROLL NO
   ws.getColumn(4).width = 28; // STUDENT NAME
   for (let i = 0; i < eCount; i++) {
     ws.getColumn(utStartCol + i).width = 16;
@@ -1028,7 +1028,7 @@ async function generateUnitTestsSummaryExcel(data = {}) {
     cReg.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const cEnr = ws.getCell(currentRow, 3);
-    cEnr.value = st.official_enrollment_no || '—';
+    cEnr.value = st.ubter_roll_no || st.official_enrollment_no || '—';
     cEnr.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const cName = ws.getCell(currentRow, 4);
@@ -1109,11 +1109,11 @@ function buildClassTestMarksheetHtml(data) {
   const questions = Array.isArray(data.questions) && data.questions.length > 0
     ? data.questions
     : [
-        { num: 1, label: 'Q1', max: maxMarks / 4 },
-        { num: 2, label: 'Q2', max: maxMarks / 4 },
-        { num: 3, label: 'Q3', max: maxMarks / 4 },
-        { num: 4, label: 'Q4', max: maxMarks / 4 }
-      ];
+      { num: 1, label: 'Q1', max: maxMarks / 4 },
+      { num: 2, label: 'Q2', max: maxMarks / 4 },
+      { num: 3, label: 'Q3', max: maxMarks / 4 },
+      { num: 4, label: 'Q4', max: maxMarks / 4 }
+    ];
 
   const qCount = questions.length;
   // Cols: SR, ROLL, REG, ENROLLMENT, NAME, Q1..QN, Total, Side Panel
@@ -1174,7 +1174,7 @@ function buildClassTestMarksheetHtml(data) {
         <td style="text-align:center;padding:5px 3px;border:1px solid #777;font-weight:bold;">${idx + 1}</td>
         <td style="text-align:center;padding:5px 3px;border:1px solid #777;font-weight:bold;">${roll}</td>
         <td style="text-align:center;padding:4px 5px;border:1px solid #777;font-size:7.5pt;">${st.registration_no || '-'}</td>
-        <td style="text-align:center;padding:4px 5px;border:1px solid #777;font-size:7.5pt;">${st.official_enrollment_no || '-'}</td>
+        <td style="text-align:center;padding:4px 5px;border:1px solid #777;font-size:7.5pt;">${st.ubter_roll_no || st.official_enrollment_no || '-'}</td>
         <td style="padding:4px 8px;border:1px solid #777;font-weight:bold;text-align:left;">${name}</td>
         ${qCells}
         <td style="text-align:center;padding:5px 3px;border:1px solid #777;font-weight:bold;${isAb ? 'color:#dc2626;' : 'color:#1e40af;'}">${isAb ? '0 (AB)' : (Math.round(rowTotal * 10) / 10)}</td>
@@ -1328,7 +1328,7 @@ async function getOrGenerateChartImages(data) {
     const pyScript = path.join(__dirname, '../utils/chartRenderer.py');
     if (!fs.existsSync(pyScript)) return { chartTrend, chartCohort };
     const py = spawn('python3', [pyScript]);
-    py.stdin.on('error', () => {});
+    py.stdin.on('error', () => { });
 
     let stdout = '';
     let stderr = '';
@@ -1377,7 +1377,7 @@ async function generateNativeExcelWithPython(data) {
   const pyScript = path.join(__dirname, '../utils/generateNativeExcelReport.py');
   if (!fs.existsSync(pyScript)) throw new Error('generateNativeExcelReport.py not found');
   const py = spawn('python3', [pyScript]);
-  py.stdin.on('error', () => {});
+  py.stdin.on('error', () => { });
 
   const chunks = [];
   let stderr = '';
@@ -1844,7 +1844,7 @@ async function generateDepartmentReportsExcel(data) {
       r.scan_id,
       r.scan_time,
       r.class_roll_no || '--',
-      r.official_enrollment_no || '--',
+      r.ubter_roll_no || r.official_enrollment_no || '--',
       r.student_name || '--',
       r.department_code || r.department_name || '--',
       r.year || '--',
@@ -1933,7 +1933,7 @@ async function generateAttendanceRegisterExcel(data) {
     wsOverview.getColumn(1).width = 7;   // SR. NO.
     wsOverview.getColumn(2).width = 10;  // ROLL NO.
     wsOverview.getColumn(3).width = 18;  // REGISTRATION NO.
-    wsOverview.getColumn(4).width = 16;  // ENROLLMENT NO.
+    wsOverview.getColumn(4).width = 16;  // UBTER ROLL NO.
     wsOverview.getColumn(5).width = 26;  // STUDENT NAME
     for (let i = 0; i < mCount; i++) {
       wsOverview.getColumn(baseColsCount + 1 + i).width = 14;
@@ -2130,7 +2130,7 @@ async function generateAttendanceRegisterExcel(data) {
     ws.getColumn(1).width = 6;   // SR. NO.
     ws.getColumn(2).width = 9;   // ROLL NO.
     ws.getColumn(3).width = 16;  // REGISTRATION NO.
-    ws.getColumn(4).width = 15;  // ENROLLMENT NO.
+    ws.getColumn(4).width = 15;  // UBTER ROLL NO.
     ws.getColumn(5).width = 24;  // STUDENT NAME
     for (let i = 0; i < dCount; i++) {
       ws.getColumn(dayStartCol + i).width = dCount <= 7 ? 12 : 4.2;

@@ -756,11 +756,11 @@ class HodController {
       const existingUser = await query(
         `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)
          UNION
-         SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)`,
-        [cleanEnroll, cleanEnroll]
+         SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?) OR LOWER(TRIM(ubter_roll_no)) = LOWER(?)`,
+        [cleanEnroll, cleanEnroll, cleanEnroll]
       );
       if (existingUser.length > 0) {
-        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Official Enrollment Number "${cleanEnroll}" already exists in the system. Enrollment numbers are uniquely assigned once upon admission.` } });
+        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system. UBTER Roll Numbers are uniquely assigned once upon admission.` } });
       }
 
       if (email && email.trim()) {
@@ -979,19 +979,19 @@ class HodController {
   static async updateStudent(req, res) {
     try {
       const studentId = parseInt(req.params.id, 10);
-      const { full_name, official_enrollment_no, enrollment_not_available, registration_no, class_roll_no, year, semester } = req.body;
+      const { full_name, official_enrollment_no, ubter_roll_no, enrollment_not_available, registration_no, class_roll_no, year, semester } = req.body;
 
       if (!full_name || !full_name.trim()) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Student Full Name is required' } });
       }
 
       const isNotAvailable = Boolean(enrollment_not_available);
-      const enrollNo = (official_enrollment_no || '').trim();
+      const enrollNo = (ubter_roll_no || official_enrollment_no || '').trim();
       if (!isNotAvailable && enrollNo && !/^\d{11}$/.test(enrollNo)) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment Number must contain exactly 11 numeric digits (0–9)' } });
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0–9)' } });
       }
       if (!isNotAvailable && !enrollNo) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Enrollment Number is required (or check "Enrollment Number Not Available")' } });
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number is required (or check "UBTER Roll Number Not Available")' } });
       }
 
       if (class_roll_no !== undefined && class_roll_no !== null && String(class_roll_no).trim() !== '') {

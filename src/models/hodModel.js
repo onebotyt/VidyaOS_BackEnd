@@ -493,7 +493,7 @@ class HodModel {
     const params = hasDept ? [deptId] : [];
 
     const students = await query(
-      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, st.enrollment_no_status, st.registration_no,
+      `SELECT st.id as student_id, st.full_name, u.email, st.phone, st.official_enrollment_no, COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no, st.enrollment_no_status, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               e.year, e.semester, COALESCE(e.status, 'ENROLLED') as enrollment_status,
               d.name as department_name, d.code as department_code
@@ -1326,9 +1326,9 @@ class HodModel {
       await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`, [userId]);
 
       const [sRes] = await conn.execute(
-        `INSERT INTO students (user_id, official_enrollment_no, registration_no, full_name, entry_mode, is_lateral_entry, admission_year)
-         VALUES (?, ?, ?, ?, 'hod_provisioned', ?, ?)`,
-        [userId, cleanEnroll, (registrationNo || '').trim() || null, cleanName, isLateralEntry ? 1 : 0, new Date().getFullYear()]
+        `INSERT INTO students (user_id, ubter_roll_no, official_enrollment_no, registration_no, full_name, entry_mode, is_lateral_entry, admission_year)
+         VALUES (?, ?, ?, ?, ?, 'hod_provisioned', ?, ?)`,
+        [userId, cleanEnroll, cleanEnroll, (registrationNo || '').trim() || null, cleanName, isLateralEntry ? 1 : 0, new Date().getFullYear()]
       );
       const studentId = sRes.insertId ?? sRes.lastInsertRowid;
 
@@ -1346,6 +1346,7 @@ class HodModel {
 
       return {
         student_id: studentId,
+        ubter_roll_no: cleanEnroll,
         official_enrollment_no: cleanEnroll,
         enrollment_no: cleanEnroll,
         registration_no: (registrationNo || '').trim() || null,
@@ -1541,7 +1542,7 @@ class HodModel {
     }
 
     return await query(
-      `SELECT st.id, st.id as student_id, st.full_name, st.official_enrollment_no, st.registration_no,
+      `SELECT st.id, st.id as student_id, st.full_name, st.official_enrollment_no, COALESCE(st.ubter_roll_no, st.official_enrollment_no) as ubter_roll_no, st.registration_no,
               COALESCE(st.class_roll_no, e.class_roll_no) as class_roll_no,
               e.year, e.semester,
               u.id as user_id, u.email,
@@ -1693,14 +1694,14 @@ class HodModel {
       enrollmentStatus = 'Not Assigned';
     } else {
       if (!/^\d{11}$/.test(cleanEnroll)) {
-        throw { status: 400, code: 'VALIDATION_ERROR', message: 'Enrollment Number must contain exactly 11 numeric digits (0–9)' };
+        throw { status: 400, code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0–9)' };
       }
       const conflicts = await query(
-        `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
-        [cleanEnroll, studentId]
+        `SELECT id FROM students WHERE (official_enrollment_no = ? OR ubter_roll_no = ?) AND id != ? LIMIT 1`,
+        [cleanEnroll, cleanEnroll, studentId]
       );
       if (conflicts.length > 0) {
-        throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${cleanEnroll}" is already assigned to another student.` };
+        throw { status: 409, code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" is already assigned to another student.` };
       }
     }
 
@@ -1720,8 +1721,8 @@ class HodModel {
 
     return await withTransaction(async (conn) => {
       await conn.execute(
-        `UPDATE students SET full_name = ?, official_enrollment_no = ?, enrollment_no_status = ?, registration_no = ?, class_roll_no = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [cleanName, cleanEnroll, enrollmentStatus, cleanReg, parsedRollNo, studentId]
+        `UPDATE students SET full_name = ?, official_enrollment_no = ?, ubter_roll_no = ?, enrollment_no_status = ?, registration_no = ?, class_roll_no = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [cleanName, cleanEnroll, cleanEnroll, enrollmentStatus, cleanReg, parsedRollNo, studentId]
       );
 
       if (st.enrollment_id) {

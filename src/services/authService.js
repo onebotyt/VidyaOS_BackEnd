@@ -527,7 +527,8 @@ class AuthService {
   }
 
   // ─────────────────────────────────────────────────────────
-  // STUDENT LOGIN (Gmail, 10-digit Phone, or 11-digit UBTER Roll No ONLY)
+  // ─────────────────────────────────────────────────────────
+  // STUDENT LOGIN (Gmail, Phone, UBTER Roll No, or UBTER Reg No)
   // ─────────────────────────────────────────────────────────
   async studentLogin(credential, password, clientInfo = {}) {
     const cred = parseLoginCredential(credential, false);
@@ -553,9 +554,11 @@ class AuthService {
         `SELECT u.id, u.username, u.email, u.phone, u.password_hash, u.temp_password_hash, u.must_change_password, u.status, u.rejection_reason
          FROM users u 
          JOIN students s ON u.id = s.user_id
-         WHERE (s.ubter_roll_no = ? OR s.official_enrollment_no = ?)
-           AND (LENGTH(s.ubter_roll_no) = 11 OR LENGTH(s.official_enrollment_no) = 11)`,
-        [cred.value, cred.value]
+         WHERE LOWER(s.official_enrollment_no) = LOWER(?)
+            OR LOWER(s.ubter_roll_no) = LOWER(?)
+            OR LOWER(s.registration_no) = LOWER(?)
+            OR LOWER(u.username) = LOWER(?)`,
+        [cred.value, cred.value, cred.value, cred.value]
       );
     } else {
       // Any other identifier (username, reg no, non-11-digit enrollment) is NOT permitted for student login
@@ -584,7 +587,7 @@ class AuthService {
     }
 
     const student = (await query(
-      `SELECT id, official_enrollment_no, ubter_roll_no, registration_no, 
+      `SELECT id, official_enrollment_no, COALESCE(ubter_roll_no, official_enrollment_no) as ubter_roll_no, registration_no, 
               COALESCE(class_roll_no, (SELECT class_roll_no FROM enrollments WHERE student_id = students.id LIMIT 1)) as class_roll_no, 
               full_name,
               address, aadhar_number, father_name, mother_name, dob, gender, category,

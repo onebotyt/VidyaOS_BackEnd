@@ -232,6 +232,7 @@ CREATE TABLE students (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   official_enrollment_no VARCHAR(50) NOT NULL,
+  ubter_roll_no VARCHAR(100) NULL,
   full_name VARCHAR(150) NOT NULL,
   entry_mode ENUM('teacher_provisioned', 'self_registered', 'admin_created') NOT NULL DEFAULT 'teacher_provisioned',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

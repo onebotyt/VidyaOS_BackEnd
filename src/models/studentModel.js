@@ -246,10 +246,10 @@ class StudentModel {
    */
   static async checkEnrollmentConflict(cleanEnroll) {
     const rows = await query(
-      `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)
+      `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?) OR LOWER(TRIM(ubter_roll_no)) = LOWER(?)
        UNION
        SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)`,
-      [cleanEnroll, cleanEnroll]
+      [cleanEnroll, cleanEnroll, cleanEnroll]
     );
     return rows.length > 0;
   }
@@ -382,7 +382,7 @@ class StudentModel {
    */
   static async listPendingRegistrations({ deptId, year, semester, ayId }) {
     let sql = `
-      SELECT s.id, s.id as student_id, s.official_enrollment_no, s.official_enrollment_no as enrollment_no, s.registration_no,
+      SELECT s.id, s.id as student_id, s.official_enrollment_no, COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no, s.official_enrollment_no as enrollment_no, s.registration_no,
              s.full_name, s.entry_mode,
              u.email, u.created_at as registered_at,
              e.id as enrollment_id, e.status as enrollment_status,
@@ -464,8 +464,8 @@ class StudentModel {
    */
   static async lookupPendingStudentId(lookupVal) {
     const rows = await query(
-      `SELECT s.id FROM students s JOIN users u ON s.user_id = u.id WHERE (s.official_enrollment_no = ? OR s.registration_no = ? OR u.email = ?) AND u.status = 'PENDING' LIMIT 1`,
-      [lookupVal, lookupVal, lookupVal]
+      `SELECT s.id FROM students s JOIN users u ON s.user_id = u.id WHERE (s.ubter_roll_no = ? OR s.official_enrollment_no = ? OR s.registration_no = ? OR u.email = ?) AND u.status = 'PENDING' LIMIT 1`,
+      [lookupVal, lookupVal, lookupVal, lookupVal]
     );
     return rows[0]?.id || null;
   }
@@ -547,9 +547,9 @@ class StudentModel {
            FROM students s
            LEFT JOIN enrollments e ON s.id = e.student_id
            LEFT JOIN users u ON s.user_id = u.id
-           WHERE (s.official_enrollment_no = ? OR s.registration_no = ? OR u.email = ?)
+           WHERE (s.ubter_roll_no = ? OR s.official_enrollment_no = ? OR s.registration_no = ? OR u.email = ?)
            ORDER BY e.id DESC LIMIT 1`,
-          [lookupVal, lookupVal, lookupVal]
+          [lookupVal, lookupVal, lookupVal, lookupVal]
         );
         students = rows;
       }
@@ -566,16 +566,16 @@ class StudentModel {
       let finalRollNo = null;
 
       if (action === 'APPROVE') {
-        resolvedEnrollNo = (officialEnrollmentNo || enrollmentNo || student.official_enrollment_no || '').trim();
+        resolvedEnrollNo = (officialEnrollmentNo || enrollmentNo || student.ubter_roll_no || student.official_enrollment_no || '').trim();
         if (!resolvedEnrollNo || resolvedEnrollNo.toLowerCase() === 'not assigned') {
           resolvedEnrollNo = null;
         } else {
           const [conflict] = await conn.execute(
-            `SELECT id FROM students WHERE official_enrollment_no = ? AND id != ? LIMIT 1`,
-            [resolvedEnrollNo, actualStudentId]
+            `SELECT id FROM students WHERE (official_enrollment_no = ? OR ubter_roll_no = ?) AND id != ? LIMIT 1`,
+            [resolvedEnrollNo, resolvedEnrollNo, actualStudentId]
           );
           if (conflict && conflict.length > 0) {
-            throw { status: 409, code: 'CONFLICT', message: `Enrollment number "${resolvedEnrollNo}" is already assigned to another student.` };
+            throw { status: 409, code: 'CONFLICT', message: `UBTER Roll Number "${resolvedEnrollNo}" is already assigned to another student.` };
           }
         }
 
@@ -630,8 +630,8 @@ class StudentModel {
 
         const enrollNoStatus = resolvedEnrollNo ? 'ASSIGNED' : 'Not Assigned';
         await conn.execute(
-          `UPDATE students SET official_enrollment_no = ?, enrollment_no_status = ?, class_roll_no = ? WHERE id = ?`,
-          [resolvedEnrollNo, enrollNoStatus, finalRollNo, actualStudentId]
+          `UPDATE students SET ubter_roll_no = ?, official_enrollment_no = ?, enrollment_no_status = ?, class_roll_no = ? WHERE id = ?`,
+          [resolvedEnrollNo, resolvedEnrollNo, enrollNoStatus, finalRollNo, actualStudentId]
         );
 
         try {

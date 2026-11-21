@@ -269,17 +269,18 @@ class TeachingGroupController {
     let studentIds = req.body.student_ids;
 
     try {
-      if (!studentIds && req.body.official_enrollment_no) {
-        const eno = req.body.official_enrollment_no.trim();
+      const rollVal = req.body.ubter_roll_no || req.body.official_enrollment_no;
+      if (!studentIds && rollVal) {
+        const eno = rollVal.trim();
         const foundId = await TeachingGroupModel.findStudentIdByEnrollment(eno);
         if (!foundId) {
-          return res.status(404).json({ success: false, error: { code: 'STUDENT_NOT_FOUND', message: `Student with enrollment "${eno}" not found in database` } });
+          return res.status(404).json({ success: false, error: { code: 'STUDENT_NOT_FOUND', message: `Student with UBTER roll number "${eno}" not found in database` } });
         }
         studentIds = [foundId];
       }
 
       if (!Array.isArray(studentIds) || studentIds.length === 0) {
-        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid student_ids array or official_enrollment_no required' } });
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid student_ids array or ubter_roll_no required' } });
       }
 
       let added = 0;

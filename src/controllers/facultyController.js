@@ -259,6 +259,7 @@ class FacultyController {
             class_roll_no: st.class_roll_no,
             registration_no: st.registration_no,
             full_name: st.full_name,
+            ubter_roll_no: st.ubter_roll_no || st.official_enrollment_no,
             official_enrollment_no: st.official_enrollment_no,
             enrollment_status: st.enrollment_status,
             attendance_marks: marks,
