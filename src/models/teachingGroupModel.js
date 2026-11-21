@@ -329,12 +329,20 @@ class TeachingGroupModel {
       const finalShort = (subjectShortName || '').trim() || finalCode;
       const finalStartDate = (startDate && String(startDate).trim()) ? String(startDate).trim() : new Date().toISOString().split('T')[0];
       const finalEndDate = (endDate && String(endDate).trim()) ? String(endDate).trim() : null;
+      const unitsCount = Math.min(20, Math.max(1, parseInt(totalUnits, 10) || 5));
+      const defaultUnitsArray = Array.from({ length: unitsCount }, (_, i) => ({
+        num: i + 1,
+        name: `Unit ${i + 1}`,
+        title: `Unit ${i + 1}`,
+        description: ''
+      }));
+      const syllabusUnitsJson = JSON.stringify(defaultUnitsArray);
 
       const groupInsert = await conn.query(
         `INSERT INTO teaching_groups 
-          (name, subject_name, subject_short_name, subject_code, component, total_units, teacher_id, academic_year_id, semester, year, start_date, end_date, invite_code, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
-        [name, subjectName, finalShort, finalCode, component, totalUnits || 5, effTeacherId, ayId, semester, computedYear, finalStartDate, finalEndDate, inviteCode]
+          (name, subject_name, subject_short_name, subject_code, component, total_units, syllabus_units, teacher_id, academic_year_id, semester, year, start_date, end_date, invite_code, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', CURRENT_TIMESTAMP)`,
+        [name, subjectName, finalShort, finalCode, component, unitsCount, syllabusUnitsJson, effTeacherId, ayId, semester, computedYear, finalStartDate, finalEndDate, inviteCode]
       );
       const groupId = (groupInsert.insertId || groupInsert[0]?.insertId) || groupInsert.lastInsertRowid;
 
