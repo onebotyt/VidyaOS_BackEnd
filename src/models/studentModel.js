@@ -29,6 +29,7 @@ class StudentModel {
               d.name as branch_name, d.code as branch_code,
               ay.label as academic_year_label,
               u.username, u.email, u.status as account_status, u.created_at as account_created_at,
+              u.google_sub, CASE WHEN u.google_sub IS NOT NULL THEN 1 ELSE 0 END as google_linked,
               s.phone as student_phone, s.parent_phone, s.parent_name,
               s.address, s.aadhar_number, s.father_name, s.mother_name, s.dob, s.gender, s.category,
               COALESCE(s.profile_completed, 0) as profile_completed

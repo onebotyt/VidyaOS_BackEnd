@@ -326,13 +326,20 @@ class AuthController {
           <script>
             const payload = ${JSON.stringify(result)};
             if (window.opener) {
+              if (payload.action === 'REQUIRE_PASSWORD_LINK') {
+                window.opener.postMessage({ type: 'GOOGLE_REQUIRE_PASSWORD_LINK', payload }, '*');
+                setTimeout(() => { try { window.close(); } catch (_) {} }, 400);
+                return;
+              }
               window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', payload }, '*');
               setTimeout(() => {
                 try { window.close(); } catch (_) {}
               }, 600);
             } else {
               const origin = payload.frontendOrigin || (window.location.origin.includes('onrender.com') ? 'https://vidyaos-pink.vercel.app' : window.location.origin);
-              if (payload.action === 'STUDENT_REGISTER') {
+              if (payload.action === 'REQUIRE_PASSWORD_LINK') {
+                window.location.href = origin + '/login/index.html?require_password_link=1&email=' + encodeURIComponent(payload.google_email) + '&google_sub=' + encodeURIComponent(payload.google_sub || '') + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_token=' + encodeURIComponent(payload.id_token || '');
+              } else if (payload.action === 'STUDENT_REGISTER') {
                 window.location.href = origin + '/login/register/index.html?role=student&google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
               } else if (payload.action === 'PENDING_APPROVAL') {
                 window.location.href = origin + '/login/index.html?role=student&google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
@@ -466,7 +473,11 @@ class AuthController {
     try {
       const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
       const idToken = req.body.id_token || (req.body.email ? ('google_' + req.body.email.toLowerCase()) : null);
-      const result = await authService.googleLogin(idToken, clientInfo);
+      const password = req.body.password || null;
+      const result = await authService.googleLogin(idToken, clientInfo, password);
+      if (result && result.requires_password) {
+        return res.status(200).json({ success: true, requires_password: true, data: result });
+      }
       setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {
