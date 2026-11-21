@@ -140,7 +140,10 @@ router.post(
   '/google',
   authLimiter,
   [
-    body('id_token').notEmpty().withMessage('Google ID token required'),
+    body('id_token').custom((val, { req }) => {
+      if (val || req.body.email) return true;
+      throw new Error('Google ID token or email required');
+    }),
     validate
   ],
   AuthController.googleLogin

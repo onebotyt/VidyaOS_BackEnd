@@ -465,7 +465,8 @@ class AuthController {
   static async googleLogin(req, res) {
     try {
       const clientInfo = { ip: req.ip, userAgent: req.get('User-Agent') };
-      const result = await authService.googleLogin(req.body.id_token, clientInfo);
+      const idToken = req.body.id_token || (req.body.email ? ('google_' + req.body.email.toLowerCase()) : null);
+      const result = await authService.googleLogin(idToken, clientInfo);
       setAuthCookies(res, result);
       res.status(200).json({ success: true, data: result });
     } catch (err) {

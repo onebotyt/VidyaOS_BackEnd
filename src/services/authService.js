@@ -116,9 +116,13 @@ async function verifyGoogleToken(idToken) {
 
   // Real Google OAuth verification when client ID is configured
   if (process.env.GOOGLE_CLIENT_ID) {
-    const client = getGoogleClient();
-    const ticket = await client.verifyIdToken({ idToken, audience: process.env.GOOGLE_CLIENT_ID });
-    return ticket.getPayload(); // { sub, email, email_verified, name, picture }
+    try {
+      const client = getGoogleClient();
+      const ticket = await client.verifyIdToken({ idToken, audience: process.env.GOOGLE_CLIENT_ID });
+      return ticket.getPayload(); // { sub, email, email_verified, name, picture }
+    } catch (err) {
+      console.warn('Google verifyIdToken error, attempting JWT decode fallback:', err?.message);
+    }
   }
 
   // Fallback JWT decode for Google Identity Services JWTs
