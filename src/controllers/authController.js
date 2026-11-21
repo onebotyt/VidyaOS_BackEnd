@@ -338,23 +338,31 @@ class AuthController {
                 window.location.href = origin + '/login/index.html?role=student&google_pending=1&email=' + encodeURIComponent(payload.google_email || '');
               } else if (payload.action === 'NOT_REGISTERED') {
                 window.location.href = origin + '/login/register/index.html?role=student&google_email=' + encodeURIComponent(payload.google_email) + '&google_name=' + encodeURIComponent(payload.google_name || '') + '&google_sub=' + encodeURIComponent(payload.google_sub || '');
-              } else if (payload.access_token) {
-                let target = '/faculty/dashboard.html';
+              } else if (payload.access_token || (payload.tokens && payload.tokens.access_token)) {
+                const token = payload.access_token || payload.tokens.access_token;
+                let target = '/faculty/dashboard/index.html';
                 if (payload.user && payload.user.roles && payload.user.roles.includes('STUDENT')) {
-                  target = '/student/dashboard.html';
-                } else if (payload.user && payload.user.roles && payload.user.roles.includes('SYSTEM_ADMIN')) {
-                  target = '/admin/dashboard.html';
+                  target = '/student/dashboard/index.html';
+                } else if (payload.user && payload.user.roles && (payload.user.roles.includes('SYSTEM_ADMIN') || payload.user.roles.includes('ADMIN'))) {
+                  target = '/admin/dashboard/index.html';
                 }
                 try {
                   if (payload.user) {
                     localStorage.setItem('user', JSON.stringify(payload.user));
                     localStorage.setItem('currentUser', JSON.stringify(payload.user));
+                    localStorage.setItem('vidyaos_user', JSON.stringify(payload.user));
+                  }
+                  if (token) {
+                    localStorage.setItem('access_token', token);
+                    localStorage.setItem('accessToken', token);
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('vidyaos_token', token);
                   }
                 } catch (_) {}
                 // Clean URL redirect: Zero tokens in query string!
                 window.location.href = origin + target;
               } else {
-                window.location.href = origin + '/faculty/profile.html?google_linked=1';
+                window.location.href = origin + '/faculty/profile/index.html?google_linked=1';
               }
             }
           </script>
