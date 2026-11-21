@@ -123,7 +123,7 @@ class AttendanceModel {
       filter += ` AND ass.student_id = ?`;
       params.push(user.student_id);
     } else if (user.teacher_id && !user.roles?.includes('SYSTEM_ADMIN')) {
-      filter += ` AND s.teacher_id = ?`;
+      filter += ` AND ar.teacher_id = ?`;
       params.push(user.teacher_id);
     }
 
@@ -132,7 +132,7 @@ class AttendanceModel {
       params.push(state);
     }
     if (subject_id) {
-      filter += ` AND s.subject_id = ?`;
+      filter += ` AND ar.subject_id = ?`;
       params.push(subject_id);
     }
 
@@ -140,11 +140,12 @@ class AttendanceModel {
       `SELECT DISTINCT s.id, s.session_type, s.label, s.start_time, s.end_time, s.state, s.auto_close_at,
               sub.name as subject_name, sub.code as subject_code,
               t.full_name as teacher_name,
-              d.name as department_name, d.name as branch_name, s.year, s.semester
+              d.name as department_name, d.name as branch_name, ar.year, ar.semester
        FROM attendance_sessions s
-       JOIN subjects sub ON s.subject_id = sub.id
-       JOIN teachers t ON s.teacher_id = t.id
-       JOIN departments d ON s.department_id = d.id
+       JOIN attendance_registers ar ON s.register_id = ar.id
+       JOIN subjects sub ON ar.subject_id = sub.id
+       JOIN teachers t ON ar.teacher_id = t.id
+       JOIN departments d ON ar.department_id = d.id
        LEFT JOIN attendance_session_students ass ON ass.session_id = s.id
        WHERE 1=1 ${filter}
        ORDER BY s.start_time DESC
