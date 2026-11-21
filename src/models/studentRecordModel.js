@@ -453,12 +453,21 @@ class StudentRecordModel {
       }
     }
 
-    sql += ` ORDER BY e.year ASC, e.semester ASC, COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC LIMIT ? OFFSET ?`;
+    sql += ` GROUP BY st.id ORDER BY e.year ASC, e.semester ASC, COALESCE(st.class_roll_no, e.class_roll_no) ASC, st.full_name ASC LIMIT ? OFFSET ?`;
     params.push(Number(limit), Number(offset));
 
     const rows = await query(sql, params);
 
-    const mapped = rows.map(r => {
+    // Deduplicate students by st.id in case of multi-enrollment data
+    const studentMap = new Map();
+    rows.forEach(r => {
+      if (!studentMap.has(r.id)) {
+        studentMap.set(r.id, r);
+      }
+    });
+    const uniqueRows = Array.from(studentMap.values());
+
+    const mapped = uniqueRows.map(r => {
       const total = Number(r.total_attendance_sessions) || 0;
       const attended = Number(r.total_attended_sessions) || 0;
       const pct = total > 0 ? Math.round((attended * 100) / total) : 100;
