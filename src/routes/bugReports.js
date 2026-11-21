@@ -80,6 +80,7 @@ router.use(auth);
 // Submitter endpoints (Students, Faculty, Admins)
 router.post('/', handleBugUpload, (req, res) => bugReportController.submitBugReport(req, res));
 router.get('/my', (req, res) => bugReportController.getMyBugReports(req, res));
+router.get('/my-reports', (req, res) => bugReportController.getMyBugReports(req, res));
 router.get('/my/:id', (req, res) => bugReportController.getMyBugReportById(req, res));
 
 // Admin management endpoints
