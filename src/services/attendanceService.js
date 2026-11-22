@@ -38,13 +38,14 @@ class AttendanceService {
 
     return await withTransaction(async (conn) => {
       // 1. Insert Session linked to register
+      const effStartTime = data.start_time || `${session_date} 09:00:00`;
       const [res] = await conn.execute(
         `INSERT INTO attendance_sessions 
          (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, 
-          session_type, label, session_date, state, auto_close_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
+          session_type, label, session_date, start_time, state, auto_close_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
         [register_id, teacherId, subject_id, department_id, year, semester, academic_year_id,
-          session_type, label, session_date, autoCloseAt]
+          session_type, label, session_date, effStartTime, autoCloseAt]
       );
 
       const sessionId = res.insertId ?? res.lastInsertRowid;

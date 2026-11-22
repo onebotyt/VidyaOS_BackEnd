@@ -113,7 +113,11 @@ class FacultyController {
       const today = new Date().toISOString().slice(0, 10);
       const existingToday = await FacultyModel.findTodaySession(registerId, today);
       if (!existingToday && register.is_active) {
-        await FacultyModel.autoCreateTodaySession(register, today);
+        try {
+          await FacultyModel.autoCreateTodaySession(register, today);
+        } catch (sessErr) {
+          console.warn('Could not auto-create today session for register:', sessErr.message);
+        }
       }
 
       const sessions = await FacultyModel.getRegisterSessions(registerId);

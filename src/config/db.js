@@ -327,6 +327,9 @@ async function ensureCompatibilityViews() {
           await query(`ALTER TABLE attendance_sessions ADD COLUMN ${c.name} ${c.type}`);
         }
       }
+      try {
+        await query(`ALTER TABLE attendance_sessions MODIFY COLUMN start_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`);
+      } catch (_) {}
     } catch (_) {}
 
     // 1h. Ensure classroom_posts has attachment_path and attachment_name

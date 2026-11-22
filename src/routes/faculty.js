@@ -94,7 +94,16 @@ router.post('/registers/:id/sessions', [
   param('id').isInt(),
   body('session_date').isDate().withMessage('Valid date required (YYYY-MM-DD)'),
   body('period_number').optional().isInt({ min: 1, max: 10 }),
-  body('session_type').optional().isIn(['THEORY', 'PRACTICAL', 'TUTORIAL', 'CUSTOM']),
+  body('session_type').optional().customSanitizer(val => {
+    if (!val) return 'THEORY';
+    const s = String(val).toUpperCase();
+    if (s.includes('PRACT')) return 'PRACTICAL';
+    if (s.includes('TUT')) return 'TUTORIAL';
+    if (s.includes('CUSTOM')) return 'CUSTOM';
+    return 'THEORY';
+  }).isIn(['THEORY', 'PRACTICAL', 'TUTORIAL', 'CUSTOM']),
+  body('start_time').optional().isString(),
+  body('end_time').optional().isString(),
   validate
 ], FacultyController.createSession);
 

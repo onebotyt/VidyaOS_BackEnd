@@ -275,15 +275,37 @@ class FacultyModel {
   static async autoCreateTodaySession(register, today) {
     const countRow = await query(`SELECT COUNT(*) as cnt FROM attendance_sessions WHERE register_id = ?`, [register.id]);
     const sessionLabel = `Class ${(countRow[0]?.cnt || 0) + 1}`;
+    const effStartTime = `${today} 09:00:00`;
+
+    let effSubjectId = register.subject_id;
+    if (!effSubjectId) {
+      if (register.group_id) {
+        const grpRows = await query(`SELECT subject_name, subject_code FROM teaching_groups WHERE id = ?`, [register.group_id]);
+        if (grpRows && grpRows[0]) {
+          const sRows = await query(
+            `SELECT id FROM subjects WHERE (name = ? OR code = ?) LIMIT 1`,
+            [grpRows[0].subject_name, grpRows[0].subject_code]
+          );
+          if (sRows && sRows[0]) effSubjectId = sRows[0].id;
+        }
+      }
+      if (!effSubjectId) {
+        const anySub = await query(`SELECT id FROM subjects WHERE department_id = ? LIMIT 1`, [register.department_id || 1]);
+        effSubjectId = (anySub && anySub[0]) ? anySub[0].id : 1;
+      }
+      try {
+        await query(`UPDATE attendance_registers SET subject_id = ? WHERE id = ?`, [effSubjectId, register.id]);
+      } catch (_) { }
+    }
 
     await query(
       `INSERT INTO attendance_sessions 
-       (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
-      [register.id, register.teacher_id, register.subject_id, register.department_id,
+       (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, start_time, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
+      [register.id, register.teacher_id, effSubjectId, register.department_id,
       register.year, register.semester, register.academic_year_id,
       register.session_type_scope === 'PRACTICAL' ? 'PRACTICAL' : 'THEORY',
-        sessionLabel, today]
+        sessionLabel, today, effStartTime]
     );
 
     const newSession = (await query(`SELECT id FROM attendance_sessions WHERE register_id = ? AND session_date = ?`, [register.id, today]))[0];
