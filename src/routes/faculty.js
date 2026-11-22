@@ -12,6 +12,7 @@ const requireRole = require('../middleware/requireRole');
 const { requireDepartmentFaculty, requireCommonFacultyManager } = require('../middleware/requireScope');
 const validate = require('../middleware/validate');
 const FacultyController = require('../controllers/facultyController');
+const HodFacultySheetsController = require('../controllers/hod-faculty-sheets');
 
 // All routes require authentication and TEACHER or SYSTEM_ADMIN role
 router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN'));
@@ -181,8 +182,8 @@ router.get('/my-classes', FacultyController.getMyClasses);
 // @route   GET /api/v1/faculty/registers/:id/internal-evaluation
 // @desc    Compute comprehensive internal evaluation score sheet for register
 // @access  Protected (TEACHER, SYSTEM_ADMIN)
-// @handler FacultyController.getInternalEvaluation() -> FacultyModel.getInternalEvaluationSheet()
-router.get('/registers/:id/internal-evaluation', [param('id').isInt(), validate], FacultyController.getInternalEvaluation);
+// @handler HodFacultySheetsController.getInternalEvaluation() -> FacultyModel.getInternalEvaluationSheet()
+router.get('/registers/:id/internal-evaluation', [param('id').isInt(), validate], HodFacultySheetsController.getInternalEvaluation);
 
 // @route   GET /api/v1/faculty/registers/:id/export/internal-evaluation-excel
 // @desc    Export register internal evaluation sheet formatted as Excel document
@@ -208,11 +209,6 @@ router.post(['/registers/:id/export/unit-tests-summary-excel', '/registers/:id/e
 // @access  Protected (TEACHER, SYSTEM_ADMIN)
 // @handler FacultyController.exportAttendanceRegister() -> FacultyModel.getRegisterAttendanceExportData() -> excelExportService
 router.post('/registers/:id/export/attendance', [param('id').isInt(), validate], FacultyController.exportAttendanceRegister);
-
-// @route   POST /api/v1/faculty/export/table-to-excel
-// @desc    Export custom client table rows into authentic Microsoft Excel (.xlsx) workbook
-// @access  Protected (TEACHER, SYSTEM_ADMIN)
-router.post('/export/table-to-excel', FacultyController.exportTableToExcel);
 
 // @route   GET /api/v1/faculty/common/pending
 // @desc    Retrieve pending registrations for first-year / common pool students

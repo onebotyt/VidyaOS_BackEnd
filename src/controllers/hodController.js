@@ -10,6 +10,8 @@ const notificationService = require('../services/notificationService');
 const { logAudit } = require('../services/auditService');
 const bcrypt = require('bcrypt');
 const { query, withTransaction } = require('../config/db');
+const HodFacultyArchiveController = require('./hod-faculty-archive');
+const HodExclusiveFacultyController = require('./hod-exclusive-faculty');
 
 function resolveHodDeptId(req) {
   let deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id || req.query?.department_id;
@@ -36,228 +38,16 @@ class HodController {
     }
   }
 
-  /**
-   * List all faculty teachers belonging to the department
-   * @route GET /api/v1/hod/teachers (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.getTeachers() (models/hodModel.js)
-   */
-  static async getTeachers(req, res) {
-    try {
-      const deptId = req.hod_department_id;
-      const data = await HodModel.getTeachers(deptId);
-      res.json({ success: true, data });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Create a new teacher user account and departmental faculty profile
-   * @route POST /api/v1/hod/teachers (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.createTeacher() (models/hodModel.js)
-   */
-  static async createTeacher(req, res) {
-    const { full_name, email, password, phone, employee_id } = req.body;
-    const gmail = email.toLowerCase().trim();
-    const deptId = req.hod_department_id;
-
-    try {
-      const passwordHash = await bcrypt.hash(password, 12);
-      const result = await HodModel.createTeacher({
-        fullName: full_name,
-        email: gmail,
-        passwordHash,
-        departmentId: deptId,
-        phone,
-        employeeId: employee_id
-      });
-
-      result.department_id = deptId;
-      result.temporary_password = password;
-
-      res.status(201).json({
-        success: true,
-        data: result,
-        message: `Teacher account created in ${req.hod_department_name}. Share Gmail and temporary password with them to log in.`
-      });
-    } catch (err) {
-      if (err.message?.includes('UNIQUE')) {
-        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Gmail already registered in the system' } });
-      }
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Retrieve teacher details and active course assignments by ID within department
-   * @route GET /api/v1/hod/teachers/:id (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.getTeacherById() (models/hodModel.js)
-   */
-  static async getTeacherById(req, res) {
-    try {
-      const teacher = await HodModel.getTeacherById(req.params.id, req.hod_department_id);
-      if (!teacher) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teacher not found in your department' } });
-      }
-      res.json({ success: true, data: teacher });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Update teacher full name, phone number, employee ID, designation, email, status, or role
-   * @route PUT /api/v1/hod/teachers/:id (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.updateTeacher() (models/hodModel.js)
-   */
-  static async updateTeacher(req, res) {
-    const { full_name, employee_id, phone, designation, email, status, role } = req.body;
-    try {
-      const teacherRows = await query(
-        `SELECT id, user_id FROM teachers WHERE id = ? ${req.hod_department_id ? 'AND department_id = ?' : ''}`,
-        req.hod_department_id ? [req.params.id, req.hod_department_id] : [req.params.id]
-      );
-      if (!teacherRows.length) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teacher not found in your department' } });
-      }
-
-      await HodModel.updateTeacher(req.params.id, req.hod_department_id, {
-        fullName: full_name,
-        employeeId: employee_id,
-        phone,
-        designation,
-        email,
-        status,
-        role
-      });
-
-      res.json({ success: true, message: 'Faculty profile updated successfully' });
-    } catch (err) {
-      if (err.message?.includes('UNIQUE') || err.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Employee ID or email already assigned to another user' } });
-      }
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Reset teacher account password and invalidate active user sessions
-   * @route POST /api/v1/hod/teachers/:id/reset-password (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.resetTeacherPassword() (models/hodModel.js)
-   */
-  static async resetTeacherPassword(req, res) {
-    try {
-      let teacherRows;
-      if (req.user.roles.includes('SYSTEM_ADMIN') && !req.hod_department_id) {
-        teacherRows = await query(
-          `SELECT user_id, full_name FROM teachers WHERE id = ?`,
-          [req.params.id]
-        );
-      } else {
-        teacherRows = await query(
-          `SELECT user_id, full_name FROM teachers WHERE id = ? AND department_id = ?`,
-          [req.params.id, req.hod_department_id]
-        );
-      }
-      if (!teacherRows.length) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teacher not found in your department' } });
-      }
-
-      const callerUserId = req.user.id || req.user.user_id;
-      if (teacherRows[0].user_id === callerUserId) {
-        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'HOD password can only be reset from your Profile page or by an Admin.' } });
-      }
-
-      const newPassHash = await bcrypt.hash(req.body.new_password, 12);
-      await HodModel.resetTeacherPassword(teacherRows[0].user_id, newPassHash);
-
-      res.json({ success: true, message: `Password for ${teacherRows[0].full_name} has been updated successfully.` });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Delete teacher profile, account, roles, sessions, and course assignments
-   * @route DELETE /api/v1/hod/teachers/:id (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.deleteTeacher() (models/hodModel.js)
-   */
-  static async deleteTeacher(req, res) {
-    try {
-      const teacherRows = await query(
-        `SELECT user_id, full_name FROM teachers WHERE id = ? AND department_id = ?`,
-        [req.params.id, req.hod_department_id]
-      );
-      if (!teacherRows.length) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Teacher not found in your department' } });
-      }
-
-      const userId = teacherRows[0].user_id;
-      if (userId === req.user.id) {
-        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You cannot delete your own account' } });
-      }
-
-      await HodModel.deleteTeacher(req.params.id, req.hod_department_id, userId);
-      res.json({ success: true, message: `Teacher ${teacherRows[0].full_name} and their assignments have been moved to Trash (30-day retention).` });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Retrieve department faculty currently in Trash (soft-deleted, 30-day retention)
-   * @route GET /api/v1/hod/trash/faculty (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   */
-  static async getTrashFaculty(req, res) {
-    try {
-      const deptId = req.hod_department_id;
-      const data = await HodModel.getTrashFaculty(deptId);
-      res.json({ success: true, data });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Restore a soft-deleted faculty member from Trash
-   * @route POST /api/v1/hod/trash/faculty/:id/restore (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   */
-  static async restoreFaculty(req, res) {
-    try {
-      const deptId = req.hod_department_id;
-      const result = await HodModel.restoreFaculty(req.params.id, deptId, req.user.id);
-      if (!result) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Faculty member not found in Trash or unauthorized' } });
-      }
-      res.json({ success: true, message: result.message });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Retrieve department faculty roster with active teaching workloads and assigned subjects
-   * @route GET /api/v1/hod/faculty-roster (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.getFacultyRoster() (models/hodModel.js)
-   */
-  static async getFacultyRoster(req, res) {
-    try {
-      const deptId = req.hod_department_id;
-      const data = await HodModel.getFacultyRoster(deptId);
-      res.json({ success: true, data });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
+  // Delegated to hod-exclusive-faculty.js
+  static async getTeachers(req, res) { return HodExclusiveFacultyController.getTeachers(req, res); }
+  static async createTeacher(req, res) { return HodExclusiveFacultyController.createTeacher(req, res); }
+  static async getTeacherById(req, res) { return HodExclusiveFacultyController.getTeacherById(req, res); }
+  static async updateTeacher(req, res) { return HodExclusiveFacultyController.updateTeacher(req, res); }
+  static async resetTeacherPassword(req, res) { return HodExclusiveFacultyController.resetTeacherPassword(req, res); }
+  static async deleteTeacher(req, res) { return HodExclusiveFacultyController.deleteTeacher(req, res); }
+  static async getTrashFaculty(req, res) { return HodExclusiveFacultyController.getTrashFaculty(req, res); }
+  static async restoreFaculty(req, res) { return HodExclusiveFacultyController.restoreFaculty(req, res); }
+  static async getFacultyRoster(req, res) { return HodExclusiveFacultyController.getFacultyRoster(req, res); }
 
   /**
    * Retrieve departmental student roster with cumulative attendance percentages and threshold compliance
@@ -267,7 +57,8 @@ class HodController {
    */
   static async getStudentsRoster(req, res) {
     try {
-      const deptId = req.hod_department_id;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
+      const deptId = isPrivileged ? (req.query?.department_id || req.hod_department_id) : req.hod_department_id;
       const students = await HodModel.getStudentsRoster(deptId);
       res.json({ success: true, data: students, total: students.length });
     } catch (err) {
@@ -705,7 +496,8 @@ class HodController {
    */
   static async getStudents(req, res) {
     try {
-      const deptId = req.hod_department_id;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
+      const deptId = isPrivileged ? (req.query.department_id || req.hod_department_id) : req.hod_department_id;
       const { year, semester, search, limit = 100, offset = 0 } = req.query;
       const result = await HodModel.getStudents(deptId, { year, semester, search, limit, offset });
       res.json({
@@ -726,8 +518,11 @@ class HodController {
    */
   static async createStudent(req, res) {
     const { official_enrollment_no, registration_no, full_name, email, year, semester, is_lateral_entry, academic_year_id, initial_password } = req.body;
-    let deptId = req.hod_department_id || req.body.department_id || req.user?.department_id || req.teacher_department_id || req.user?.hod_department_id;
-    if (!deptId && (req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN'))) {
+    const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
+    let deptId = isPrivileged
+      ? (req.body.department_id || req.hod_department_id || req.user?.department_id)
+      : req.hod_department_id;
+    if (!deptId && isPrivileged) {
       deptId = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
     }
 
@@ -805,13 +600,14 @@ class HodController {
    */
   static async bulkCreateStudents(req, res) {
     let { year, semester, students, academic_year_id, department_id } = req.body;
-    let deptId = req.hod_department_id || department_id || req.user?.department_id || req.teacher_department_id || req.user?.hod_department_id;
+    const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
+    let deptId = isPrivileged
+      ? (department_id || req.hod_department_id || req.user?.department_id)
+      : req.hod_department_id;
 
-    if (!deptId) {
-      if (req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN')) {
-        const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
-        deptId = defaultDept;
-      }
+    if (!deptId && isPrivileged) {
+      const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
+      deptId = defaultDept;
     }
 
     if (!deptId) {
@@ -903,7 +699,7 @@ class HodController {
    */
   static async restoreStudent(req, res) {
     try {
-      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
       const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
       const result = await HodModel.restoreStudent(req.params.id, deptId, req.user?.id);
       if (!result) {
@@ -921,7 +717,7 @@ class HodController {
    */
   static async bulkRestoreStudents(req, res) {
     try {
-      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
       const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
       const ids = req.body.ids || req.body.student_ids || [];
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -940,7 +736,7 @@ class HodController {
    */
   static async bulkDeleteStudents(req, res) {
     try {
-      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
       const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
       const ids = req.body.ids || req.body.student_ids || [];
       if (!Array.isArray(ids) || ids.length === 0) {
@@ -959,7 +755,7 @@ class HodController {
    */
   static async permanentDeleteStudent(req, res) {
     try {
-      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN') || req.user?.is_hod;
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
       const deptId = isPrivileged ? null : (req.hod_department_id || req.user?.department_id || req.teacher_department_id);
       const result = await HodModel.permanentDeleteStudents([req.params.id], deptId, req.user?.id);
       if (!result.deleted_count) {
@@ -979,6 +775,8 @@ class HodController {
   static async updateStudent(req, res) {
     try {
       const studentId = parseInt(req.params.id, 10);
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
+      const deptId = isPrivileged ? null : req.hod_department_id;
       const { full_name, official_enrollment_no, ubter_roll_no, enrollment_not_available, registration_no, class_roll_no, year, semester } = req.body;
 
       if (!full_name || !full_name.trim()) {
@@ -1009,7 +807,7 @@ class HodController {
         classRollNo: class_roll_no,
         year,
         semester
-      }, req.user?.id);
+      }, req.user?.id, deptId);
 
       res.json({ success: true, message: 'Student details updated successfully', data: result });
     } catch (err) {
@@ -1278,197 +1076,25 @@ class HodController {
    */
   static async getHierarchy(req, res) {
     try {
-      const deptId = req.hod_department_id;
-      const data = await HodModel.getHierarchy(deptId, req.hod_department_name);
+      const deptId = resolveHodDeptId(req);
+      const data = await HodModel.getHierarchy(deptId, req.hod_department_name || req.user?.department_name || '');
       res.json({ success: true, data });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
   }
 
-  /**
-   * List distinct graduation years for alumni students in department
-   * @route GET /api/v1/hod/archive/batches (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.getArchiveBatches() (models/hodModel.js)
-   */
-  static async getArchiveBatches(req, res) {
-    try {
-      const batches = await HodModel.getArchiveBatches(req.hod_department_id);
-      res.json({ success: true, data: batches });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
+  // Delegated to hod-faculty-archive.js
+  static async getArchiveBatches(req, res) { return HodFacultyArchiveController.getArchiveBatches(req, res); }
+  static async getArchive(req, res) { return HodFacultyArchiveController.getArchive(req, res); }
 
-  /**
-   * Retrieve archived alumni students with lifetime attendance stats and KPI metrics
-   * @route GET /api/v1/hod/archive (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.getArchive() (models/hodModel.js)
-   */
-  static async getArchive(req, res) {
-    try {
-      const result = await HodModel.getArchive(req.hod_department_id, req.query);
-      res.json({
-        success: true,
-        data: result.students,
-        kpis: result.kpis
-      });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Retrieve pending faculty registration requests awaiting HOD approval
-   * @route GET /api/v1/hod/registrations/pending-faculty, GET /api/v1/hod/faculty-registrations/pending (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.getPendingFacultyRegistrations() (models/hodModel.js)
-   */
-  static async getPendingFacultyRegistrations(req, res) {
-    try {
-      const deptId = resolveHodDeptId(req);
-      const rows = await HodModel.getPendingFacultyRegistrations(deptId);
-      res.json({ success: true, data: rows });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Approve a pending faculty self-registration, creating user account, teacher record, and audit log
-   * @route POST /api/v1/hod/registrations/faculty/:id/approve, POST /api/v1/hod/faculty-registrations/:id/approve (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.approveFacultyRegistration() (models/hodModel.js)
-   * @usesService notificationService.sendNotification() (services/notificationService.js)
-   */
-  static async approveFacultyRegistration(req, res) {
-    const reqId = Number(req.params.id);
-    const deptId = resolveHodDeptId(req);
-    const isSysAdmin = req.user.roles?.includes('SYSTEM_ADMIN');
-
-    try {
-      const result = await HodModel.approveFacultyRegistration(reqId, req.user.id, deptId, isSysAdmin);
-      if (!result) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Pending faculty registration request not found in your department' } });
-      }
-
-      notificationService.sendNotification({
-        userId: result.user_id,
-        type: notificationService.NOTIFICATION_TYPES.FACULTY_APPROVAL,
-        title: 'Faculty Registration Approved',
-        message: 'Welcome to the faculty portal! Your registration for Department has been approved by the HOD.',
-        linkUrl: '/faculty/registers.html'
-      }).catch(() => { });
-
-      res.status(200).json({
-        success: true,
-        message: `Faculty registration for ${result.full_name} has been approved successfully.`,
-        data: result
-      });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Reject a pending faculty self-registration with recorded reason
-   * @route POST /api/v1/hod/registrations/faculty/:id/reject, POST /api/v1/hod/faculty-registrations/:id/reject (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.rejectFacultyRegistration() (models/hodModel.js)
-   */
-  static async rejectFacultyRegistration(req, res) {
-    const reqId = Number(req.params.id);
-    const deptId = resolveHodDeptId(req);
-    const reason = req.body.rejection_reason || req.body.reason;
-    const isSysAdmin = req.user.roles?.includes('SYSTEM_ADMIN');
-
-    try {
-      const result = await HodModel.rejectFacultyRegistration(reqId, req.user.id, deptId, isSysAdmin, reason);
-      if (!result) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Pending faculty registration request not found in your department' } });
-      }
-
-      res.json({ success: true, message: 'Faculty registration request rejected.', data: result });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Adjudicate a pending faculty registration by delegating to approve or reject handlers
-   * @route POST /api/v1/hod/faculty-registrations/:id/adjudicate, POST /api/v1/hod/registrations/faculty/:id/adjudicate (routes/hod.js)
-   * @access Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-   * @usesModel HodModel.approveFacultyRegistration() / rejectFacultyRegistration() (models/hodModel.js)
-   */
-  static async adjudicateFacultyRegistration(req, res) {
-    const action = (req.body.action || 'APPROVE').toUpperCase();
-    if (action === 'REJECT') {
-      return HodController.rejectFacultyRegistration(req, res);
-    }
-    return HodController.approveFacultyRegistration(req, res);
-  }
-
-  /**
-   * Check whether faculty self-registration gate is open for department
-   * @route GET /api/v1/hod/faculty-registration-status (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.getFacultyRegistrationStatus() (models/hodModel.js)
-   */
-  static async getFacultyRegistrationStatus(req, res) {
-    try {
-      let deptId = req.hod_department_id || req.user?.department_id || req.user?.hod_department_id || req.query.department_id;
-      if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
-        const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
-        deptId = defaultDept;
-      }
-      if (!deptId) {
-        return res.status(400).json({ success: false, error: { code: 'NO_DEPARTMENT', message: 'HOD has no assigned department' } });
-      }
-
-      const isOpen = await HodModel.getFacultyRegistrationStatus(deptId);
-      res.json({
-        success: true,
-        data: {
-          is_open: isOpen,
-          department_id: deptId
-        }
-      });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Toggle departmental faculty self-registration gate with audit trail
-   * @route POST /api/v1/hod/faculty-registration-toggle (routes/hod.js)
-   * @access Protected (HOD, SYSTEM_ADMIN)
-   * @usesModel HodModel.toggleFacultyRegistration() (models/hodModel.js)
-   */
-  static async toggleFacultyRegistration(req, res) {
-    try {
-      let deptId = req.body.department_id || req.hod_department_id || req.user?.department_id || req.user?.hod_department_id;
-      if (!deptId && req.user?.roles?.includes('SYSTEM_ADMIN')) {
-        const defaultDept = (await query('SELECT id FROM departments WHERE is_active = 1 LIMIT 1'))[0]?.id;
-        deptId = defaultDept;
-      }
-      if (!deptId) {
-        return res.status(400).json({ success: false, error: { code: 'NO_DEPARTMENT', message: 'HOD has no assigned department' } });
-      }
-
-      const isOpen = Boolean(req.body.open);
-      await HodModel.toggleFacultyRegistration(deptId, isOpen, req.user.id);
-
-      res.json({
-        success: true,
-        message: `Faculty self-registration for this department is now ${isOpen ? 'OPEN' : 'CLOSED'}`,
-        data: { is_open: isOpen, department_id: deptId }
-      });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
+  // Delegated to hod-exclusive-faculty.js (faculty self-registration lifecycle)
+  static async getPendingFacultyRegistrations(req, res) { return HodExclusiveFacultyController.getPendingFacultyRegistrations(req, res); }
+  static async approveFacultyRegistration(req, res) { return HodExclusiveFacultyController.approveFacultyRegistration(req, res); }
+  static async rejectFacultyRegistration(req, res) { return HodExclusiveFacultyController.rejectFacultyRegistration(req, res); }
+  static async adjudicateFacultyRegistration(req, res) { return HodExclusiveFacultyController.adjudicateFacultyRegistration(req, res); }
+  static async getFacultyRegistrationStatus(req, res) { return HodExclusiveFacultyController.getFacultyRegistrationStatus(req, res); }
+  static async toggleFacultyRegistration(req, res) { return HodExclusiveFacultyController.toggleFacultyRegistration(req, res); }
 
   /**
    * Check whether student self-registration gate is open for department

@@ -215,6 +215,29 @@ class AuthController {
   }
 
   /**
+   * Checks if current authenticated user account is linked to Google OAuth
+   * @route GET /api/v1/auth/google/status (routes/auth.js)
+   * @access Protected
+   * @usesService authService.getGoogleStatus() (services/authService.js)
+   */
+  static async getGoogleStatus(req, res) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+      }
+      const status = await authService.getGoogleStatus(userId);
+      res.status(200).json({
+        success: true,
+        linked: status.linked,
+        data: status
+      });
+    } catch (err) {
+      res.status(err.status || 500).json({ success: false, error: { code: err.code || 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
    * Generates authorization redirect URL for Google OAuth flow.
    * @route GET /api/v1/auth/google/url (routes/auth.js)
    * @access Public
@@ -932,21 +955,6 @@ class AuthController {
       }
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
-  }
-
-  /**
-   * Submits a faculty or HOD registration request pending administrative approval.
-   * @route POST /api/v1/auth/faculty/register (routes/auth.js)
-   * @access Disabled (Faculty accounts provisioned exclusively by Admin and Department HOD)
-   */
-  static async registerFaculty(req, res) {
-    return res.status(403).json({
-      success: false,
-      error: {
-        code: 'FORBIDDEN',
-        message: 'Faculty self-registration has been disabled. Faculty and HOD accounts are provisioned exclusively by Institutional Administrators and Department HODs.'
-      }
-    });
   }
 }
 

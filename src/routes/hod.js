@@ -14,6 +14,8 @@ const validate = require('../middleware/validate');
 const HodController = require('../controllers/hodController');
 const StudentController = require('../controllers/studentController');
 const AuthController = require('../controllers/authController');
+const HodFacultyArchiveController = require('../controllers/hod-faculty-archive');
+const HodExclusiveFacultyController = require('../controllers/hod-exclusive-faculty');
 
 // All HOD/Department routes require authenticated faculty or administrator
 router.use(auth, requireRole('TEACHER', 'SYSTEM_ADMIN', 'ADMIN', 'HOD', 'FACULTY'), requireHODOrClassTeacher());
@@ -27,13 +29,13 @@ router.get('/dashboard', requireHOD(), HodController.getDashboard);
 // @route   GET /api/v1/hod/teachers
 // @desc    List all faculty members belonging to the department
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.getTeachers() -> HodModel.getTeachers()
-router.get('/teachers', HodController.getTeachers);
+// @handler HodExclusiveFacultyController.getTeachers() -> HodModel.getTeachers()
+router.get('/teachers', HodExclusiveFacultyController.getTeachers);
 
 // @route   POST /api/v1/hod/teachers
 // @desc    Create a new teacher user account and departmental faculty profile
 // @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.createTeacher() -> HodModel.createTeacher()
+// @handler HodExclusiveFacultyController.createTeacher() -> HodModel.createTeacher()
 router.post('/teachers', requireHOD(), [
   body('full_name').trim().notEmpty().withMessage('Full name required'),
   body('email').isEmail().withMessage('Valid institutional Gmail required'),
@@ -41,18 +43,18 @@ router.post('/teachers', requireHOD(), [
   body('phone').optional().trim(),
   body('employee_id').optional().trim(),
   validate
-], HodController.createTeacher);
+], HodExclusiveFacultyController.createTeacher);
 
 // @route   GET /api/v1/hod/teachers/:id
 // @desc    Retrieve teacher details and active course assignments by ID within department
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.getTeacherById() -> HodModel.getTeacherById()
-router.get('/teachers/:id', [param('id').isInt(), validate], HodController.getTeacherById);
+// @handler HodExclusiveFacultyController.getTeacherById() -> HodModel.getTeacherById()
+router.get('/teachers/:id', [param('id').isInt(), validate], HodExclusiveFacultyController.getTeacherById);
 
 // @route   PUT /api/v1/hod/teachers/:id
 // @desc    Update teacher full name, phone number, or employee ID
 // @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.updateTeacher() -> HodModel.updateTeacher()
+// @handler HodExclusiveFacultyController.updateTeacher() -> HodModel.updateTeacher()
 router.put('/teachers/:id', requireHOD(), [
   param('id').isInt(),
   body('full_name').optional().trim().notEmpty(),
@@ -63,39 +65,39 @@ router.put('/teachers/:id', requireHOD(), [
   body('status').optional().trim(),
   body('role').optional().trim(),
   validate
-], HodController.updateTeacher);
+], HodExclusiveFacultyController.updateTeacher);
 
 // @route   POST /api/v1/hod/teachers/:id/reset-password
 // @desc    Reset teacher account password and invalidate active user sessions
 // @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.resetTeacherPassword() -> HodModel.resetTeacherPassword()
+// @handler HodExclusiveFacultyController.resetTeacherPassword() -> HodModel.resetTeacherPassword()
 router.post('/teachers/:id/reset-password', requireHOD(), [
   param('id').isInt(),
   body('new_password').trim().notEmpty().withMessage('New password is required'),
   validate
-], HodController.resetTeacherPassword);
+], HodExclusiveFacultyController.resetTeacherPassword);
 
 // @route   DELETE /api/v1/hod/teachers/:id
 // @desc    Delete teacher profile, account, roles, sessions, and course assignments
 // @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.deleteTeacher() -> HodModel.deleteTeacher()
-router.delete('/teachers/:id', requireHOD(), [param('id').isInt(), validate], HodController.deleteTeacher);
+// @handler HodExclusiveFacultyController.deleteTeacher() -> HodModel.deleteTeacher()
+router.delete('/teachers/:id', requireHOD(), [param('id').isInt(), validate], HodExclusiveFacultyController.deleteTeacher);
 
 // @route   GET /api/v1/hod/trash/faculty
 // @desc    Retrieve soft-deleted faculty for HOD department currently in Trash
 // @access  Protected (HOD, SYSTEM_ADMIN)
-router.get('/trash/faculty', requireHOD(), HodController.getTrashFaculty);
+router.get('/trash/faculty', requireHOD(), HodExclusiveFacultyController.getTrashFaculty);
 
 // @route   POST /api/v1/hod/trash/faculty/:id/restore
 // @desc    Restore a soft-deleted faculty member from Trash
 // @access  Protected (HOD, SYSTEM_ADMIN)
-router.post('/trash/faculty/:id/restore', requireHOD(), [param('id').isInt(), validate], HodController.restoreFaculty);
+router.post('/trash/faculty/:id/restore', requireHOD(), [param('id').isInt(), validate], HodExclusiveFacultyController.restoreFaculty);
 
 // @route   GET /api/v1/hod/faculty-roster
 // @desc    Retrieve department faculty roster with active teaching workloads and assigned subjects
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.getFacultyRoster() -> HodModel.getFacultyRoster()
-router.get('/faculty-roster', HodController.getFacultyRoster);
+// @handler HodExclusiveFacultyController.getFacultyRoster() -> HodModel.getFacultyRoster()
+router.get('/faculty-roster', HodExclusiveFacultyController.getFacultyRoster);
 
 // @route   GET /api/v1/hod/students-roster
 // @desc    Retrieve departmental student roster with cumulative attendance percentages and threshold compliance
@@ -368,68 +370,68 @@ router.get('/hierarchy', HodController.getHierarchy);
 
 // @route   GET /api/v1/hod/archive/batches
 // @desc    List distinct graduation years for alumni students in department
-// @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.getArchiveBatches() -> HodModel.getArchiveBatches()
-router.get('/archive/batches', requireHOD(), HodController.getArchiveBatches);
+// @access  Protected (TEACHER, HOD, FACULTY, SYSTEM_ADMIN)
+// @handler HodFacultyArchiveController.getArchiveBatches() -> HodModel.getArchiveBatches()
+router.get('/archive/batches', requireRole('TEACHER', 'HOD', 'DEPT_HEAD', 'FACULTY', 'SYSTEM_ADMIN', 'ADMIN'), HodFacultyArchiveController.getArchiveBatches);
 
 // @route   GET /api/v1/hod/archive
 // @desc    Retrieve archived alumni students with lifetime attendance stats and KPI metrics
-// @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.getArchive() -> HodModel.getArchive()
-router.get('/archive', requireHOD(), HodController.getArchive);
+// @access  Protected (TEACHER, HOD, FACULTY, SYSTEM_ADMIN)
+// @handler HodFacultyArchiveController.getArchive() -> HodModel.getArchive()
+router.get('/archive', requireRole('TEACHER', 'HOD', 'DEPT_HEAD', 'FACULTY', 'SYSTEM_ADMIN', 'ADMIN'), HodFacultyArchiveController.getArchive);
 
 // @route   GET /api/v1/hod/registrations/pending-faculty
 // @route   GET /api/v1/hod/faculty-registrations/pending
 // @desc    Retrieve pending faculty registration requests awaiting HOD approval
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.getPendingFacultyRegistrations() -> HodModel.getPendingFacultyRegistrations()
-router.get(['/registrations/pending-faculty', '/faculty-registrations/pending'], HodController.getPendingFacultyRegistrations);
+// @handler HodExclusiveFacultyController.getPendingFacultyRegistrations() -> HodModel.getPendingFacultyRegistrations()
+router.get(['/registrations/pending-faculty', '/faculty-registrations/pending'], HodExclusiveFacultyController.getPendingFacultyRegistrations);
 
 // @route   POST /api/v1/hod/registrations/faculty/:id/approve
 // @route   POST /api/v1/hod/faculty-registrations/:id/approve
 // @desc    Approve a pending faculty self-registration, creating user account, teacher record, and audit log
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.approveFacultyRegistration() -> HodModel.approveFacultyRegistration() -> notificationService.sendNotification()
-router.post(['/registrations/faculty/:id/approve', '/faculty-registrations/:id/approve'], HodController.approveFacultyRegistration);
+// @handler HodExclusiveFacultyController.approveFacultyRegistration() -> HodModel.approveFacultyRegistration() -> notificationService.sendNotification()
+router.post(['/registrations/faculty/:id/approve', '/faculty-registrations/:id/approve'], HodExclusiveFacultyController.approveFacultyRegistration);
 
 // @route   POST /api/v1/hod/registrations/faculty/:id/reject
 // @route   POST /api/v1/hod/faculty-registrations/:id/reject
 // @desc    Reject a pending faculty self-registration with recorded reason
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.rejectFacultyRegistration() -> HodModel.rejectFacultyRegistration()
+// @handler HodExclusiveFacultyController.rejectFacultyRegistration() -> HodModel.rejectFacultyRegistration()
 router.post(['/registrations/faculty/:id/reject', '/faculty-registrations/:id/reject'], [
   body('reason').optional().trim(),
   body('rejection_reason').optional().trim(),
   validate
-], HodController.rejectFacultyRegistration);
+], HodExclusiveFacultyController.rejectFacultyRegistration);
 
 // @route   POST /api/v1/hod/faculty-registrations/:id/adjudicate
 // @route   POST /api/v1/hod/registrations/faculty/:id/adjudicate
 // @desc    Adjudicate a pending faculty registration by delegating to approve or reject handlers
 // @access  Protected (HOD, Class Teacher, SYSTEM_ADMIN)
-// @handler HodController.adjudicateFacultyRegistration() -> HodModel.approveFacultyRegistration() / rejectFacultyRegistration()
+// @handler HodExclusiveFacultyController.adjudicateFacultyRegistration() -> HodModel.approveFacultyRegistration() / rejectFacultyRegistration()
 router.post(['/faculty-registrations/:id/adjudicate', '/registrations/faculty/:id/adjudicate'], [
   body('action').optional().isIn(['APPROVE', 'REJECT']).withMessage("Action must be 'APPROVE' or 'REJECT'"),
   body('reason').optional().trim(),
   body('rejection_reason').optional().trim(),
   validate
-], HodController.adjudicateFacultyRegistration);
+], HodExclusiveFacultyController.adjudicateFacultyRegistration);
 
 // @route   GET /api/v1/hod/faculty-registration-status
 // @desc    Check whether faculty self-registration gate is open for department
 // @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.getFacultyRegistrationStatus() -> HodModel.getFacultyRegistrationStatus()
-router.get('/faculty-registration-status', requireHOD(), HodController.getFacultyRegistrationStatus);
+// @handler HodExclusiveFacultyController.getFacultyRegistrationStatus() -> HodModel.getFacultyRegistrationStatus()
+router.get('/faculty-registration-status', requireHOD(), HodExclusiveFacultyController.getFacultyRegistrationStatus);
 
 // @route   POST /api/v1/hod/faculty-registration-toggle
 // @desc    Toggle departmental faculty self-registration gate with audit trail
 // @access  Protected (HOD, SYSTEM_ADMIN)
-// @handler HodController.toggleFacultyRegistration() -> HodModel.toggleFacultyRegistration()
+// @handler HodExclusiveFacultyController.toggleFacultyRegistration() -> HodModel.toggleFacultyRegistration()
 router.post('/faculty-registration-toggle', requireHOD(), [
   body('open').isBoolean().withMessage('open flag (boolean) is required'),
   body('department_id').optional().isInt(),
   validate
-], HodController.toggleFacultyRegistration);
+], HodExclusiveFacultyController.toggleFacultyRegistration);
 
 // @route   GET /api/v1/hod/registrations/pending-students
 // @route   GET /api/v1/hod/pending-students

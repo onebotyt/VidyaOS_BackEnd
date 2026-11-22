@@ -461,7 +461,7 @@ class TeachingGroupModel {
     if (!rows[0]) return null;
     const group = rows[0];
     let linkedRegisters = await query(
-      `SELECT id, name, session_type_scope, is_official FROM attendance_registers WHERE group_id = ? ORDER BY id ASC`,
+      `SELECT id, name, session_type_scope, is_official FROM attendance_registers WHERE group_id = ? AND is_active = 1 ORDER BY is_official DESC, id ASC`,
       [groupId]
     );
 
@@ -1515,20 +1515,6 @@ class TeachingGroupModel {
        WHERE gm.group_id = ? AND gm.status = 'ENROLLED'
        ORDER BY CAST(s.class_roll_no AS SIGNED) ASC, s.class_roll_no ASC`,
       [testId, groupId]
-    );
-  }
-
-  /**
-   * Looks up official enrollment numbers and registration IDs for student list.
-   * @param {Array<number>} studentIds - Array of student IDs
-   * @returns {Promise<Array>} Student records
-   */
-  static async getStudentIdentifiers(studentIds) {
-    return await query(
-      `SELECT id, official_enrollment_no, COALESCE(ubter_roll_no, official_enrollment_no) as ubter_roll_no, registration_no
-       FROM students WHERE id IN (${studentIds.map(() => '?').join(',')})
-       LIMIT 200`,
-      studentIds
     );
   }
 

@@ -147,7 +147,7 @@ class DeviceService {
       let parsedPayload = {};
       try {
         parsedPayload = cmd.payload_json ? JSON.parse(cmd.payload_json) : {};
-      } catch (_) {}
+      } catch (_) { }
 
       activeCommand = {
         command_id: cmd.id,
@@ -179,7 +179,7 @@ class DeviceService {
                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
               [device.id, device.device_uid, level, tag, msg]
             );
-          } catch (_) {}
+          } catch (_) { }
         }
       }
     }
@@ -574,7 +574,7 @@ class DeviceService {
               ]
             );
           }
-        } catch (_) {}
+        } catch (_) { }
 
         inserted++;
       } catch (err) {
@@ -951,7 +951,7 @@ class DeviceService {
                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
               [deviceId, deviceUid || device?.device_uid || 'ESP32', level, tag, msg]
             );
-          } catch (_) {}
+          } catch (_) { }
         }
       }
     }

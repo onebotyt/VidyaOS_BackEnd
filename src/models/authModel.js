@@ -119,12 +119,6 @@ class AuthModel {
    * @returns {Promise<Object>} Gates summary payload
    */
   static async getRegistrationGatesData() {
-    const adminSettings = await query(
-      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('admin_reg_hod_open', 'admin_reg_common_faculty_open')`
-    );
-    const hodOpen = adminSettings.some(s => s.setting_key === 'admin_reg_hod_open' && s.setting_value === '1');
-    const commonOpen = adminSettings.some(s => s.setting_key === 'admin_reg_common_faculty_open' && s.setting_value === '1');
-
     const departments = await query(
       `SELECT d.id, d.name, d.code, d.degree_duration_years, d.active_term, d.hod_user_id,
               t.full_name as hod_name, u.status as hod_status,
@@ -136,9 +130,6 @@ class AuthModel {
        ORDER BY d.id ASC`
     );
 
-    const facultyRegSettings = await query(
-      `SELECT setting_key, setting_value FROM system_settings WHERE setting_key LIKE 'faculty_reg_dept_%'`
-    );
     const studentRegSettings = await query(
       `SELECT setting_key, setting_value FROM system_settings WHERE (setting_key LIKE 'cohort_reg_%' OR setting_key LIKE 'cohort_reg_dept_%') AND setting_value = '1'`
     );
@@ -146,17 +137,8 @@ class AuthModel {
     const deptGates = departments.map(d => {
       const isHodActive = Boolean(d.hod_user_id && d.hod_status === 'ACTIVE');
       const facultyCount = (d.teacher_count || 0) + (isHodActive ? 1 : 0);
-      const facKey = `faculty_reg_dept_${d.id}`;
-      const isFacultyOpen = isHodActive && facultyRegSettings.some(s => s.setting_key === facKey && s.setting_value === '1');
 
-      let facultyClosedReason = null;
-      if (!isHodActive) {
-        facultyClosedReason = `No active Head of Department (HOD) is currently appointed for ${d.name} to open registration.`;
-      } else if (!isFacultyOpen) {
-        facultyClosedReason = `The ${d.name} Head of Department has not opened faculty registration at this time.`;
-      }
-
-      const hasStudentOpen = studentRegSettings.some(s => 
+      const hasStudentOpen = studentRegSettings.some(s =>
         s.setting_key.startsWith(`cohort_reg_${d.id}_`) || s.setting_key === `cohort_reg_dept_${d.id}`
       );
       let studentClosedReason = null;
@@ -174,8 +156,8 @@ class AuthModel {
         hod_active: isHodActive,
         hod_name: isHodActive ? d.hod_name : null,
         faculty_count: facultyCount,
-        faculty_registration_open: isFacultyOpen,
-        faculty_closed_reason: facultyClosedReason,
+        faculty_registration_open: false,
+        faculty_closed_reason: 'Faculty accounts are provisioned exclusively by Institutional Administrators and Department HODs.',
         student_registration_open: facultyCount > 0 && hasStudentOpen,
         student_closed_reason: studentClosedReason
       };
@@ -183,10 +165,10 @@ class AuthModel {
 
     return {
       admin: {
-        hod_registration_open: hodOpen,
-        common_faculty_registration_open: commonOpen,
-        hod_closed_reason: hodOpen ? null : 'Institutional Administration has not opened HOD registration.',
-        common_faculty_closed_reason: commonOpen ? null : 'Institutional Administration has not opened Common Faculty registration.'
+        hod_registration_open: false,
+        common_faculty_registration_open: false,
+        hod_closed_reason: 'Faculty accounts are provisioned exclusively by Institutional Administrators and Department HODs.',
+        common_faculty_closed_reason: 'Faculty accounts are provisioned exclusively by Institutional Administrators and Department HODs.'
       },
       departments: deptGates
     };
@@ -219,8 +201,6 @@ class AuthModel {
     const rows = await query(
       `SELECT id FROM students WHERE LOWER(TRIM(official_enrollment_no)) = LOWER(?)
        OR LOWER(TRIM(ubter_roll_no)) = LOWER(?)
-       UNION
-       SELECT id FROM students WHERE LOWER(TRIM(COALESCE(ubter_roll_no, ''))) = LOWER(?)
        UNION
        SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)`,
       [cleanEnroll, cleanEnroll, cleanEnroll]
@@ -304,57 +284,6 @@ class AuthModel {
         studentId: createdStudentId
       };
     });
-  }
-
-  /**
-   * Checks if a pending faculty registration request exists for an email.
-   * @calledBy AuthController.registerFaculty() (controllers/authController.js)
-   * @route POST /api/v1/auth/faculty/register (routes/auth.js)
-   * @param {string} email - Email address
-   * @returns {Promise<boolean>} True if pending request exists
-   */
-  static async findPendingFacultyRequest(email) {
-    const rows = await query(
-      `SELECT id FROM faculty_registration_requests WHERE LOWER(email) = LOWER(?) AND status = 'PENDING'`,
-      [email]
-    );
-    return rows.length > 0;
-  }
-
-  /**
-   * Creates a pending faculty registration request record.
-   * @calledBy AuthController.registerFaculty() (controllers/authController.js)
-   * @route POST /api/v1/auth/faculty/register (routes/auth.js)
-   * @param {Object} params - Request attributes
-   * @returns {Promise<number>} Inserted request ID
-   */
-  static async createFacultyRequest({
-    fullName,
-    email,
-    passwordHash,
-    cleanPhone,
-    phone,
-    employeeId,
-    accountType,
-    targetDeptId,
-    approvalType
-  }) {
-    const res = await query(
-      `INSERT INTO faculty_registration_requests 
-       (full_name, email, password_hash, phone, employee_id, account_type, department_id, approval_type, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
-      [
-        fullName.trim(),
-        email.toLowerCase(),
-        passwordHash,
-        cleanPhone || (phone ? phone.trim() : null),
-        employeeId ? employeeId.trim() : null,
-        accountType,
-        targetDeptId,
-        approvalType
-      ]
-    );
-    return res.insertId ?? res.lastInsertRowid;
   }
 }
 

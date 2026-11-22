@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HOD Model
  * Encapsulates MySQL 8.x queries and transactions for department administration:
  * teachers, subjects, course assignments, devices, student rosters, bulk imports,
@@ -128,9 +128,17 @@ class HodModel {
    * @calledBy HodController.getTeachers() (controllers/hodController.js)
    * @route GET /api/v1/hod/teachers (routes/hod.js)
    * @param {number} deptId Department ID
+   * @param {number|null} excludeUserId Optional user ID to exclude (e.g. caller HOD)
    * @returns {Promise<Array<Object>>} Teacher records
    */
-  static async getTeachers(deptId) {
+  static async getTeachers(deptId, excludeUserId = null) {
+    if (!deptId) return [];
+    const params = [deptId];
+    let excludeSql = '';
+    if (excludeUserId) {
+      excludeSql = ' AND u.id != ? AND t.user_id != ?';
+      params.push(excludeUserId, excludeUserId);
+    }
     return await query(
       `SELECT t.id, t.user_id, t.full_name, t.employee_id, t.phone,
               u.email as gmail, u.username, u.status, u.must_change_password,
@@ -141,9 +149,14 @@ class HodModel {
        FROM teachers t
        JOIN users u ON t.user_id = u.id
        LEFT JOIN teacher_assignments ta ON ta.teacher_id = t.id AND ta.is_active = 1
-       WHERE t.department_id = ?
+       WHERE t.department_id = ? AND t.deleted_at IS NULL
+         AND t.employee_id != 'ADMIN-01'
+         AND u.email != 'admin@gmail.com'
+         AND (NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = 'SYSTEM_ADMIN'))
+         ${excludeSql}
        GROUP BY t.id, t.user_id, t.full_name, t.employee_id, t.phone, u.email, u.username, u.status, u.must_change_password, u.google_sub, t.created_at
-       ORDER BY t.full_name`, [deptId]
+       ORDER BY t.full_name`,
+      params
     );
   }
 
@@ -364,7 +377,8 @@ class HodModel {
    * @param {number} deptId Department ID
    * @returns {Promise<Array<Object>>} List of trashed faculty with remaining retention days
    */
-  static async getTrashFaculty(deptId) {
+  static async getTrashFaculty(deptId, excludeUserId = null) {
+    if (!deptId) return [];
     try {
       const expired = await query(
         `SELECT id, user_id FROM teachers WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)`
@@ -386,6 +400,13 @@ class HodModel {
       console.warn('Auto-purge check error:', e.message);
     }
 
+    const params = [deptId];
+    let excludeSql = '';
+    if (excludeUserId) {
+      excludeSql = ' AND u.id != ? AND t.user_id != ?';
+      params.push(excludeUserId, excludeUserId);
+    }
+
     return await query(
       `SELECT t.id, t.id as teacher_id, t.full_name, t.employee_id, t.phone, t.created_at, t.deleted_at,
               t.department_id,
@@ -394,8 +415,12 @@ class HodModel {
        FROM teachers t
        JOIN users u ON t.user_id = u.id
        WHERE t.department_id = ? AND t.deleted_at IS NOT NULL
+         AND t.employee_id != 'ADMIN-01'
+         AND u.email != 'admin@gmail.com'
+         AND (NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = 'SYSTEM_ADMIN'))
+         ${excludeSql}
        ORDER BY t.deleted_at DESC`,
-      [deptId]
+      params
     );
   }
 
@@ -408,8 +433,8 @@ class HodModel {
    */
   static async restoreFaculty(teacherId, deptId, userId = 1) {
     const tRows = await query(
-      `SELECT id, user_id, full_name FROM teachers WHERE id = ? AND department_id = ? AND deleted_at IS NOT NULL`,
-      [teacherId, deptId]
+      `SELECT id, user_id, full_name FROM teachers WHERE id = ? ${deptId ? 'AND department_id = ?' : ''} AND deleted_at IS NOT NULL`,
+      deptId ? [teacherId, deptId] : [teacherId]
     );
     if (!tRows.length) return null;
     const uid = tRows[0].user_id;
@@ -438,9 +463,17 @@ class HodModel {
    * @calledBy HodController.getFacultyRoster() (controllers/hodController.js)
    * @route GET /api/v1/hod/faculty-roster (routes/hod.js)
    * @param {number} deptId Department ID
+   * @param {number|null} excludeUserId Optional user ID to exclude (e.g. caller HOD)
    * @returns {Promise<Array<Object>>} Faculty roster with teaching load
    */
-  static async getFacultyRoster(deptId) {
+  static async getFacultyRoster(deptId, excludeUserId = null) {
+    if (!deptId) return [];
+    const params = [deptId];
+    let excludeSql = '';
+    if (excludeUserId) {
+      excludeSql = ' AND u.id != ? AND t.user_id != ?';
+      params.push(excludeUserId, excludeUserId);
+    }
     const teachers = await query(
       `SELECT t.id, t.employee_id, t.full_name, t.designation, t.phone, t.department_id,
               d.name as department_name, d.code as department_code,
@@ -452,8 +485,12 @@ class HodModel {
        JOIN users u ON t.user_id = u.id
        LEFT JOIN departments d ON t.department_id = d.id
        WHERE t.department_id = ? AND t.deleted_at IS NULL
+         AND t.employee_id != 'ADMIN-01'
+         AND u.email != 'admin@gmail.com'
+         AND (NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = 'SYSTEM_ADMIN'))
+         ${excludeSql}
        ORDER BY CASE WHEN t.employee_id LIKE '%HOD%' OR t.designation LIKE '%Head%' THEN 0 ELSE 1 END, t.full_name ASC`,
-      [deptId]
+      params
     );
 
     const teacherIds = teachers.map(t => t.id);
@@ -489,7 +526,7 @@ class HodModel {
    */
   static async getStudentsRoster(deptId) {
     const hasDept = deptId !== undefined && deptId !== null && deptId !== '' && deptId !== 'ALL';
-    const whereDept = hasDept ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : '';
+    const whereDept = hasDept ? 'AND e.department_id = ?' : '';
     const params = hasDept ? [deptId] : [];
 
     const students = await query(
@@ -1243,13 +1280,13 @@ class HodModel {
     let whereClause = `WHERE 1=1`;
     const params = [];
 
-    if (deptId) {
+    const effectiveDeptId = deptId || branch_id;
+    if (effectiveDeptId) {
       whereClause += ` AND e.department_id = ?`;
-      params.push(deptId);
+      params.push(effectiveDeptId);
     }
 
     if (academic_year_id) { whereClause += ` AND e.academic_year_id = ?`; params.push(academic_year_id); }
-    if (branch_id && branch_id !== deptId) { whereClause += ` AND e.department_id = ?`; params.push(branch_id); }
     if (year) { whereClause += ` AND e.year = ?`; params.push(parseInt(year, 10)); }
     if (semester) { whereClause += ` AND e.semester = ?`; params.push(parseInt(semester, 10)); }
     if (status) {
@@ -1473,7 +1510,7 @@ class HodModel {
     const sRows = await query(
       `SELECT s.id, s.user_id, s.full_name, e.department_id FROM students s
        LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+       WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NULL`,
       deptId ? [id, deptId] : [id]
     );
     if (!sRows.length) return false;
@@ -1551,9 +1588,9 @@ class HodModel {
        FROM students st
        JOIN users u ON st.user_id = u.id
        LEFT JOIN enrollments e ON e.student_id = st.id
-       WHERE (e.department_id = ? OR e.department_id IS NULL) AND st.deleted_at IS NOT NULL
+       WHERE ${deptId ? 'e.department_id = ? AND ' : ''}st.deleted_at IS NOT NULL
        ORDER BY st.deleted_at DESC`,
-      [deptId]
+      deptId ? [deptId] : []
     );
   }
 
@@ -1568,7 +1605,7 @@ class HodModel {
     const sRows = await query(
       `SELECT s.id, s.user_id, s.full_name FROM students s
        LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NOT NULL`,
+       WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NOT NULL`,
       deptId ? [studentId, deptId] : [studentId]
     );
     if (!sRows.length) return null;
@@ -1630,7 +1667,7 @@ class HodModel {
       const sRows = await query(
         `SELECT s.id, s.user_id, s.full_name FROM students s
          LEFT JOIN enrollments e ON e.student_id = s.id
-         WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NOT NULL`,
+         WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NOT NULL`,
         deptId ? [sid, deptId] : [sid]
       );
       if (!sRows.length) continue;
@@ -1672,16 +1709,16 @@ class HodModel {
    * @param {number} userId Acting user ID
    * @returns {Promise<Object>} Updated student record
    */
-  static async updateStudent(studentId, { fullName, officialEnrollmentNo, enrollmentNotAvailable, registrationNo, classRollNo, year, semester }, userId = 1) {
+  static async updateStudent(studentId, { fullName, officialEnrollmentNo, enrollmentNotAvailable, registrationNo, classRollNo, year, semester }, userId = 1, deptId = null) {
     const sRows = await query(
       `SELECT s.*, e.id as enrollment_id, e.department_id, e.academic_year_id, e.year, e.semester
        FROM students s
-       LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? AND s.deleted_at IS NULL ORDER BY e.id DESC LIMIT 1`,
-      [studentId]
+       JOIN enrollments e ON e.student_id = s.id
+       WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NULL ORDER BY e.id DESC LIMIT 1`,
+      deptId ? [studentId, deptId] : [studentId]
     );
     if (!sRows.length) {
-      throw { status: 404, code: 'NOT_FOUND', message: 'Student record not found or has been moved to Trash' };
+      throw { status: 404, code: 'NOT_FOUND', message: 'Student record not found in your department or has been moved to Trash' };
     }
     const st = sRows[0];
 
@@ -1694,7 +1731,7 @@ class HodModel {
       enrollmentStatus = 'Not Assigned';
     } else {
       if (!/^\d{11}$/.test(cleanEnroll)) {
-        throw { status: 400, code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0–9)' };
+        throw { status: 400, code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must contain exactly 11 numeric digits (0â€“9)' };
       }
       const conflicts = await query(
         `SELECT id FROM students WHERE (official_enrollment_no = ? OR ubter_roll_no = ?) AND id != ? LIMIT 1`,
@@ -1773,7 +1810,7 @@ class HodModel {
       `SELECT s.id, s.user_id, s.full_name, e.department_id, e.status as enrollment_status
        FROM students s
        LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+       WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NULL`,
       deptId ? [studentId, deptId] : [studentId]
     );
     if (!sRows.length) return null;
@@ -1820,7 +1857,7 @@ class HodModel {
       `SELECT s.id, s.user_id, s.full_name, e.department_id, e.status as enrollment_status
        FROM students s
        LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+       WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NULL`,
       deptId ? [studentId, deptId] : [studentId]
     );
     if (!sRows.length) return null;
@@ -1865,7 +1902,7 @@ class HodModel {
       `SELECT s.id, s.user_id, s.full_name, e.department_id
        FROM students s
        LEFT JOIN enrollments e ON e.student_id = s.id
-       WHERE s.id = ? ${deptId ? 'AND (e.department_id = ? OR e.department_id IS NULL)' : ''} AND s.deleted_at IS NULL`,
+       WHERE s.id = ? ${deptId ? 'AND e.department_id = ?' : ''} AND s.deleted_at IS NULL`,
       deptId ? [studentId, deptId] : [studentId]
     );
     if (!sRows.length) return null;
@@ -1968,7 +2005,7 @@ class HodModel {
           currentSem = st.semester;
           targetSem = st.semester - 1;
           targetYear = Math.floor((targetSem - 1) / 2) + 1;
-          note = `Demote: Year ${currentYear} Sem ${currentSem} → Year ${targetYear} Sem ${targetSem}`;
+          note = `Demote: Year ${currentYear} Sem ${currentSem} â†’ Year ${targetYear} Sem ${targetSem}`;
           eligibleCount++;
         } else {
           key = `BASE_Y1_S1`;
@@ -2408,7 +2445,7 @@ class HodModel {
          SELECT ra.student_id,
                 COUNT(ra.id) as total_sessions,
                 SUM(CASE WHEN ra.attendance_status = 'PRESENT' THEN 1 ELSE 0 END) as attended_sessions,
-                ROUND(SUM(CASE WHEN ra.attendance_status = 'PRESENT' THEN 1.0 ELSE 0.0 END) * 100.0 / MAX(COUNT(ra.id), 1), 1) as attendance_percentage
+                ROUND(SUM(CASE WHEN ra.attendance_status = 'PRESENT' THEN 1.0 ELSE 0.0 END) * 100.0 / GREATEST(COUNT(ra.id), 1), 1) as attendance_percentage
           FROM register_attendance ra
           GROUP BY ra.student_id
         ) att ON att.student_id = s.id

@@ -335,23 +335,6 @@ class AuthService {
     }
 
     if (!users || users.length === 0) {
-      if (cred.type === 'EMAIL') {
-        try {
-          const pendingReq = await query(
-            `SELECT status, rejection_reason FROM faculty_registration_requests WHERE LOWER(email) = ? ORDER BY id DESC LIMIT 1`,
-            [cred.value]
-          );
-          if (pendingReq && pendingReq.length > 0) {
-            if (pendingReq[0].status === 'PENDING') {
-              throw { status: 403, code: 'PENDING_APPROVAL', message: 'Your faculty registration request is pending approval.' };
-            } else if (pendingReq[0].status === 'REJECTED') {
-              throw { status: 403, code: 'REGISTRATION_REJECTED', message: `Your faculty registration request was rejected: ${pendingReq[0].rejection_reason || 'Contact administration.'}` };
-            }
-          }
-        } catch (tableErr) {
-          if (tableErr.status) throw tableErr;
-        }
-      }
       throw { status: 401, code: 'UNAUTHORIZED', message: GENERIC_AUTH_ERROR_MSG };
     }
     const user = users[0];
@@ -710,6 +693,20 @@ class AuthService {
       access_token: accessToken,
       refresh_token: refreshToken,
       message: 'Password set successfully. Account is now active.'
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // GET GOOGLE STATUS (Check if user account has linked Google)
+  // ─────────────────────────────────────────────────────────
+  async getGoogleStatus(userId) {
+    const users = await query(`SELECT id, email, google_sub FROM users WHERE id = ?`, [userId]);
+    if (!users.length) return { linked: false, email: null };
+    const user = users[0];
+    const isLinked = Boolean(user.google_sub && String(user.google_sub).trim() !== '');
+    return {
+      linked: isLinked,
+      email: user.email || null
     };
   }
 

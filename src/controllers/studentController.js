@@ -27,9 +27,15 @@ class StudentController {
    */
   static async getStudents(req, res) {
     try {
-      let deptId = req.query.department_id || req.query.branch_id || req.teacher_department_id || req.user.department_id || req.user.hod_department_id;
-      if (!deptId && req.user.teacher_id) {
-        deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+      const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
+      let deptId;
+      if (isPrivileged) {
+        deptId = req.query.department_id || req.query.branch_id || req.teacher_department_id || req.user.department_id || req.user.hod_department_id;
+      } else {
+        deptId = req.hod_department_id || req.teacher_department_id || req.user.department_id || req.user.hod_department_id;
+        if (!deptId && req.user.teacher_id) {
+          deptId = await StudentModel.getTeacherDepartment(req.user.teacher_id);
+        }
       }
       const { year, semester, search, status, academic_year_id, limit = 500, offset = 0 } = req.query;
       const result = await StudentModel.getStudents(deptId, { year, semester, search, status, academic_year_id, limit, offset });
@@ -604,7 +610,7 @@ class StudentController {
             : `Your registration request was not approved: ${rejection_reason || 'Criteria not met'}.`,
           linkUrl: isApprove ? '/student/attendance.html' : null
         });
-      } catch (_) {}
+      } catch (_) { }
 
       res.status(200).json({
         success: true,

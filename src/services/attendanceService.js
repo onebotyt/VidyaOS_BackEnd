@@ -44,7 +44,7 @@ class AttendanceService {
           session_type, label, session_date, state, auto_close_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
         [register_id, teacherId, subject_id, department_id, year, semester, academic_year_id,
-         session_type, label, session_date, autoCloseAt]
+          session_type, label, session_date, autoCloseAt]
       );
 
       const sessionId = res.insertId ?? res.lastInsertRowid;
@@ -174,7 +174,7 @@ class AttendanceService {
           status: 422,
           code: 'UNPROCESSABLE_ENTITY',
           message: `Universal marking invariant failed: ${unmarked.length} student(s) remain unmarked. ` +
-                   `Every included student must have status PRESENT, ABSENT, or LATE before finalization.`,
+            `Every included student must have status PRESENT, ABSENT, or LATE before finalization.`,
           details: { unmarked_roll_numbers: unmarked }
         };
       }
@@ -521,7 +521,7 @@ class AttendanceService {
             })
           ]
         );
-      } catch (_) {}
+      } catch (_) { }
 
       return {
         correction_id: correctionId,

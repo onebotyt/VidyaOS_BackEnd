@@ -125,6 +125,7 @@ app.get(['/login/faculty-register.html', '/login/faculty-register', '/register/f
 app.get(['/admin/academic_structure.html', '/admin/academic_structure'], (req, res) => res.redirect(301, '/admin/academic-structure.html'));
 app.get(['/admin/audit_logs.html', '/admin/audit_logs'], (req, res) => res.redirect(301, '/admin/audit-logs.html'));
 app.get('/admin/departments.html', (req, res) => res.redirect(301, '/admin/academic-structure.html?tab=departments'));
+app.get(['/admin/reports.html', '/admin/reports', '/admin/reports/', '/admin/reports/index.html'], (req, res) => res.redirect(301, '/admin/dashboard/index.html'));
 app.get('/faculty/analytics.html', (req, res) => res.redirect(301, '/faculty/reports.html?tab=analytics'));
 
 // Consolidated Register Tabs 301 Redirects (Rule 4 & Milestone Consolidation)

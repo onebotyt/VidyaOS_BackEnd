@@ -93,6 +93,12 @@ router.post(
 // @handler AuthController.getGoogleConfig()
 router.get('/google/config', AuthController.getGoogleConfig);
 
+// @route   GET /api/v1/auth/google/status
+// @desc    Check if current user account is linked to Google
+// @access  Protected (Authenticated)
+// @handler AuthController.getGoogleStatus()
+router.get('/google/status', auth, AuthController.getGoogleStatus);
+
 // @route   GET /api/v1/auth/google/url
 // @desc    Generate Google authorization URL
 // @access  Public

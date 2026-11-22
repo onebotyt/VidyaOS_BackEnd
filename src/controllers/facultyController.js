@@ -14,6 +14,7 @@ const bcrypt = require('bcrypt');
 const FacultyModel = require('../models/facultyModel');
 const deviceService = require('../services/deviceService');
 const excelExportService = require('../services/excelExportService');
+const HodFacultySheetsController = require('./hod-faculty-sheets');
 
 const STANDARD_HOLIDAYS = {
   '01-26': 'REPUBLIC DAY',
@@ -784,33 +785,7 @@ class FacultyController {
    * @usesModel FacultyModel.getInternalEvaluationData() (models/facultyModel.js)
    */
   static async getInternalEvaluation(req, res) {
-    const registerId = req.params.id;
-    const teacherId = req.user.teacher_id;
-
-    try {
-      const register = await FacultyModel.getRegisterById(registerId);
-      if (!register) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Register not found' } });
-
-      const isAdmin = req.user.roles?.includes('SYSTEM_ADMIN');
-      const isDeptHod = req.user.is_hod && req.user.hod_department_id === register.department_id;
-      if (teacherId && register.teacher_id !== teacherId && !isAdmin && !isDeptHod) {
-        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You do not have access to this register' } });
-      }
-
-      const evalData = await FacultyModel.getInternalEvaluationData(registerId, register);
-      res.json({
-        success: true,
-        data: {
-          register,
-          institution_name: evalData.institution_name,
-          assignments: evalData.assignments,
-          exams: evalData.exams,
-          roster: evalData.roster
-        }
-      });
-    } catch (err) {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
+    return HodFacultySheetsController.getInternalEvaluation(req, res);
   }
 
   /**
@@ -1062,129 +1037,6 @@ class FacultyController {
       res.json({ success: true, data: rows });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
-    }
-  }
-
-  /**
-   * Generates a genuine, styled ExcelJS (.xlsx) binary workbook from client structured table rows.
-   * @route POST /api/v1/faculty/export/table-to-excel (routes/faculty.js)
-   * @access TEACHER, SYSTEM_ADMIN
-   */
-  static async exportTableToExcel(req, res) {
-    try {
-      const { title, sheet_name, rows } = req.body || {};
-      const ExcelJS = require('exceljs');
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'VidyaOS Institutional Campus OS';
-      wb.created = new Date();
-
-      const wsName = (sheet_name || title || 'Evaluation').replace(/[*?:/\\\[\]]/g, ' ').trim().substring(0, 31) || 'Sheet1';
-      const ws = wb.addWorksheet(wsName, {
-        views: [{ showGridLines: true }],
-        pageSetup: { orientation: 'landscape', fitToPage: true }
-      });
-
-      const borderThin = {
-        top: { style: 'thin', color: { argb: 'FF94A3B8' } },
-        left: { style: 'thin', color: { argb: 'FF94A3B8' } },
-        bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
-        right: { style: 'thin', color: { argb: 'FF94A3B8' } }
-      };
-
-      const matrix = [];
-      let maxCols = 1;
-
-      (rows || []).forEach((rowCells, rIdx) => {
-        const excelRowIdx = rIdx + 1;
-        if (!matrix[excelRowIdx]) matrix[excelRowIdx] = [];
-        let excelColIdx = 1;
-
-        (rowCells || []).forEach(cell => {
-          while (matrix[excelRowIdx][excelColIdx]) {
-            excelColIdx++;
-          }
-
-          const rowspan = cell.rowspan || 1;
-          const colspan = cell.colspan || 1;
-          const text = cell.text !== undefined ? String(cell.text).trim() : '';
-
-          let val = text;
-          if (!cell.is_header && text !== '' && !isNaN(text) && !text.includes('/') && !text.includes('-') && !text.startsWith('0')) {
-            const num = Number(text);
-            if (!isNaN(num)) val = num;
-          }
-
-          const excelCell = ws.getCell(excelRowIdx, excelColIdx);
-          excelCell.value = val;
-          excelCell.border = borderThin;
-
-          if (cell.is_blue) {
-            excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
-            excelCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF0369A1' } };
-            excelCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-          } else if (cell.is_tan) {
-            excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3C7' } };
-            excelCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF92400E' } };
-            excelCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-          } else if (cell.is_sub) {
-            excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-            excelCell.font = { name: 'Calibri', size: 9.5, bold: true, color: { argb: 'FF334155' } };
-            excelCell.alignment = { horizontal: 'center', vertical: 'middle' };
-          } else if (cell.is_summary) {
-            excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-            excelCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF0F172A' } };
-            excelCell.alignment = { horizontal: cell.is_label ? 'right' : 'center', vertical: 'middle' };
-          } else if (cell.is_absent || text === 'AB' || text === 'A') {
-            excelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
-            excelCell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFDC2626' } };
-            excelCell.alignment = { horizontal: 'center', vertical: 'middle' };
-          } else {
-            excelCell.font = { name: 'Calibri', size: 10, bold: Boolean(cell.is_name || cell.is_header) };
-            excelCell.alignment = { horizontal: cell.is_name ? 'left' : 'center', vertical: 'middle' };
-          }
-
-          if (rowspan > 1 || colspan > 1) {
-            const endRow = excelRowIdx + rowspan - 1;
-            const endCol = excelColIdx + colspan - 1;
-            ws.mergeCells(excelRowIdx, excelColIdx, endRow, endCol);
-
-            for (let r = excelRowIdx; r <= endRow; r++) {
-              if (!matrix[r]) matrix[r] = [];
-              for (let c = excelColIdx; c <= endCol; c++) {
-                matrix[r][c] = true;
-              }
-            }
-          } else {
-            matrix[excelRowIdx][excelColIdx] = true;
-          }
-
-          excelColIdx += colspan;
-          if (excelColIdx > maxCols) maxCols = excelColIdx;
-        });
-
-        const isFirst = rIdx === 0;
-        ws.getRow(excelRowIdx).height = isFirst ? 28 : (rowCells.some(c => c.is_header) ? 22 : 19);
-      });
-
-      for (let c = 1; c <= maxCols; c++) {
-        const col = ws.getColumn(c);
-        let maxLen = 8;
-        col.eachCell({ includeEmpty: false }, cell => {
-          const v = cell.value ? String(cell.value) : '';
-          if (v.length > maxLen && v.length < 50) maxLen = v.length;
-        });
-        col.width = Math.max(9, Math.min(maxLen + 3, 35));
-      }
-
-      const buffer = await wb.xlsx.writeBuffer();
-      const safeFilename = (title || 'Spreadsheet').replace(/[^a-zA-Z0-9_-]/g, '_');
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.xlsx"`);
-      res.setHeader('Content-Length', buffer.length);
-      return res.send(buffer);
-    } catch (err) {
-      console.error('Table to Excel export error:', err);
-      res.status(500).json({ success: false, error: { message: err.message } });
     }
   }
 }
