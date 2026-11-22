@@ -343,6 +343,23 @@ async function ensureCompatibilityViews() {
         await query("ALTER TABLE classroom_posts ADD COLUMN attachment_name VARCHAR(255) NULL AFTER attachment_path");
       }
     } catch (_) {}
+
+    // 1i. Ensure register_holidays table exists for dynamic holiday/working day management
+    try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS register_holidays (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          register_id INT NULL,
+          holiday_date DATE NOT NULL,
+          holiday_name VARCHAR(150) NULL,
+          is_working_day TINYINT(1) NOT NULL DEFAULT 0,
+          created_by INT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_reg_date (register_id, holiday_date)
+        )
+      `);
+    } catch (_) {}
   } catch (err) {
     logger.warn(`Note on teaching_groups.subject_code check: ${err.message}`);
   }

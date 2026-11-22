@@ -117,6 +117,26 @@ router.delete('/registers/:id/sessions/:sessionId', [
   validate
 ], FacultyController.deleteSession);
 
+// @route   POST /api/v1/faculty/registers/:id/holidays
+// @desc    Set or override a holiday or working day for a specific register
+// @access  Protected (TEACHER, SYSTEM_ADMIN)
+router.post('/registers/:id/holidays', [
+  param('id').isInt(),
+  body('date').isDate().withMessage('Valid date required (YYYY-MM-DD)'),
+  body('holiday_name').optional({ nullable: true, checkFalsy: true }).isString(),
+  body('is_working_day').optional({ nullable: true }).customSanitizer(v => (v === true || v === 1 || v === '1' || v === 'true') ? 1 : 0),
+  validate
+], FacultyController.setRegisterHoliday);
+
+// @route   DELETE /api/v1/faculty/registers/:id/holidays/:date
+// @desc    Remove holiday/working day override and restore system default
+// @access  Protected (TEACHER, SYSTEM_ADMIN)
+router.delete('/registers/:id/holidays/:date', [
+  param('id').isInt(),
+  param('date').isDate().withMessage('Valid date required (YYYY-MM-DD)'),
+  validate
+], FacultyController.removeRegisterHoliday);
+
 // @route   GET /api/v1/faculty/cohorts
 // @desc    Retrieve cohorts assigned to the teacher or department
 // @access  Protected (TEACHER, SYSTEM_ADMIN)

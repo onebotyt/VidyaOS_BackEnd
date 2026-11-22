@@ -15,19 +15,7 @@ const FacultyModel = require('../models/facultyModel');
 const deviceService = require('../services/deviceService');
 const excelExportService = require('../services/excelExportService');
 const HodFacultySheetsController = require('./hod-faculty-sheets');
-
-const STANDARD_HOLIDAYS = {
-  '01-26': 'REPUBLIC DAY',
-  '08-15': 'INDEPENDENCE DAY',
-  '08-19': 'RAKSHA BANDHAN',
-  '08-26': 'ID-E-MILAD',
-  '10-02': 'MAHATMA GANDHI JAYANTI',
-  '10-24': 'DUSSEHRA',
-  '11-01': 'DIWALI VACATION',
-  '11-02': 'GOVARDHAN PUJA',
-  '11-15': 'GURU NANAK JAYANTI',
-  '12-25': 'CHRISTMAS DAY'
-};
+const { query } = require('../config/db');
 
 class FacultyController {
   /**
@@ -132,6 +120,23 @@ class FacultyController {
       const daysInMonth = new Date(tYear, tMonth, 0).getDate();
       const monthDays = [];
 
+      // Fetch dynamic register holidays & working day overrides for this register
+      let holidayOverrides = [];
+      try {
+        holidayOverrides = await query(
+          `SELECT holiday_date, holiday_name, is_working_day FROM register_holidays 
+           WHERE (register_id = ? OR register_id IS NULL) 
+             AND holiday_date LIKE ?`,
+          [registerId, `${targetMonth}-%`]
+        );
+      } catch (_) {}
+
+      const holidayMap = new Map();
+      (holidayOverrides || []).forEach(h => {
+        const dStr = typeof h.holiday_date === 'string' ? h.holiday_date.slice(0, 10) : new Date(h.holiday_date).toISOString().slice(0, 10);
+        holidayMap.set(dStr, h);
+      });
+
       for (let d = 1; d <= daysInMonth; d++) {
         const dayStr = String(d).padStart(2, '0');
         const dateStr = `${targetMonth}-${dayStr}`;
@@ -140,13 +145,28 @@ class FacultyController {
         const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek];
         const isSunday = dayOfWeek === 0;
         const isSecondSaturday = dayOfWeek === 6 && d >= 8 && d <= 14;
-        const mmdd = `${String(tMonth).padStart(2, '0')}-${dayStr}`;
-        const holiday = STANDARD_HOLIDAYS[mmdd] || null;
+        const isDefaultHoliday = isSunday || isSecondSaturday;
+        const defaultLabel = isSunday ? 'SUNDAY' : (isSecondSaturday ? 'SECOND SATURDAY' : null);
 
+        const override = holidayMap.get(dateStr);
+        let isHoliday = false;
         let nonInstructionalLabel = null;
-        if (isSunday) nonInstructionalLabel = 'SUNDAY';
-        else if (isSecondSaturday) nonInstructionalLabel = 'SECOND SATURDAY';
-        else if (holiday) nonInstructionalLabel = holiday;
+
+        if (override) {
+          if (override.is_working_day) {
+            // Overridden to be a working class day (Sunday or Second Saturday removed from holidays)
+            isHoliday = false;
+            nonInstructionalLabel = null;
+          } else {
+            // Overridden to be a holiday with custom reason
+            isHoliday = true;
+            nonInstructionalLabel = (override.holiday_name && override.holiday_name.trim()) ? override.holiday_name.trim().toUpperCase() : (defaultLabel || 'HOLIDAY');
+          }
+        } else {
+          // Default: ONLY Sunday and Second Saturday are holidays!
+          isHoliday = isDefaultHoliday;
+          nonInstructionalLabel = defaultLabel;
+        }
 
         monthDays.push({
           day: d,
@@ -155,8 +175,12 @@ class FacultyController {
           day_of_week: dayOfWeek,
           is_sunday: isSunday,
           is_second_saturday: isSecondSaturday,
-          is_holiday: Boolean(nonInstructionalLabel),
+          is_default_holiday: isDefaultHoliday,
+          is_holiday: isHoliday,
+          is_working_day_override: Boolean(override && override.is_working_day),
+          is_custom_holiday: Boolean(override && !override.is_working_day),
           holiday_label: nonInstructionalLabel,
+          holiday_reason: override?.holiday_name || null,
           event_label: null
         });
       }
@@ -1041,6 +1065,72 @@ class FacultyController {
       res.json({ success: true, data: rows });
     } catch (err) {
       res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+  /**
+   * Sets or overrides a holiday/working day for a specific register.
+   * @route POST /api/v1/faculty/registers/:id/holidays (routes/faculty.js)
+   * @access TEACHER, SYSTEM_ADMIN
+   */
+  static async setRegisterHoliday(req, res) {
+    const registerId = req.params.id;
+    const { date, holiday_name, is_working_day } = req.body;
+    const teacherId = req.user?.teacher_id || null;
+
+    if (!date) {
+      return res.status(400).json({ success: false, error: { message: 'Date is required (YYYY-MM-DD)' } });
+    }
+
+    try {
+      const isWorking = Boolean(is_working_day) ? 1 : 0;
+      const hName = holiday_name ? String(holiday_name).trim() : null;
+
+      await query(
+        `INSERT INTO register_holidays (register_id, holiday_date, holiday_name, is_working_day, created_by)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE 
+           holiday_name = VALUES(holiday_name),
+           is_working_day = VALUES(is_working_day),
+           updated_at = CURRENT_TIMESTAMP`,
+        [registerId, date, hName, isWorking, teacherId]
+      );
+
+      res.json({
+        success: true,
+        message: isWorking ? `Marked ${date} as a working day` : `Marked ${date} as a holiday${hName ? ': ' + hName : ''}`,
+        data: {
+          register_id: Number(registerId),
+          holiday_date: date,
+          holiday_name: hName,
+          is_working_day: isWorking
+        }
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { message: err.message } });
+    }
+  }
+
+  /**
+   * Resets a day's holiday/working day status back to system default.
+   * @route DELETE /api/v1/faculty/registers/:id/holidays/:date (routes/faculty.js)
+   * @access TEACHER, SYSTEM_ADMIN
+   */
+  static async removeRegisterHoliday(req, res) {
+    const registerId = req.params.id;
+    const date = req.params.date;
+
+    try {
+      await query(
+        `DELETE FROM register_holidays WHERE (register_id = ? OR register_id IS NULL) AND holiday_date = ?`,
+        [registerId, date]
+      );
+
+      res.json({
+        success: true,
+        message: `Reset ${date} back to system default calendar.`
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: { message: err.message } });
     }
   }
 }
