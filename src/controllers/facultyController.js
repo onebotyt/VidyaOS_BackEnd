@@ -967,7 +967,7 @@ class FacultyController {
         buffer = await excelExportService.generateAttendanceRegisterPdf(exportData);
         contentType = 'application/pdf';
         filename = `Attendance_Register_${safeSubj}_${safeRange}.pdf`;
-      } else if (format === 'doc') {
+      } else if (format === 'doc' || format === 'docx' || format === 'word') {
         buffer = await excelExportService.generateAttendanceRegisterDoc(exportData);
         contentType = 'application/msword';
         filename = `Attendance_Register_${safeSubj}_${safeRange}.doc`;

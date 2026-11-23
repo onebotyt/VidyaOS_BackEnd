@@ -339,9 +339,45 @@ class DeviceController {
         req.ip
       );
 
-      if (action_type === 'ENROLL_TEMPLATE') {
-        const targetSlot = req.body.slot_id ? Number(req.body.slot_id) : 14;
+      // Resolve student's registered slot or allocate first free slot
+      let targetSlot = req.body.slot_id ? Number(req.body.slot_id) : null;
+      if (!targetSlot && student_id) {
+        // 1. Check student_biometric_templates
+        const tmplCheck = await query(
+          `SELECT slot_id FROM student_biometric_templates WHERE student_id = ? AND is_active = 1 AND slot_id IS NOT NULL LIMIT 1`,
+          [student_id]
+        );
+        if (tmplCheck && tmplCheck.length > 0 && tmplCheck[0].slot_id) {
+          targetSlot = Number(tmplCheck[0].slot_id);
+        } else {
+          // 2. Check fingerprint_slots for this device
+          const slotCheck = await query(
+            `SELECT slot_number FROM fingerprint_slots WHERE device_id = ? AND student_id = ? AND is_active = 1 LIMIT 1`,
+            [device.id, student_id]
+          );
+          if (slotCheck && slotCheck.length > 0 && slotCheck[0].slot_number) {
+            targetSlot = Number(slotCheck[0].slot_number);
+          }
+        }
+      }
 
+      // 3. Fallback: find first available free slot on device (1..300)
+      if (!targetSlot) {
+        const occSlots = await query(
+          `SELECT slot_number FROM fingerprint_slots WHERE device_id = ? AND is_active = 1`,
+          [device.id]
+        );
+        const usedSet = new Set((occSlots || []).map(s => Number(s.slot_number)));
+        for (let s = 1; s <= 300; s++) {
+          if (!usedSet.has(s)) {
+            targetSlot = s;
+            break;
+          }
+        }
+      }
+      if (!targetSlot) targetSlot = 1;
+
+      if (action_type === 'ENROLL_TEMPLATE') {
         // Generate deterministic 512-byte AS608 template buffer for this student
         const rawTemplate = Buffer.alloc(512);
         const header = Buffer.from(`AS608_TPL_STD_${student_id}_${Date.now()}`);
@@ -389,8 +425,6 @@ class DeviceController {
       }
 
       if (action_type === 'MARK_ATTENDANCE') {
-        const targetSlot = req.body.slot_id ? Number(req.body.slot_id) : 14;
-
         // Ensure slot mapping exists in fingerprint_slots so dual-layer verification succeeds
         await query(
           `INSERT INTO fingerprint_slots (device_id, slot_number, student_id, is_active, enrolled_at)
@@ -645,16 +679,412 @@ class DeviceController {
   }
 
   /**
-   * 8. Delete a student's cloud fingerprint template
+   * 8. Delete a student's cloud fingerprint template & queue removal from AS608 hardware
    * @route DELETE /api/v1/devices/hod/templates/:student_id
    */
   async deleteStudentTemplate(req, res) {
     try {
       const studentId = parseInt(req.params.student_id, 10);
+      if (!studentId) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Valid student_id is required' } });
+      }
+
+      // Find all slots and devices assigned to this student
+      const slots = await query(
+        `SELECT fs.device_id, fs.slot_number, d.name as device_name, d.device_uid, d.department_id
+         FROM fingerprint_slots fs
+         JOIN devices d ON d.id = fs.device_id
+         WHERE fs.student_id = ? AND fs.is_active = 1`,
+        [studentId]
+      );
+
+      const tmpls = await query(
+        `SELECT slot_id, department_id FROM student_biometric_templates WHERE student_id = ? AND is_active = 1`,
+        [studentId]
+      );
+
+      // Queue DELETE_TEMPLATE command for each device
+      const queuedDevices = new Set();
+      for (const s of slots) {
+        await query(
+          `INSERT INTO esp32_command_queue (device_id, department_id, command_type, student_id, payload_json, status, created_by)
+           VALUES (?, ?, 'DELETE_TEMPLATE', ?, ?, 'PENDING', ?)`,
+          [s.device_id, s.department_id, studentId, JSON.stringify({ student_id: studentId, slot_id: s.slot_number }), req.user.id]
+        );
+        queuedDevices.add(s.device_name || s.device_uid);
+      }
+
+      if (slots.length === 0 && tmpls.length > 0 && tmpls[0].slot_id) {
+        const deptDevices = await query(
+          `SELECT id, department_id, name FROM devices WHERE is_active = 1 ${tmpls[0].department_id ? 'AND department_id = ' + tmpls[0].department_id : ''}`
+        );
+        for (const d of deptDevices) {
+          await query(
+            `INSERT INTO esp32_command_queue (device_id, department_id, command_type, student_id, payload_json, status, created_by)
+             VALUES (?, ?, 'DELETE_TEMPLATE', ?, ?, 'PENDING', ?)`,
+            [d.id, d.department_id, studentId, JSON.stringify({ student_id: studentId, slot_id: tmpls[0].slot_id }), req.user.id]
+          );
+          queuedDevices.add(d.name);
+        }
+      }
+
       await query(`DELETE FROM student_biometric_templates WHERE student_id = ?`, [studentId]);
       await query(`DELETE FROM fingerprint_slots WHERE student_id = ?`, [studentId]);
-      return res.json({ success: true, message: 'Student biometric template removed from cloud vault.' });
+
+      const devMsg = queuedDevices.size > 0
+        ? ` Template removed from cloud vault and queued for deletion on ${Array.from(queuedDevices).join(', ')}.`
+        : ' Template removed from cloud vault.';
+
+      return res.json({
+        success: true,
+        data: { student_id: studentId, cleared_slots: slots.map(s => s.slot_number) },
+        message: `Student biometric template removed.${devMsg}`
+      });
     } catch (err) {
+      logger.error('[DeviceController] deleteStudentTemplate error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * 8b. Get all 300 hardware slots for a device with mapped students & duplicate audit
+   * @route GET /api/v1/devices/hod/:device_id/slots
+   */
+  async getDeviceSlots(req, res) {
+    try {
+      const deviceId = parseInt(req.params.device_id, 10);
+      const device = await deviceModel.getById(deviceId);
+      if (!device) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'ESP32 device not found' } });
+      }
+
+      const occupiedRows = await query(
+        `SELECT fs.id as slot_record_id,
+                fs.device_id,
+                fs.slot_number,
+                fs.student_id,
+                fs.is_active as slot_active,
+                fs.enrolled_at,
+                s.full_name,
+                s.official_enrollment_no,
+                s.registration_no,
+                COALESCE(s.ubter_roll_no, s.official_enrollment_no) as ubter_roll_no,
+                COALESCE(e.class_roll_no, s.class_roll_no, 0) as class_roll_no,
+                COALESCE(e.department_id, device.department_id) as department_id,
+                d.name as department_name,
+                d.code as department_code,
+                e.year,
+                e.semester,
+                sbt.id as template_id,
+                sbt.slot_id as template_slot_id,
+                sbt.template_sha256,
+                sbt.quality_score,
+                sbt.created_at as template_created_at
+         FROM fingerprint_slots fs
+         JOIN devices device ON device.id = fs.device_id
+         LEFT JOIN students s ON s.id = fs.student_id
+         LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+         LEFT JOIN departments d ON d.id = COALESCE(e.department_id, device.department_id)
+         LEFT JOIN student_biometric_templates sbt ON sbt.student_id = fs.student_id AND sbt.is_active = 1
+         WHERE fs.device_id = ? AND fs.is_active = 1
+         ORDER BY fs.slot_number ASC`,
+        [device.id]
+      );
+
+      const unmappedTemplates = await query(
+        `SELECT sbt.id as template_id,
+                sbt.student_id,
+                sbt.slot_id,
+                sbt.template_sha256,
+                sbt.quality_score,
+                sbt.created_at as template_created_at,
+                s.full_name,
+                s.official_enrollment_no,
+                COALESCE(e.class_roll_no, s.class_roll_no, 0) as class_roll_no,
+                d.name as department_name,
+                e.year, e.semester
+         FROM student_biometric_templates sbt
+         JOIN students s ON s.id = sbt.student_id
+         LEFT JOIN enrollments e ON e.student_id = s.id AND e.status = 'ENROLLED'
+         LEFT JOIN departments d ON d.id = COALESCE(e.department_id, sbt.department_id)
+         WHERE sbt.is_active = 1
+           AND sbt.student_id NOT IN (SELECT student_id FROM fingerprint_slots WHERE device_id = ? AND is_active = 1 AND student_id IS NOT NULL)`,
+        [device.id]
+      );
+
+      // Duplicate & Anomaly Auditing Engine
+      const duplicates = [];
+      const studentSlotCounts = new Map();
+      const slotStudentCounts = new Map();
+      const hashCounts = new Map();
+
+      occupiedRows.forEach(row => {
+        const stId = row.student_id;
+        const slotNum = row.slot_number;
+        const sha = row.template_sha256;
+
+        if (stId) {
+          if (!studentSlotCounts.has(stId)) studentSlotCounts.set(stId, []);
+          studentSlotCounts.get(stId).push({ slot_number: slotNum, full_name: row.full_name, roll_no: row.class_roll_no });
+        }
+
+        if (!slotStudentCounts.has(slotNum)) slotStudentCounts.set(slotNum, []);
+        slotStudentCounts.get(slotNum).push({ student_id: stId, full_name: row.full_name, roll_no: row.class_roll_no });
+
+        if (sha) {
+          if (!hashCounts.has(sha)) hashCounts.set(sha, []);
+          hashCounts.get(sha).push({ student_id: stId, full_name: row.full_name, slot_number: slotNum });
+        }
+
+        if (row.template_slot_id && row.template_slot_id !== slotNum) {
+          duplicates.push({
+            type: 'SLOT_DRIFT',
+            severity: 'WARNING',
+            student_id: stId,
+            full_name: row.full_name,
+            slot_number: slotNum,
+            template_slot_id: row.template_slot_id,
+            description: `Student ${row.full_name} is in hardware slot #${slotNum}, but cloud template points to slot #${row.template_slot_id}.`
+          });
+        }
+      });
+
+      for (const [stId, slotsList] of studentSlotCounts.entries()) {
+        if (slotsList.length > 1) {
+          const slotNums = slotsList.map(s => s.slot_number);
+          duplicates.push({
+            type: 'MULTIPLE_SLOTS_FOR_STUDENT',
+            severity: 'CRITICAL',
+            student_id: stId,
+            full_name: slotsList[0].full_name,
+            slots: slotNums,
+            description: `Student ${slotsList[0].full_name} occupies multiple slots: #${slotNums.join(', #')}. One should be purged.`
+          });
+        }
+      }
+
+      for (const [slotNum, studentsList] of slotStudentCounts.entries()) {
+        if (studentsList.length > 1) {
+          duplicates.push({
+            type: 'MULTIPLE_STUDENTS_ON_SLOT',
+            severity: 'CRITICAL',
+            slot_number: slotNum,
+            students: studentsList,
+            description: `Hardware slot #${slotNum} is assigned to multiple students: ${studentsList.map(s => s.full_name).join(', ')}.`
+          });
+        }
+      }
+
+      for (const [sha, occList] of hashCounts.entries()) {
+        const uniqueStudents = new Set(occList.map(o => o.student_id));
+        if (uniqueStudents.size > 1) {
+          duplicates.push({
+            type: 'IDENTICAL_TEMPLATE_HASH',
+            severity: 'WARNING',
+            sha256_prefix: sha.slice(0, 16) + '...',
+            students: occList,
+            description: `Identical fingerprint template hash found for multiple students (${occList.map(o => o.full_name).join(', ')}). Possible duplicate finger scan.`
+          });
+        }
+      }
+
+      const slotMap = new Map();
+      occupiedRows.forEach(row => {
+        const hasDup = duplicates.some(d =>
+          (d.student_id && d.student_id === row.student_id) ||
+          (d.slot_number && d.slot_number === row.slot_number)
+        );
+        slotMap.set(row.slot_number, {
+          slot_number: row.slot_number,
+          is_occupied: true,
+          student: {
+            id: row.student_id,
+            full_name: row.full_name || 'Roster Student',
+            class_roll_no: row.class_roll_no,
+            official_enrollment_no: row.official_enrollment_no || row.ubter_roll_no || '—',
+            department_name: row.department_name || '',
+            department_code: row.department_code || '',
+            year: row.year,
+            semester: row.semester
+          },
+          template: {
+            id: row.template_id,
+            slot_id: row.template_slot_id,
+            finger_index: 1,
+            sha256_short: row.template_sha256 ? `${row.template_sha256.slice(0, 8)}...${row.template_sha256.slice(-6)}` : null,
+            template_sha256: row.template_sha256,
+            quality_score: row.quality_score || 96,
+            enrolled_at: row.enrolled_at
+          },
+          is_duplicate: hasDup,
+          duplicate_reasons: duplicates
+            .filter(d => (d.student_id && d.student_id === row.student_id) || (d.slot_number && d.slot_number === row.slot_number))
+            .map(d => d.description)
+        });
+      });
+
+      const totalSlots = 300;
+      const occupiedSlotsList = Array.from(slotMap.values());
+      const occupiedCount = occupiedSlotsList.length;
+      const freeCount = Math.max(0, totalSlots - occupiedCount);
+      const uniqueStudentsCount = studentSlotCounts.size;
+
+      return res.json({
+        success: true,
+        data: {
+          device: {
+            id: device.id,
+            name: device.name,
+            device_uid: device.device_uid,
+            department_id: device.department_id,
+            status: device.status,
+            ip_address: device.ip_address,
+            firmware_version: device.firmware_version
+          },
+          summary: {
+            total_slots: totalSlots,
+            occupied_slots: occupiedCount,
+            free_slots: freeCount,
+            unique_students_enrolled: uniqueStudentsCount,
+            duplicate_issues_count: duplicates.length,
+            unmapped_templates_count: unmappedTemplates.length
+          },
+          occupied_slots: occupiedSlotsList,
+          duplicates,
+          unmapped_templates: unmappedTemplates
+        }
+      });
+    } catch (err) {
+      logger.error('[DeviceController] getDeviceSlots error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * 8c. Delete a specific slot from AS608 hardware memory and database
+   * @route DELETE /api/v1/devices/hod/:device_id/slots/:slot_number
+   */
+  async deleteDeviceSlot(req, res) {
+    try {
+      const deviceId = parseInt(req.params.device_id, 10);
+      const slotNumber = parseInt(req.params.slot_number, 10);
+      const device = await deviceModel.getById(deviceId);
+      if (!device) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'ESP32 device not found' } });
+      }
+
+      const slotRows = await query(
+        `SELECT fs.id, fs.student_id, s.full_name
+         FROM fingerprint_slots fs
+         LEFT JOIN students s ON s.id = fs.student_id
+         WHERE fs.device_id = ? AND fs.slot_number = ? AND fs.is_active = 1`,
+        [device.id, slotNumber]
+      );
+
+      const studentId = slotRows[0]?.student_id || null;
+      const studentName = slotRows[0]?.full_name || 'Student';
+
+      // 1. Queue DELETE_TEMPLATE command to ESP32 hardware
+      await query(
+        `INSERT INTO esp32_command_queue (device_id, department_id, command_type, student_id, payload_json, status, created_by)
+         VALUES (?, ?, 'DELETE_TEMPLATE', ?, ?, 'PENDING', ?)`,
+        [device.id, device.department_id, studentId, JSON.stringify({ slot_id: slotNumber, student_id: studentId }), req.user.id]
+      );
+
+      // 2. Delete slot from fingerprint_slots
+      await query(`DELETE FROM fingerprint_slots WHERE device_id = ? AND slot_number = ?`, [device.id, slotNumber]);
+
+      // 3. If no other active slot remains for this student, clean template from student_biometric_templates
+      if (studentId) {
+        const otherSlots = await query(
+          `SELECT id FROM fingerprint_slots WHERE student_id = ? AND is_active = 1`,
+          [studentId]
+        );
+        if (otherSlots.length === 0) {
+          await query(`DELETE FROM student_biometric_templates WHERE student_id = ?`, [studentId]);
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: { device_id: device.id, slot_number: slotNumber, student_id: studentId },
+        message: `Hardware Slot #${slotNumber} (${studentName}) deleted from database and queued for removal on ${device.name}.`
+      });
+    } catch (err) {
+      logger.error('[DeviceController] deleteDeviceSlot error:', { error: err.message });
+      return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
+    }
+  }
+
+  /**
+   * 8d. Auto-resolve and clean duplicate slot assignments for this device
+   * @route POST /api/v1/devices/hod/:device_id/clean-duplicates
+   */
+  async cleanDeviceDuplicates(req, res) {
+    try {
+      const deviceId = parseInt(req.params.device_id, 10);
+      const device = await deviceModel.getById(deviceId);
+      if (!device) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'ESP32 device not found' } });
+      }
+
+      const dupStudents = await query(
+        `SELECT student_id, COUNT(*) as cnt
+         FROM fingerprint_slots
+         WHERE device_id = ? AND is_active = 1 AND student_id IS NOT NULL
+         GROUP BY student_id
+         HAVING cnt > 1`,
+        [device.id]
+      );
+
+      let resolvedCount = 0;
+      const clearedSlots = [];
+
+      for (const d of dupStudents) {
+        const studentId = d.student_id;
+        const stSlots = await query(
+          `SELECT fs.id, fs.slot_number, fs.enrolled_at, sbt.slot_id as template_slot_id
+           FROM fingerprint_slots fs
+           LEFT JOIN student_biometric_templates sbt ON sbt.student_id = fs.student_id AND sbt.is_active = 1
+           WHERE fs.device_id = ? AND fs.student_id = ? AND fs.is_active = 1
+           ORDER BY fs.enrolled_at DESC, fs.id DESC`,
+          [device.id, studentId]
+        );
+
+        if (stSlots.length <= 1) continue;
+
+        let keepSlot = stSlots.find(s => s.template_slot_id && s.slot_number === s.template_slot_id) || stSlots[0];
+        const purgeSlots = stSlots.filter(s => s.id !== keepSlot.id);
+
+        for (const p of purgeSlots) {
+          await query(
+            `INSERT INTO esp32_command_queue (device_id, department_id, command_type, student_id, payload_json, status, created_by)
+             VALUES (?, ?, 'DELETE_TEMPLATE', ?, ?, 'PENDING', ?)`,
+            [device.id, device.department_id, studentId, JSON.stringify({ slot_id: p.slot_number, student_id: studentId }), req.user.id]
+          );
+          await query(`DELETE FROM fingerprint_slots WHERE id = ?`, [p.id]);
+          clearedSlots.push(p.slot_number);
+          resolvedCount++;
+        }
+
+        await query(
+          `UPDATE student_biometric_templates SET slot_id = ?, updated_at = CURRENT_TIMESTAMP WHERE student_id = ? AND is_active = 1`,
+          [keepSlot.slot_number, studentId]
+        );
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          resolved_count: resolvedCount,
+          cleared_slots: clearedSlots
+        },
+        message: resolvedCount > 0
+          ? `Successfully resolved ${resolvedCount} duplicate slot assignment(s). Cleared hardware slots: #${clearedSlots.join(', #')}.`
+          : 'No duplicate slot assignments found for this device.'
+      });
+    } catch (err) {
+      logger.error('[DeviceController] cleanDeviceDuplicates error:', { error: err.message });
       return res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: err.message } });
     }
   }

@@ -131,9 +131,21 @@ router.post('/hod/simulate-biometric', auth, requireRole(...facultyRoles), (req,
 });
 
 // @route   DELETE /api/v1/devices/hod/templates/:student_id
-// @desc    Remove a student's cloud fingerprint template
+// @desc    Remove a student's cloud fingerprint template & queue removal from AS608 hardware
 router.delete('/hod/templates/:student_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteStudentTemplate(req, res));
 router.delete('/hod/template/:student_id', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteStudentTemplate(req, res));
+
+// @route   GET /api/v1/devices/hod/:device_id/slots
+// @desc    Get all 300 hardware slots, mapped students, templates, and duplicate audit
+router.get('/hod/:device_id/slots', auth, requireRole(...facultyRoles), (req, res) => deviceController.getDeviceSlots(req, res));
+
+// @route   DELETE /api/v1/devices/hod/:device_id/slots/:slot_number
+// @desc    Delete a specific slot from AS608 hardware and database
+router.delete('/hod/:device_id/slots/:slot_number', auth, requireRole(...facultyRoles), (req, res) => deviceController.deleteDeviceSlot(req, res));
+
+// @route   POST /api/v1/devices/hod/:device_id/clean-duplicates
+// @desc    Auto-resolve and clean duplicate slot assignments for this device
+router.post('/hod/:device_id/clean-duplicates', auth, requireRole(...facultyRoles), (req, res) => deviceController.cleanDeviceDuplicates(req, res));
 
 // ── 3. Standard Device Administration Routes ────────────────────────────────
 

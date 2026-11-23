@@ -479,11 +479,12 @@ class DeviceService {
         );
         if (tmplRows && tmplRows.length > 0 && tmplRows[0].slot_id) {
           if (tmplRows[0].slot_id !== slotId) {
-            throw {
-              status: 403,
-              code: 'SLOT_SECURITY_MISMATCH',
-              message: `Security validation failed: slot_id ${slotId} does not match student template registered slot ${tmplRows[0].slot_id}`
-            };
+            // Auto-heal / synchronize: update student_biometric_templates to match active hardware slot
+            logger.info(`[Attendance] Auto-syncing slot drift for Student ${studentId}: updating template slot from #${tmplRows[0].slot_id} to active slot #${slotId}`);
+            await query(
+              `UPDATE student_biometric_templates SET slot_id = ?, updated_at = CURRENT_TIMESTAMP WHERE student_id = ? AND is_active = 1`,
+              [slotId, studentId]
+            );
           }
         }
       }

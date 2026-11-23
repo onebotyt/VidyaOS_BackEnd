@@ -2243,20 +2243,15 @@ function buildAttendanceRegisterHtml(data) {
       }).join('');
 
       return `<tr>
-        <td style="padding:4px; text-align:center;">${st.sr_no}</td>
         <td style="padding:4px; text-align:center; font-weight:bold;">${st.roll_no}</td>
         <td style="padding:4px; text-align:center; font-size:7.5pt; font-family:monospace;">${st.registration_no || '--'}</td>
         <td style="padding:4px; text-align:center; font-size:7.5pt; font-family:monospace;">${st.enrollment_no || '--'}</td>
         <td style="padding:4px; text-align:left; font-weight:600;">${st.name}</td>
         ${monthCells}
-        <td style="padding:4px; text-align:center; font-weight:bold; color:#006600;">${st.overall_present}</td>
-        <td style="padding:4px; text-align:center; font-weight:bold; ${Number(st.overall_absent) > 0 ? 'color:#CC0000;' : ''}">${st.overall_absent}</td>
-        <td style="padding:4px; text-align:center; font-weight:bold;">${st.overall_total}</td>
-        <td style="padding:4px; text-align:center; font-weight:bold;">${st.percentage}%</td>
       </tr>`;
     }).join('');
 
-    const totalCols = 9 + overviewMonths.length;
+    const totalCols = 4 + overviewMonths.length;
 
     pagesHtml += `
     <div class="print-page ${monthlySheets.length > 0 ? 'page-break' : ''}">
@@ -2278,16 +2273,11 @@ function buildAttendanceRegisterHtml(data) {
             </th>
           </tr>
           <tr class="hdr-tan">
-            <th style="width:28px; text-align:center;">SR.</th>
             <th style="width:48px; text-align:center;">ROLL NO.</th>
-            <th style="width:85px; text-align:center;">REGISTRATION NO.</th>
-            <th style="width:78px; text-align:center;">UBTER ROLL NO.</th>
-            <th style="text-align:left; min-width:120px;">STUDENT NAME</th>
+            <th style="width:110px; text-align:center;">UBTER REGISTRATION NO.</th>
+            <th style="width:95px; text-align:center;">UBTER ROLL NO.</th>
+            <th style="text-align:left; min-width:140px;">STUDENT NAME</th>
             ${theadMonths}
-            <th style="width:50px; text-align:center;">PRESENT</th>
-            <th style="width:50px; text-align:center;">ABSENT</th>
-            <th style="width:50px; text-align:center;">TOTAL</th>
-            <th style="width:50px; text-align:center;">% ATT.</th>
           </tr>
         </thead>
         <tbody>
