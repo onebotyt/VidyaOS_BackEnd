@@ -1291,6 +1291,16 @@ class DeviceController {
         secondsAgo = Math.max(0, Math.round((Date.now() - new Date(hb).getTime()) / 1000));
         isOnline = Boolean(dev.is_active && secondsAgo <= 300);
       }
+
+      // If active, queue remote PING command so ESP32 OLED shows live feedback and chimes buzzer
+      if (dev.is_active) {
+        await query(
+          `INSERT INTO esp32_command_queue (device_id, department_id, command_type, payload_json, status, created_by)
+           VALUES (?, ?, 'PING', ?, 'PENDING', ?)`,
+          [dev.id, dev.department_id || 1, JSON.stringify({ action: 'PING', source: 'Web Console', timestamp: Date.now() }), req.user?.id || 1]
+        );
+      }
+
       return res.json({
         success: true,
         data: {
