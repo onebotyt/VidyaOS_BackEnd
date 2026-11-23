@@ -808,6 +808,10 @@ class DeviceService {
       throw { status: 404, code: 'NOT_FOUND', message: 'ESP32 device not found' };
     }
     const dev = devices[0];
+
+    // Clear stale scans from previous sessions so frontend only receives fresh live airwaves
+    await query(`DELETE FROM device_wifi_scans WHERE device_id = ?`, [dev.id]);
+
     const qRes = await query(
       `INSERT INTO esp32_command_queue (device_id, department_id, command_type, payload_json, status, created_by)
        VALUES (?, ?, 'SCAN_WIFI', '{}', 'PENDING', ?)`,
@@ -825,7 +829,7 @@ class DeviceService {
     return await query(
       `SELECT id, device_id, ssid, rssi, auth_mode, channel, scanned_at
        FROM device_wifi_scans
-       WHERE device_id = ?
+       WHERE device_id = ? AND scanned_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
        ORDER BY rssi DESC, id DESC
        LIMIT 25`,
       [deviceId]
@@ -861,6 +865,15 @@ class DeviceService {
           );
         }
       }
+      await query(
+        `UPDATE esp32_command_queue
+         SET status = 'COMPLETED',
+             result_message = ?,
+             completed_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE device_id = ? AND command_type = 'SCAN_WIFI' AND status IN ('PENDING', 'DELIVERED')`,
+        [`Discovered ${networks.length} Wi-Fi networks`, device.id]
+      );
     }
     return { success: true, networks_recorded: networks.length, count: networks.length };
   }

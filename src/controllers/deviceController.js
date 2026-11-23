@@ -209,9 +209,9 @@ class DeviceController {
             device_uid: onlineDev.device_uid,
             name: onlineDev.name,
             department_id: onlineDev.department_id,
-            ip_address: onlineDev.ip_address || '192.168.1.105',
-            wifi_rssi: onlineDev.wifi_rssi || -56,
-            battery_pct: onlineDev.battery_pct || 88,
+            ip_address: onlineDev.ip_address || null,
+            wifi_rssi: onlineDev.wifi_rssi != null ? onlineDev.wifi_rssi : null,
+            battery_pct: onlineDev.battery_pct != null ? onlineDev.battery_pct : null,
             as608_status: 'READY'
           },
           message: `Detected active ESP32 biometric terminal '${onlineDev.device_uid}'`
