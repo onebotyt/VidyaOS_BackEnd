@@ -154,6 +154,21 @@ app.get(['/faculty/attendance/quick.html', '/faculty/attendance/quick'], (req, r
 app.get('/student/attendance/subjects.html', (req, res) => res.redirect(301, '/student/attendance.html'));
 app.get(['/student/todo.html', '/student/todo'], (req, res) => res.redirect(301, '/student/assignments.html'));
 
+// Classroom Academic Dossier Sub-Module Permanent 301 Redirects -> Consolidated Dynamic Engine (/faculty/course-file/index.html?type=...)
+function redirectCourseFileModule(type) {
+  return (req, res) => {
+    const q = new URLSearchParams(req.query);
+    if (!q.has('type')) q.set('type', type);
+    res.redirect(301, `/faculty/course-file/index.html?${q.toString()}`);
+  };
+}
+app.get(['/faculty/theory-classes', '/faculty/theory-classes/', '/faculty/theory-classes/index.html', '/faculty/theory-classes.html'], redirectCourseFileModule('theory'));
+app.get(['/faculty/lab-classes', '/faculty/lab-classes/', '/faculty/lab-classes/index.html', '/faculty/lab-classes.html'], redirectCourseFileModule('lab'));
+app.get(['/faculty/student-performance', '/faculty/student-performance/', '/faculty/student-performance/index.html', '/faculty/student-performance.html'], redirectCourseFileModule('performance'));
+app.get(['/faculty/assessment-process', '/faculty/assessment-process/', '/faculty/assessment-process/index.html', '/faculty/assessment-process.html'], redirectCourseFileModule('nba'));
+app.get(['/faculty/direct-assessment', '/faculty/direct-assessment/', '/faculty/direct-assessment/index.html', '/faculty/direct-assessment.html'], redirectCourseFileModule('direct'));
+app.get(['/faculty/indirect-assessment', '/faculty/indirect-assessment/', '/faculty/indirect-assessment/index.html', '/faculty/indirect-assessment.html'], redirectCourseFileModule('indirect'));
+
 
 // Static file serving options with production caching
 const staticOptions = {
