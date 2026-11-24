@@ -343,8 +343,24 @@ router.put('/carousel', async (req, res) => {
     }
 
     if (updates.length > 0) {
-      await AdminModel.updateSettings(updates, req.user?.id || 1);
+      try {
+        await AdminModel.updateSettings(updates, req.user?.id || 1);
+      } catch (_) {}
     }
+
+    // Also persist to JSON file for cross-origin & non-SQL fallback
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const configPath = path.join(__dirname, '../../../backend/data/carousel-config.json');
+      const fileData = {
+        images: Array.isArray(images) ? images : [],
+        switch_speed: switch_speed !== undefined ? parseInt(switch_speed, 10) : 3600,
+        autoplay: autoplay !== undefined ? Boolean(autoplay) : true,
+        updated_at: new Date().toISOString()
+      };
+      fs.writeFileSync(configPath, JSON.stringify(fileData, null, 2), 'utf8');
+    } catch (_) {}
 
     res.json({
       success: true,

@@ -1,0 +1,47 @@
+{
+  "images": [
+    {
+      "id": "campus",
+      "title": "UGIP Main Campus",
+      "subtitle": "Government Polytechnic Nainital, Uttarakhand",
+      "category": "Our Campus",
+      "src": "/login/images/bg1-campus.jpg",
+      "fallback": "/login/images/all.jpg"
+    },
+    {
+      "id": "nainital",
+      "title": "Nainital Lake",
+      "subtitle": "Scenic Naini Lake, Uttarakhand",
+      "category": "Nainital",
+      "src": "/login/images/gallery-nainital.jpg",
+      "fallback": "/login/images/bg4-himalaya.jpg"
+    },
+    {
+      "id": "academic",
+      "title": "Academic & Administrative Block",
+      "subtitle": "Government Polytechnic Nainital (UGIP)",
+      "category": "Academic Block",
+      "src": "/login/images/bg3-building.jpg",
+      "fallback": "/login/images/academic.png"
+    },
+    {
+      "id": "lab",
+      "title": "IT & Computing Lab",
+      "subtitle": "Mountain-View Workstations & Digital Classroom",
+      "category": "Computing Lab",
+      "src": "https://images.unsplash.com/photo-1562774053-701939374585?auto=format&fit=crop&w=1200&q=80",
+      "fallback": "/login/images/all.jpg"
+    },
+    {
+      "id": "nature",
+      "title": "Himalayan Forest Panorama",
+      "subtitle": "Snow-Capped Himalayan Views & Natural Beauty",
+      "category": "Natural Beauty",
+      "src": "/login/images/gallery-natural-beauty.jpg",
+      "fallback": "/login/images/bg4-himalaya.jpg"
+    }
+  ],
+  "switch_speed": 3600,
+  "autoplay": true,
+  "updated_at": "2026-11-24T17:00:00.000Z"
+}

@@ -346,6 +346,23 @@ router.get('/branding', async (req, res) => {
 // @access  Public
 router.get('/carousel', async (req, res) => {
   try {
+    const fs = require('fs');
+    const path = require('path');
+    const configPath = path.join(__dirname, '../../../backend/data/carousel-config.json');
+    if (fs.existsSync(configPath)) {
+      const fileData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (fileData && (fileData.images || fileData.switch_speed)) {
+        return res.json({
+          success: true,
+          data: {
+            images: fileData.images || null,
+            switch_speed: parseInt(fileData.switch_speed, 10) || 3600,
+            autoplay: fileData.autoplay !== false
+          }
+        });
+      }
+    }
+
     const { query } = require('../config/db');
     const rows = await query(
       `SELECT setting_key, setting_value FROM system_settings 
@@ -362,7 +379,7 @@ router.get('/carousel', async (req, res) => {
       success: true,
       data: {
         images: Array.isArray(images) && images.length ? images : null,
-        switch_speed: parseInt(map.carousel_switch_speed, 10) || 5500,
+        switch_speed: parseInt(map.carousel_switch_speed, 10) || 3600,
         autoplay: map.carousel_autoplay !== 'false'
       }
     });
@@ -371,7 +388,7 @@ router.get('/carousel', async (req, res) => {
       success: true,
       data: {
         images: null,
-        switch_speed: 5500,
+        switch_speed: 3600,
         autoplay: true
       }
     });
