@@ -210,7 +210,7 @@ class FacultyController {
         academicEvents.push({ id: asg.id, type: 'ASSIGNMENT', title: label, date: asgDate, max_marks: asg.max_marks });
       }
 
-      const allFinalizedSessions = sessions.filter(s => s.state === 'FINALIZED' || s.state === 'CLOSED');
+      const allFinalizedSessions = sessions.filter(s => s.state === 'FINALIZED' || s.state === 'CLOSED' || s.state === 'OPEN' || s.state === 'DRAFT');
       const monthFinalizedSessions = allFinalizedSessions.filter(s => s.session_date.startsWith(targetMonth));
       const prevFinalizedSessions = allFinalizedSessions.filter(s => s.session_date < `${targetMonth}-01`);
 
@@ -515,7 +515,7 @@ class FacultyController {
           session_id: newSessionId,
           session_date,
           period_number: period_number || 1,
-          state: 'DRAFT',
+          state: 'FINALIZED',
           label: label || `Class 1 (Period ${period_number || 1})`
         }
       });

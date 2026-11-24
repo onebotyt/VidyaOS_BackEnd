@@ -379,7 +379,7 @@ class FacultyModel {
     const insertRes = await query(
       `INSERT INTO attendance_sessions 
        (register_id, teacher_id, subject_id, department_id, year, semester, academic_year_id, session_type, label, session_date, period_number, start_time, end_time, state)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'FINALIZED')`,
       [
         reg.id, reg.teacher_id, effSubjectId, reg.department_id,
         reg.year, reg.semester, reg.academic_year_id,
@@ -572,7 +572,7 @@ class FacultyModel {
       `SELECT ra.student_id, ra.attendance_status, s.id as session_id, s.session_date, s.period_number, s.label
        FROM register_attendance ra
        JOIN attendance_sessions s ON s.id = ra.session_id
-       WHERE s.register_id = ? AND s.state = 'FINALIZED'`,
+       WHERE s.register_id = ?`,
       [registerId]
     );
   }

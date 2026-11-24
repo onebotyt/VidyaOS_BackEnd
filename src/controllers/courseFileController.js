@@ -224,11 +224,8 @@ class CourseFileController {
       let hasData = false;
       if (itemDef.key === 'student_list' && students.length > 0) hasData = true;
       if (itemDef.key === 'assignment_schedule' && assignments.length > 0) hasData = true;
-      if (itemDef.key === 'internal_assessment_plan' && file.evaluation_scheme) hasData = true;
       if (itemDef.key === 'advanced_learners' && (advancedLearners.length > 0 || file.advanced_learners_json)) hasData = true;
       if (itemDef.key === 'slow_learners' && (slowLearners.length > 0 || file.slow_learners_json)) hasData = true;
-      if (itemDef.key === 'course_outcomes' && file.cos_json) hasData = true;
-      if (itemDef.key === 'copo_matrix' && file.copo_matrix_json) hasData = true;
 
       const isCompleted = !!doc || hasData;
       if (isCompleted) completedCount++;
