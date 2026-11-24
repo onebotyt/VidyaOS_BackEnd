@@ -341,4 +341,41 @@ router.get('/branding', async (req, res) => {
   }
 });
 
+// @route   GET /api/v1/auth/carousel
+// @desc    Public institution login carousel images and switch speed
+// @access  Public
+router.get('/carousel', async (req, res) => {
+  try {
+    const { query } = require('../config/db');
+    const rows = await query(
+      `SELECT setting_key, setting_value FROM system_settings 
+       WHERE setting_key IN ('carousel_images', 'carousel_switch_speed', 'carousel_autoplay')`
+    );
+    const map = {};
+    (rows || []).forEach(r => { map[r.setting_key] = r.setting_value; });
+    let images = null;
+    try {
+      if (map.carousel_images) images = JSON.parse(map.carousel_images);
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      data: {
+        images: Array.isArray(images) && images.length ? images : null,
+        switch_speed: parseInt(map.carousel_switch_speed, 10) || 5500,
+        autoplay: map.carousel_autoplay !== 'false'
+      }
+    });
+  } catch (err) {
+    return res.json({
+      success: true,
+      data: {
+        images: null,
+        switch_speed: 5500,
+        autoplay: true
+      }
+    });
+  }
+});
+
 module.exports = router;

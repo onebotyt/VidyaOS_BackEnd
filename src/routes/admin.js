@@ -267,6 +267,99 @@ router.post('/branding/upload', uploadBranding.single('file'), async (req, res) 
   }
 });
 
+// @route   POST /api/v1/admin/carousel/upload
+// @desc    Upload an image for the login carousel
+// @access  Protected (SYSTEM_ADMIN)
+router.post('/carousel/upload', uploadBranding.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: { message: 'No image file uploaded' } });
+    }
+    const storageService = require('../services/storageService');
+    const uploadRes = await storageService.upload(req.file, { subfolder: 'carousel' });
+    const fileUrl = uploadRes.url || `/uploads/carousel/${req.file.filename}`;
+
+    res.json({
+      success: true,
+      message: 'Carousel image uploaded successfully',
+      data: {
+        url: fileUrl,
+        filename: req.file.filename,
+        provider: uploadRes.provider || 'local'
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// @route   GET /api/v1/admin/carousel
+// @desc    Retrieve carousel images and switch speed
+// @access  Protected (SYSTEM_ADMIN)
+router.get('/carousel', async (req, res) => {
+  try {
+    const { query } = require('../config/db');
+    const rows = await query(
+      `SELECT setting_key, setting_value FROM system_settings 
+       WHERE setting_key IN ('carousel_images', 'carousel_switch_speed', 'carousel_autoplay')`
+    );
+    const map = {};
+    (rows || []).forEach(r => { map[r.setting_key] = r.setting_value; });
+    let images = null;
+    try {
+      if (map.carousel_images) images = JSON.parse(map.carousel_images);
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      data: {
+        images: Array.isArray(images) && images.length ? images : null,
+        switch_speed: parseInt(map.carousel_switch_speed, 10) || 5500,
+        autoplay: map.carousel_autoplay !== 'false'
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
+// @route   PUT /api/v1/admin/carousel
+// @desc    Update carousel images configuration and transition switch speed
+// @access  Protected (SYSTEM_ADMIN)
+router.put('/carousel', async (req, res) => {
+  try {
+    const { images, switch_speed, autoplay } = req.body;
+    const AdminModel = require('../models/adminModel');
+    const updates = [];
+
+    if (Array.isArray(images)) {
+      updates.push(['carousel_images', JSON.stringify(images)]);
+    }
+    if (switch_speed !== undefined) {
+      updates.push(['carousel_switch_speed', String(switch_speed)]);
+    }
+    if (autoplay !== undefined) {
+      updates.push(['carousel_autoplay', String(autoplay)]);
+    }
+
+    if (updates.length > 0) {
+      await AdminModel.updateSettings(updates, req.user?.id || 1);
+    }
+
+    res.json({
+      success: true,
+      message: 'Carousel configuration updated successfully',
+      data: {
+        images: Array.isArray(images) ? images : null,
+        switch_speed: switch_speed !== undefined ? parseInt(switch_speed, 10) : 5500,
+        autoplay: autoplay !== undefined ? Boolean(autoplay) : true
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+});
+
 // @route   GET /api/v1/admin/reports/department
 // @route   GET /api/v1/admin/reports/attendance
 // @desc    Compile and return department attendance analytics and scan logs
