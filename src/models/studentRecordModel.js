@@ -1064,7 +1064,7 @@ class StudentRecordModel {
         sub.feedback,
         COALESCE(tg.subject_name, s.name, 'Department Subject') as subject_name,
         COALESCE(tg.subject_code, s.code, 'IT500') as subject_code,
-        COALESCE(tg.subject_short_name, s.code, s.name, 'DBMS') as subject_short_name
+        COALESCE(tg.subject_short_name, tg.subject_name, s.name, 'Subject') as subject_short_name
       FROM assessments a
       LEFT JOIN assessment_submissions sub ON a.id = sub.assessment_id AND sub.student_id = ?
       LEFT JOIN subjects s ON a.subject_id = s.id
@@ -1077,17 +1077,20 @@ class StudentRecordModel {
     // 3. Attendance broken down by semester & subject
     const attendanceBySemester = await query(
       `SELECT 
-        s.semester,
-        sub.name as subject_name,
-        sub.code as subject_code,
+        COALESCE(s.semester, reg.semester, 5) as semester,
+        COALESCE(tg.subject_name, sub.name, reg.name, 'Department Subject') as subject_name,
+        COALESCE(tg.subject_code, sub.code, 'IT500') as subject_code,
+        COALESCE(tg.subject_short_name, tg.subject_name, sub.name, 'Subject') as subject_short_name,
         COUNT(ra.id) as total_sessions,
         SUM(CASE WHEN ra.attendance_status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) as attended_sessions
       FROM register_attendance ra
       JOIN attendance_sessions s ON ra.session_id = s.id
-      LEFT JOIN subjects sub ON s.subject_id = sub.id
+      LEFT JOIN attendance_registers reg ON s.register_id = reg.id
+      LEFT JOIN subjects sub ON COALESCE(s.subject_id, reg.subject_id) = sub.id
+      LEFT JOIN teaching_groups tg ON reg.group_id = tg.id
       WHERE ra.student_id = ?
-      GROUP BY s.semester, sub.name, sub.code
-      ORDER BY s.semester ASC, sub.name ASC`,
+      GROUP BY COALESCE(s.semester, reg.semester, 5), subject_name, subject_code, subject_short_name
+      ORDER BY semester ASC, subject_name ASC`,
       [studentId]
     );
 
@@ -1095,16 +1098,19 @@ class StudentRecordModel {
     const attendanceSessions = await query(
       `SELECT 
         s.id as session_id,
-        s.semester,
+        COALESCE(s.semester, reg.semester, 5) as semester,
         s.session_date,
         s.session_type,
         s.period_number,
-        COALESCE(sub.name, 'Department Subject') as subject_name,
-        COALESCE(sub.code, 'IT500') as subject_code,
+        COALESCE(tg.subject_name, sub.name, reg.name, 'Department Subject') as subject_name,
+        COALESCE(tg.subject_code, sub.code, 'IT500') as subject_code,
+        COALESCE(tg.subject_short_name, tg.subject_name, sub.name, 'Subject') as subject_short_name,
         ra.attendance_status
       FROM register_attendance ra
       JOIN attendance_sessions s ON ra.session_id = s.id
-      LEFT JOIN subjects sub ON s.subject_id = sub.id
+      LEFT JOIN attendance_registers reg ON s.register_id = reg.id
+      LEFT JOIN subjects sub ON COALESCE(s.subject_id, reg.subject_id) = sub.id
+      LEFT JOIN teaching_groups tg ON reg.group_id = tg.id
       WHERE ra.student_id = ?
       ORDER BY s.session_date ASC, s.period_number ASC`,
       [studentId]
