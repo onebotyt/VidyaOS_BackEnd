@@ -246,9 +246,16 @@ router.get('/students', HodController.getStudents);
 // @access  Protected (HOD, Department Faculty, SYSTEM_ADMIN)
 // @handler HodController.createStudent() -> HodModel.createStudent()
 router.post('/students', requireHODOrClassTeacher(), [
-  body('official_enrollment_no').trim().notEmpty().withMessage('Official enrollment number required'),
+  body('official_enrollment_no').trim().notEmpty().withMessage('UBTER Roll Number is required')
+    .isNumeric().withMessage('UBTER Roll Number must be numeric')
+    .isLength({ min: 1, max: 11 }).withMessage('UBTER Roll Number must be maximum 11 digits'),
   body('full_name').trim().notEmpty().withMessage('Student full name required'),
-  body('email').optional().trim().isEmail().withMessage('Valid email required'),
+  body('registration_no').optional({ checkFalsy: true }).trim()
+    .isNumeric().withMessage('UBTER Registration Number must be numeric')
+    .isLength({ min: 1, max: 8 }).withMessage('UBTER Registration Number must be maximum 8 digits'),
+  body('email').optional({ checkFalsy: true }).trim().isEmail().withMessage('Valid email required'),
+  body('phone').optional({ checkFalsy: true }).trim()
+    .matches(/^\d{10}$/).withMessage('Phone Number must be a 10-digit mobile number'),
   body('initial_password').optional().trim(),
   body('academic_year_id').optional().isInt(),
   body('year').isInt({ min: 1, max: 6 }).withMessage('Year required'),

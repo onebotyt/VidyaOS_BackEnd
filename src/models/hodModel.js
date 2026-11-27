@@ -1346,26 +1346,27 @@ class HodModel {
    * @param {Object} params Student enrollment parameters
    * @returns {Promise<Object>} Created student record
    */
-  static async createStudent({ deptId, ayId, officialEnrollmentNo, registrationNo, fullName, email, year, semester, isLateralEntry, initialPassword }) {
+  static async createStudent({ deptId, ayId, officialEnrollmentNo, registrationNo, fullName, email, phone, year, semester, isLateralEntry, initialPassword }) {
     const cleanEnroll = officialEnrollmentNo.trim();
     const cleanName = fullName.trim();
+    const cleanPhone = phone ? String(phone).trim() : null;
     const tempPassword = (initialPassword && initialPassword.trim()) ? initialPassword.trim() : 'Password@123';
     const tempPasswordHash = await bcrypt.hash(tempPassword, 12);
 
     return await withTransaction(async (conn) => {
       const [uRes] = await conn.execute(
-        `INSERT INTO users (username, email, temp_password_hash, must_change_password, status)
-         VALUES (?, ?, ?, 1, 'PROVISIONED')`,
-        [cleanEnroll, email?.trim() || null, tempPasswordHash]
+        `INSERT INTO users (username, email, phone, temp_password_hash, must_change_password, status)
+         VALUES (?, ?, ?, ?, 1, 'PROVISIONED')`,
+        [cleanEnroll, email?.trim() || null, cleanPhone, tempPasswordHash]
       );
       const userId = uRes.insertId ?? uRes.lastInsertRowid;
 
       await conn.execute(`INSERT INTO user_roles (user_id, role) VALUES (?, 'STUDENT')`, [userId]);
 
       const [sRes] = await conn.execute(
-        `INSERT INTO students (user_id, ubter_roll_no, official_enrollment_no, registration_no, full_name, entry_mode, is_lateral_entry, admission_year)
-         VALUES (?, ?, ?, ?, ?, 'hod_provisioned', ?, ?)`,
-        [userId, cleanEnroll, cleanEnroll, (registrationNo || '').trim() || null, cleanName, isLateralEntry ? 1 : 0, new Date().getFullYear()]
+        `INSERT INTO students (user_id, ubter_roll_no, official_enrollment_no, registration_no, full_name, phone, entry_mode, is_lateral_entry, admission_year)
+         VALUES (?, ?, ?, ?, ?, ?, 'hod_provisioned', ?, ?)`,
+        [userId, cleanEnroll, cleanEnroll, (registrationNo || '').trim() || null, cleanName, cleanPhone, isLateralEntry ? 1 : 0, new Date().getFullYear()]
       );
       const studentId = sRes.insertId ?? sRes.lastInsertRowid;
 

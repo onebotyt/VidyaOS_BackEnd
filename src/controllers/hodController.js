@@ -517,7 +517,7 @@ class HodController {
    * @usesModel HodModel.createStudent() (models/hodModel.js)
    */
   static async createStudent(req, res) {
-    const { official_enrollment_no, registration_no, full_name, email, year, semester, is_lateral_entry, academic_year_id, initial_password } = req.body;
+    const { official_enrollment_no, registration_no, full_name, email, phone, year, semester, is_lateral_entry, academic_year_id, initial_password } = req.body;
     const isPrivileged = req.user?.roles?.includes('SYSTEM_ADMIN') || req.user?.roles?.includes('ADMIN');
     let deptId = isPrivileged
       ? (req.body.department_id || req.hod_department_id || req.user?.department_id)
@@ -547,7 +547,14 @@ class HodController {
         ayId = ayRow.id;
       }
 
-      const cleanEnroll = official_enrollment_no.trim();
+      // 1. UBTER Roll Number Check (max 11 numeric digits)
+      const cleanEnroll = (official_enrollment_no || '').trim();
+      if (!cleanEnroll) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number is required' } });
+      }
+      if (!/^\d{1,11}$/.test(cleanEnroll)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Roll Number must be numeric and maximum 11 digits.' } });
+      }
       const existingUser = await query(
         `SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(?)
          UNION
@@ -555,17 +562,50 @@ class HodController {
         [cleanEnroll, cleanEnroll, cleanEnroll]
       );
       if (existingUser.length > 0) {
-        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system. UBTER Roll Numbers are uniquely assigned once upon admission.` } });
+        return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `UBTER Roll Number "${cleanEnroll}" already exists in the system.` } });
       }
 
-      if (email && email.trim()) {
-        const cleanEmail = email.trim();
+      // 2. UBTER Registration Number Check (max 8 numeric digits)
+      const cleanReg = (registration_no || '').trim();
+      if (cleanReg) {
+        if (!/^\d{1,8}$/.test(cleanReg)) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'UBTER Registration Number must be numeric and maximum 8 digits.' } });
+        }
+        const existingReg = await query(
+          `SELECT id FROM students WHERE LOWER(TRIM(registration_no)) = LOWER(?) AND deleted_at IS NULL`,
+          [cleanReg]
+        );
+        if (existingReg.length > 0) {
+          return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `UBTER Registration Number "${cleanReg}" already exists in the system.` } });
+        }
+      }
+
+      // 3. Email Address / Gmail Check
+      const cleanEmail = (email || '').trim();
+      if (cleanEmail) {
         const existingEmail = await query(
           `SELECT id FROM users WHERE LOWER(TRIM(email)) = LOWER(?) OR LOWER(TRIM(username)) = LOWER(?)`,
           [cleanEmail, cleanEmail]
         );
         if (existingEmail.length > 0) {
-          return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Email "${cleanEmail}" is already registered to an account.` } });
+          return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Email address "${cleanEmail}" is already registered in the system.` } });
+        }
+      }
+
+      // 4. Phone Number Check (10 numeric digits)
+      const cleanPhone = (phone || '').trim();
+      if (cleanPhone) {
+        if (!/^\d{10}$/.test(cleanPhone)) {
+          return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Phone Number must be a valid 10-digit mobile number.' } });
+        }
+        const existingPhone = await query(
+          `SELECT id FROM users WHERE TRIM(phone) = ?
+           UNION
+           SELECT id FROM students WHERE TRIM(phone) = ? AND deleted_at IS NULL`,
+          [cleanPhone, cleanPhone]
+        );
+        if (existingPhone.length > 0) {
+          return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: `Phone number "${cleanPhone}" is already registered in the system.` } });
         }
       }
 
@@ -573,9 +613,10 @@ class HodController {
         deptId,
         ayId,
         officialEnrollmentNo: cleanEnroll,
-        registrationNo: registration_no,
+        registrationNo: cleanReg || null,
         fullName: full_name,
-        email,
+        email: cleanEmail || null,
+        phone: cleanPhone || null,
         year,
         semester,
         isLateralEntry: is_lateral_entry,
